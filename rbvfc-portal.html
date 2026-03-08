@@ -2216,12 +2216,12 @@ function onAdminTabShow() {
   if (urlInput&&state.sheetWebhookUrl) urlInput.value=state.sheetWebhookUrl;
   // Collapse all cards on open
   var collapseIds = [
-    'adminDutyCollapse','adminMembersCollapse','rankEditorCollapse',
-    'exportSheetCollapse','cadDispatchCollapse','rawDataCollapse','adminPinCollapse'
+    'rankEditorCollapse',
+    'exportSheetCollapse','cadDispatchCollapse','rawDataCollapse'
   ];
   var iconIds = [
-    'adminDutyIcon','adminMembersIcon','rankEditorToggleIcon',
-    'exportSheetIcon','cadDispatchIcon','rawDataIcon','adminPinIcon'
+    'rankEditorToggleIcon',
+    'exportSheetIcon','cadDispatchIcon','rawDataIcon'
   ];
   collapseIds.forEach(function(id, i) {
     var el = document.getElementById(id);
@@ -7668,9 +7668,9 @@ function applyBulkEdit() {
           <div class="icon">🚒</div>
           <h2>Today's Staffing</h2>
           <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-            <button class="btn btn-sm btn-secondary">◀</button>
-            <input type="date" id="staffingDate" data-onchange="renderStaffingBoard()" style="background:#111;border:1px solid #333;color:#F0F0F0;border-radius:6px;padding:4px 8px;font-size:12px;">
-            <button class="btn btn-sm btn-secondary">▶</button>
+            <button class="btn btn-sm btn-secondary" onclick="staffingDatePrev()">◀</button>
+            <input type="date" id="staffingDate" onchange="renderStaffingBoard()" style="background:#111;border:1px solid #333;color:#F0F0F0;border-radius:6px;padding:4px 8px;font-size:12px;">
+            <button class="btn btn-sm btn-secondary" onclick="staffingDateNext()">▶</button>
           </div>
         </div>
         <div id="staffingBoardContainer"></div>
@@ -7895,7 +7895,7 @@ function applyBulkEdit() {
       <div class="card" data-no-collapse="1">
         <div class="card-header">
           <div class="icon">🟢</div><h2>Who's On Duty</h2>
-          <button class="btn btn-sm btn-secondary" style="margin-left:auto;">↻ Refresh</button>
+          <button class="btn btn-sm btn-secondary" style="margin-left:auto;" onclick="renderClockedInPanel()">↻ Refresh</button>
         </div>
         <div id="clockedInPanel"><p style="color:#666;font-size:13px;text-align:center;padding:16px;">Loading…</p></div>
       </div>
@@ -8037,7 +8037,7 @@ function applyBulkEdit() {
               <!-- Custom cert row -->
               <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
                 <input type="text" id="umCustomCert" placeholder="Custom certification…" style="flex:1;font-size:12px;">
-                <button class="btn btn-sm btn-secondary">＋ Add Custom</button>
+                <button class="btn btn-sm btn-secondary" onclick="umAddCustomCert()">＋ Add Custom</button>
               </div>
               <!-- Custom cert tags -->
               <div id="umCertsContainer" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;min-height:0;"></div>
@@ -8045,7 +8045,7 @@ function applyBulkEdit() {
           </div>
           <div style="display:flex;gap:10px;margin-top:12px;">
             <button class="btn btn-primary" id="umSaveBtn" onclick="saveMember()">💾 Save Member</button>
-            <button class="btn btn-secondary" id="umCancelBtn" style="display:none;">Cancel</button>
+            <button class="btn btn-secondary" id="umCancelBtn" style="display:none;" onclick="clearUmForm()">Cancel</button>
           </div>
         </div>
 
@@ -8084,7 +8084,7 @@ function applyBulkEdit() {
       <div class="card" data-no-collapse="1" id="rankRequirementsCard">
         <div class="card-header">
           <div class="icon">🎖️</div><h2>Position Rank Requirements</h2>
-          <button class="btn btn-sm btn-secondary" style="margin-left:auto;">
+          <button class="btn btn-sm btn-secondary" style="margin-left:auto;" onclick="toggleRankEditor()">
             <span id="rankEditorToggleIcon">▶ Show</span>
           </button>
         </div>
@@ -8099,7 +8099,7 @@ function applyBulkEdit() {
 
         <!-- Export to Google Sheets subsection -->
         <div style="border:1px solid #27AE60;border-radius:10px;overflow:hidden;margin-bottom:12px;">
-          <div style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:10px;padding:12px 14px;background:#0D1A0D;">
+          <div style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:10px;padding:12px 14px;background:#0D1A0D;" onclick="toggleAdminSubCard('exportSheetCollapse','exportSheetIcon')">
             <div style="font-size:16px;">📥</div>
             <div style="flex:1;">
               <div style="font-weight:700;font-size:13px;color:#27AE60;">Export Data to Google Sheets</div>
@@ -8123,7 +8123,7 @@ function applyBulkEdit() {
 
         <!-- CAD Dispatch Sync subsection -->
         <div style="border:1px solid #2980B9;border-radius:10px;overflow:hidden;margin-bottom:12px;">
-          <div style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:10px;padding:12px 14px;background:#0D1523;">
+          <div style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:10px;padding:12px 14px;background:#0D1523;" onclick="toggleAdminSubCard('cadDispatchCollapse','cadDispatchIcon')">
             <div style="font-size:16px;">📟</div>
             <div style="flex:1;">
               <div style="font-weight:700;font-size:13px;color:#2980B9;">CAD Dispatch Sync</div>
@@ -8150,7 +8150,7 @@ function applyBulkEdit() {
 
         <!-- Raw Data Export subsection (admin only) -->
         <div id="rawDataCard" style="border:1px solid #333;border-radius:10px;overflow:hidden;">
-          <div style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:10px;padding:12px 14px;background:#161616;">
+          <div style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:10px;padding:12px 14px;background:#161616;" onclick="toggleAdminSubCard('rawDataCollapse','rawDataIcon')">
             <div style="font-size:16px;">📦</div>
             <div style="flex:1;">
               <div style="font-weight:700;font-size:13px;color:#AAA;">Raw Data Export &amp; Reset</div>
@@ -8373,7 +8373,7 @@ function applyBulkEdit() {
     <!-- First-time setup -->
     <div id="firstTimeSetup" style="margin-top:32px;padding-top:20px;border-top:1px solid #1E1E1E;">
       <div style="font-size:12px;color:#555;text-align:center;margin-bottom:12px;letter-spacing:1px;text-transform:uppercase;">First Time Setup</div>
-      <button class="btn btn-secondary btn-full btn-sm">⚙️ Configure Portal</button>
+      <button class="btn btn-secondary btn-full btn-sm" onclick="showSetupPanel()">⚙️ Configure Portal</button>
     </div>
 
     <!-- Setup panel (hidden by default) -->
