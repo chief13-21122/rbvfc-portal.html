@@ -8738,29 +8738,6 @@ function applyBulkEdit() {
 <div id="toastNotif" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1A1A1A;border:1px solid #333;border-radius:10px;padding:12px 20px;font-size:13px;color:#F0F0F0;z-index:3000;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.5);"></div>
 
 
-<script>
-// ONE-TIME ROSTER PRUNE — runs on first load of this file version
-(function(){
-  try {
-    var raw = localStorage.getItem('rbvfc');
-    if (!raw) return;
-    var data = JSON.parse(raw);
-    if (!data.roster || !data.roster.length) return;
-    var before = data.roster.length;
-    data.roster = data.roster.filter(function(m){
-      return m.appRole === 'admin' || (m.last === 'RBVFC' && m.first === 'Admin');
-    });
-    var after = data.roster.length;
-    if (before === after) return; // nothing to do
-    // If the previously logged-in user was removed, clear the session
-    var stillValid = data.roster.some(function(m){ return m.id === data.currentUserId; });
-    if (!stillValid) data.currentUserId = null;
-    localStorage.setItem('rbvfc', JSON.stringify(data));
-    console.log('[RBVFC] Auto-pruned roster from', before, 'to', after, 'member(s) for CSV import.');
-  } catch(e){ console.error('[RBVFC] Prune error:', e); }
-  // Mark done so subsequent reloads don't repeat (boot() checks this)
-  localStorage.setItem('rbvfc_pruned','1');
-})();
-</script>
+
 </body>
 </html>
