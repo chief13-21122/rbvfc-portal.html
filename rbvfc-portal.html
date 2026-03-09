@@ -6546,6 +6546,19 @@ function toggleStaffCard(bodyId, chevId) {
   if (chev) chev.style.transform = open ? 'rotate(0deg)' : 'rotate(-90deg)';
 }
 
+function toggleAdminSubCard(collapseId, iconId) {
+  var body = document.getElementById(collapseId);
+  var icon = document.getElementById(iconId);
+  if (!body) return;
+  var open = body.style.display === 'none' || body.style.display === '';
+  body.style.display = open ? 'block' : 'none';
+  if (icon) icon.style.transform = open ? 'rotate(0deg)' : 'rotate(-90deg)';
+}
+
+function toggleRankEditor() {
+  toggleAdminRankCard();
+}
+
 
 // ═══════════════════════════════════════════════════
 //  BOARD TAB (Staffing + LOSAP side-by-side)
@@ -6856,6 +6869,22 @@ function openEditResponse(responseId) {
 }
 
 // 5. Render pending CAD calls list
+function fillCadCall(index) {
+  var call = (state.cadPendingCalls || [])[index];
+  if (!call) return;
+  // Navigate to Response tab and pre-fill fields
+  showTab('response');
+  setTimeout(function() {
+    var addr = document.getElementById('respAddress') || document.getElementById('incidentAddress');
+    var num  = document.getElementById('respIncidentNum') || document.getElementById('incidentNum');
+    var date = document.getElementById('respDate') || document.getElementById('incidentDate');
+    if (addr) addr.value = call.address || call.incident || '';
+    if (num)  num.value  = call.incidentNum || '';
+    if (date) date.value = call.date || '';
+    showToast('📟 CAD call loaded into form');
+  }, 300);
+}
+
 function renderCadPendingCalls() {
   var container = document.getElementById('cadPendingList') ||
                   document.querySelector('#cadPendingCard .cadPendingList');
