@@ -738,6 +738,7 @@ function showMoreMenu() {
 function hideMoreMenu() {
   var s = document.getElementById('moreSheet'); if(s) { s.style.opacity='0'; s.style.pointerEvents='none'; var p=document.getElementById('moreSheetPanel'); if(p) p.style.transform='translateY(100%)'; setTimeout(function(){ s.style.display='none'; },350); }
 }
+function closeMoreMenu() { hideMoreMenu(); }
 
 // ═══════════════════════════════════════════════════
 //  CLOCK IN / OUT
@@ -783,17 +784,23 @@ function clockOutFromReminder() { dismissReminder(); toggleClock(); }
 //  STATS
 // ═══════════════════════════════════════════════════
 function updateStats() {
-  var yr = new Date().getFullYear();
+  var yr = String(new Date().getFullYear());
   var uid = state.currentUserId;
-  var mySessions = (state.sessions||[]).filter(function(s){ return s.memberId===uid && s.date && s.date.startsWith(yr); });
-  var myHrs = mySessions.reduce(function(a,s){ return a+(parseFloat(s.hours)||0); },0);
-  var myResponses = (state.emergencyResponses||[]).filter(function(r){
-    return r.members && r.members.includes(uid) && r.date && r.date.startsWith(String(yr));
-  }).length;
   var myPts = calcMemberLOSAP(uid, yr);
-  var he = document.getElementById('statHours'); if(he) he.textContent = myHrs.toFixed(1);
-  var re = document.getElementById('statResponses'); if(re) re.textContent = myResponses;
   var pe = document.getElementById('statPoints'); if(pe) pe.textContent = myPts;
+  // Clock-screen LOSAP mini-card
+  var ptsEl  = document.getElementById('clockLosapPts');
+  var barEl  = document.getElementById('clockLosapBar');
+  var statEl = document.getElementById('clockLosapStatus');
+  var banner = document.getElementById('losapBanner');
+  if (ptsEl)  ptsEl.textContent = myPts + ' / 50';
+  if (barEl)  barEl.style.width = Math.min(100,(myPts/50)*100)+'%';
+  if (statEl) { statEl.textContent = myPts>=50 ? '✓ LOSAP QUALIFIED' : (50-myPts)+' pts to qualify'; statEl.style.color = myPts>=50?'#27AE60':'#888'; }
+  if (banner) {
+    banner.className = 'qual-banner '+(myPts>=50?'pass':'fail');
+    var h3 = banner.querySelector('h3'); if(h3) h3.textContent = myPts>=50?'✓ LOSAP QUALIFIED':'Not Yet Qualified';
+    var sub = document.getElementById('losapBannerSub'); if(sub) sub.textContent = myPts>=50?'You have met the '+yr+' LOSAP requirement.':(50-myPts)+' more points needed to qualify.';
+  }
 }
 
 // ═══════════════════════════════════════════════════
@@ -1391,7 +1398,8 @@ function renderLOSAP() {
   try { renderMyPendingTraining(); } catch(e) {}
 }
 function renderUnitBreakdown(uid, yr, responses) {
-  var container = document.getElementById('unitBreakdown');
+  var container = document.getElementById('losapUnitBreakdown');
+  var card = document.getElementById('losapUnitBreakdownCard');
   if (!container) return;
   var unitCounts = {};
   UNITS.forEach(function(u){ unitCounts[u]=0; });
@@ -1400,17 +1408,62 @@ function renderUnitBreakdown(uid, yr, responses) {
   UNITS.forEach(function(u) {
     if (unitCounts[u]===0) return;
     var isEMS = EMS_UNITS.includes(u);
-    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1E1E1E;">'+
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 10px;border-bottom:1px solid #1E1E1E;">'+
       '<span style="font-size:13px;color:'+(isEMS?'#27AE60':'#3498DB')+';">'+u+'</span>'+
       '<span style="font-family:Bebas Neue,sans-serif;font-size:16px;color:#F0F0F0;">'+unitCounts[u]+'</span>'+
       '</div>';
   });
-  container.innerHTML = html || '<p style="color:#666;font-size:13px;">No unit responses logged yet.</p>';
+  container.innerHTML = html || '<p style="color:#666;font-size:13px;padding:10px;">No unit responses logged yet.</p>';
+  if (card) card.style.display = html ? 'block' : 'none';
 }
 
 function renderRankingStatus(uid, yr) {
-  var container = document.getElementById('rankingStatus');
+  var container = document.getElementById('losapRankingStatus');
+  var card = document.getElementById('losapRankingCard');
   if (!container) return;
+  var yrStr = String(yr);
+  var responses = state.emergencyResponses||[];
+
+  var emsCounts = {}, fireCounts = {};
+  (state.roster||[]).forEach(function(m){ emsCounts[m.id]=0; fireCounts[m.id]=0; });
+  responses.filter(function(r){ return r.date&&r.date.startsWith(yrStr); }).forEach(function(r){
+    (r.members||[]).forEach(function(mid){
+      var hasEMS = (r.units||[]).some(function(u){ return EMS_UNITS.includes(u); });
+      var hasFire = (r.units||[]).some(function(u){ return FIRE_UNITS.includes(u); });
+      if (hasEMS) emsCounts[mid] = (emsCounts[mid]||0)+1;
+      if (hasFire) fireCounts[mid] = (fireCounts[mid]||0)+1;
+    });
+  });
+  var emsSorted = Object.keys(emsCounts).sort(function(a,b){ return emsCounts[b]-emsCounts[a]; });
+  var fireSorted = Object.keys(fireCounts).sort(function(a,b){ return fireCounts[b]-fireCounts[a]; });
+  var emsRank = emsSorted.indexOf(uid)+1;
+  var fireRank = fireSorted.indexOf(uid)+1;
+  var myEMS = emsCounts[uid]||0;
+  var myFire = fireCounts[uid]||0;
+
+  var html = '';
+  if (myEMS>0) {
+    var emsTop5 = emsRank>=1&&emsRank<=5;
+    html += '<div style="padding:10px;border-radius:8px;background:'+(emsTop5?'#0A2A1A':'#1A1A1A')+';border:1px solid '+(emsTop5?'#27AE60':'#333')+';margin:8px;">'+
+      '<div style="font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">EMS Responses</div>'+
+      '<div style="display:flex;align-items:center;gap:8px;">'+
+      (emsTop5?'<span style="font-size:20px;">🏆</span>':'<span style="font-size:20px;">🚑</span>')+
+      '<div><div style="font-size:18px;font-weight:700;color:'+(emsTop5?'#27AE60':'#F0F0F0')+';">#'+emsRank+' of '+emsSorted.length+'</div>'+
+      '<div style="font-size:12px;color:#888;">'+myEMS+' responses'+(emsTop5?' — Top 5 EMS Responder! 🏆':'')+'</div></div></div></div>';
+  }
+  if (myFire>0) {
+    var fireTop5 = fireRank>=1&&fireRank<=5;
+    html += '<div style="padding:10px;border-radius:8px;background:'+(fireTop5?'#2A0A0A':'#1A1A1A')+';border:1px solid '+(fireTop5?'#C8102E':'#333')+';margin:8px;">'+
+      '<div style="font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Fire Responses</div>'+
+      '<div style="display:flex;align-items:center;gap:8px;">'+
+      (fireTop5?'<span style="font-size:20px;">🏆</span>':'<span style="font-size:20px;">🚒</span>')+
+      '<div><div style="font-size:18px;font-weight:700;color:'+(fireTop5?'#C8102E':'#F0F0F0')+';">#'+fireRank+' of '+fireSorted.length+'</div>'+
+      '<div style="font-size:12px;color:#888;">'+myFire+' responses'+(fireTop5?' — Top 5 Fire Responder! 🏆':'')+'</div></div></div></div>';
+  }
+  if (!myEMS&&!myFire) html = '<p style="color:#666;font-size:13px;padding:10px;">No responses logged yet for '+yr+'.</p>';
+  container.innerHTML = html;
+  if (card) card.style.display = 'block';
+}
   var yrStr = String(yr);
   var responses = state.emergencyResponses||[];
 
@@ -4311,8 +4364,9 @@ function renderSpecialEvents(containerId) {
         : '';
 
     // Date label with TODAY badge
+    var _evTime = ev.startTime || ev.time || '';
     var dateLabel = (isToday ? '<span style="font-size:10px;background:#C8102E;color:#FFF;border-radius:4px;padding:1px 5px;margin-right:5px;font-weight:700;">TODAY</span>' : '')
-      + evDate + (ev.time ? ' · ⏰ ' + ev.time : '') + (ev.location ? ' · 📍 ' + ev.location : '');
+      + evDate + (_evTime ? ' · ⏰ ' + _evTime : '') + (ev.location ? ' · 📍 ' + ev.location : '');
 
     // Full signup list
     var signupList = '';
@@ -5258,16 +5312,31 @@ function boot() {
       {id:'s_a09',userId:'mbr_018',start:_ago(0,1),activity:'duty',note:'',end:null,duration:null},
       {id:'s_a10',userId:'mbr_003',start:_ago(0,5),activity:'drill',note:'Monthly drill night',end:null,duration:null},
       {id:'s_a11',userId:'mbr_010',start:_ago(0,1),activity:'duty',note:'',end:null,duration:null},
-      {id:'s_p01',userId:'rbvfc_admin_001',start:_ago(1,6),activity:'duty',note:'',end:_ago(1,2),duration:4*36e5},
-      {id:'s_p02',userId:'mbr_003',start:_ago(2,4),activity:'drill',note:'',end:_ago(2,1),duration:3*36e5},
-      {id:'s_p03',userId:'mbr_005',start:_ago(3,5),activity:'duty',note:'',end:_ago(3,1),duration:4*36e5},
-      {id:'s_p04',userId:'mbr_007',start:_ago(4,3),activity:'duty',note:'',end:_ago(4,1),duration:2*36e5},
-      {id:'s_p05',userId:'mbr_009',start:_ago(5,2),activity:'meeting',note:'Monthly Company Meeting',end:_ago(5,.5),duration:1.5*36e5},
-      {id:'s_p06',userId:'mbr_012',start:_ago(6,4),activity:'duty',note:'',end:_ago(6,1),duration:3*36e5},
-      {id:'s_p07',userId:'mbr_016',start:_ago(7,3),activity:'duty',note:'',end:_ago(7,1),duration:2*36e5},
-      {id:'s_p08',userId:'mbr_017',start:_ago(8,4),activity:'drill',note:'Driver training',end:_ago(8,1),duration:3*36e5},
-      {id:'s_p09',userId:'mbr_004',start:_ago(2,3),activity:'duty',note:'',end:_ago(2,.5),duration:2.5*36e5},
-      {id:'s_p10',userId:'mbr_014',start:_ago(3,6),activity:'duty',note:'',end:_ago(3,2),duration:4*36e5}
+      {id:'s_p01',userId:'rbvfc_admin_001',start:_ago(1,6),activity:'duty',note:'',end:_ago(1,2),duration:4*3600},
+      {id:'s_p02',userId:'mbr_003',start:_ago(2,4),activity:'drill',note:'',end:_ago(2,1),duration:3*3600},
+      {id:'s_p03',userId:'mbr_005',start:_ago(3,5),activity:'duty',note:'',end:_ago(3,1),duration:4*3600},
+      {id:'s_p04',userId:'mbr_007',start:_ago(4,3),activity:'duty',note:'',end:_ago(4,1),duration:2*3600},
+      {id:'s_p05',userId:'mbr_009',start:_ago(5,2),activity:'meeting',note:'Monthly Company Meeting',end:_ago(5,.5),duration:5400},
+      {id:'s_p06',userId:'mbr_012',start:_ago(6,4),activity:'duty',note:'',end:_ago(6,1),duration:3*3600},
+      {id:'s_p07',userId:'mbr_016',start:_ago(7,3),activity:'duty',note:'',end:_ago(7,1),duration:2*3600},
+      {id:'s_p08',userId:'mbr_017',start:_ago(8,4),activity:'drill',note:'Driver training',end:_ago(8,1),duration:3*3600},
+      {id:'s_p09',userId:'mbr_004',start:_ago(2,3),activity:'duty',note:'',end:_ago(2,.5),duration:9000},
+      {id:'s_p10',userId:'mbr_014',start:_ago(3,6),activity:'duty',note:'',end:_ago(3,2),duration:4*3600},
+      {id:'s_p11',userId:'mbr_002',start:_ago(7,5),activity:'duty',note:'',end:_ago(7,1),duration:4*3600},
+      {id:'s_p12',userId:'mbr_008',start:_ago(10,4),activity:'drill',note:'Live fire drill SMBC',end:_ago(10,0),duration:4*3600},
+      {id:'s_p13',userId:'mbr_011',start:_ago(14,3),activity:'duty',note:'',end:_ago(14,1),duration:2*3600},
+      {id:'s_p14',userId:'mbr_015',start:_ago(14,4),activity:'duty',note:'',end:_ago(14,0),duration:4*3600},
+      {id:'s_p15',userId:'mbr_006',start:_ago(21,6),activity:'duty',note:'',end:_ago(21,2),duration:4*3600},
+      {id:'s_p16',userId:'mbr_004',start:_ago(21,5),activity:'drill',note:'Tower ladder evolutions',end:_ago(21,1),duration:4*3600},
+      {id:'s_p17',userId:'rbvfc_admin_001',start:_ago(28,6),activity:'meeting',note:'Officers Meeting',end:_ago(28,4),duration:2*3600},
+      {id:'s_p18',userId:'mbr_002',start:_ago(30,5),activity:'drill',note:'Monthly drill — hose evolutions',end:_ago(30,1),duration:4*3600},
+      {id:'s_p19',userId:'mbr_018',start:_ago(30,5),activity:'drill',note:'Monthly drill',end:_ago(30,1),duration:4*3600},
+      {id:'s_p20',userId:'mbr_005',start:_ago(45,4),activity:'duty',note:'',end:_ago(45,0),duration:4*3600},
+      {id:'s_p21',userId:'mbr_010',start:_ago(14,3),activity:'duty',note:'',end:_ago(14,1),duration:2*3600},
+      {id:'s_p22',userId:'mbr_014',start:_ago(21,5),activity:'drill',note:'Extrication drill',end:_ago(21,1),duration:4*3600},
+      {id:'s_p23',userId:'mbr_018',start:_ago(14,6),activity:'duty',note:'',end:_ago(14,2),duration:4*3600},
+      {id:'s_p24',userId:'mbr_011',start:_ago(30,5),activity:'drill',note:'Monthly drill',end:_ago(30,1),duration:4*3600},
+      {id:'s_p25',userId:'mbr_015',start:_ago(45,6),activity:'duty',note:'',end:_ago(45,2),duration:4*3600}
     ];
 
     state.currentUserId = 'rbvfc_admin_001';
@@ -5313,25 +5382,75 @@ function boot() {
       {id:'tr_18',userId:'mbr_004',type:'Aerial Operations',description:'Elevated Master Stream Operations',hours:4,date:_ds(1),status:'pending',submittedAt:_ago(1,0),points:4}
     ];
 
-    // LOSAP activities
+    // LOSAP activities - use memberId, category, points to match CAT_CONFIG
     var _mPts = {'rbvfc_admin_001':220,'mbr_002':195,'mbr_003':178,'mbr_004':165,'mbr_005':142,'mbr_006':158,'mbr_007':134,'mbr_008':171,'mbr_009':89,'mbr_010':147,'mbr_011':162,'mbr_012':138,'mbr_013':45,'mbr_014':176,'mbr_015':188,'mbr_016':121,'mbr_017':72,'mbr_018':167};
-    var _aTypes = [{t:'Emergency Response',p:1},{t:'Duty',p:1},{t:'Drill',p:2},{t:'Meeting',p:2},{t:'Training',p:3},{t:'Community Event',p:2}];
+    var _cats = [
+      {c:'emergency',p:1,l:'Emergency Response'},
+      {c:'meeting',p:1,l:'Company Meeting'},
+      {c:'drill',p:2,l:'Drill/In-House'},
+      {c:'training',p:3,l:'Formal Training'},
+      {c:'duties',p:2,l:'Collateral Duties'}
+    ];
     state.losapActivities = [];
     var _lid = 1;
     Object.keys(_mPts).forEach(function(uid){
       var target=_mPts[uid], running=0, d=180;
       while(running<target && d>=0){
-        var a=_aTypes[Math.floor(Math.random()*_aTypes.length)], pts=a.p*(Math.random()>.7?2:1);
+        var a=_cats[Math.floor(Math.random()*_cats.length)], pts=a.p*(Math.random()>.7?2:1);
         running+=pts;
-        state.losapActivities.push({id:'la_'+String(_lid++).padStart(4,'0'),userId:uid,type:a.t,date:_ds(d),points:pts,description:a.t,approvedBy:'rbvfc_admin_001',createdAt:_ago(d,2)});
+        state.losapActivities.push({
+          id:'la_'+String(_lid++).padStart(4,'0'),
+          memberId:uid,
+          category:a.c,
+          date:_ds(d),
+          points:pts,
+          pts:pts,
+          desc:a.l,
+          approvedBy:'rbvfc_admin_001',
+          createdAt:_ago(d,2)
+        });
         d-=Math.floor(Math.random()*5+1);
       }
     });
 
-    // Staffing shifts
-    var _raw=[[_ds(0),'e131','Chauffeur','mbr_008'],[_ds(0),'e131','Officer','mbr_002'],[_ds(0),'e131','Nozzle','mbr_004'],[_ds(0),'e131','Backup','mbr_014'],[_ds(0),'Tk13','Chauffeur','mbr_018'],[_ds(0),'Tk13','Tiller','mbr_008'],[_ds(0),'Tk13','Roof','mbr_006'],[_ds(0),'a139','Driver','mbr_010'],[_ds(0),'a139','Technician','mbr_016'],[_ds(1),'e131','Chauffeur','rbvfc_admin_001'],[_ds(1),'e131','Officer','mbr_015'],[_ds(1),'e132','Chauffeur','mbr_018'],[_ds(1),'e132','Officer','mbr_003'],[_ds(1),'e132','Nozzle','mbr_007'],[_ds(1),'a139','Driver','mbr_010'],[_ds(1),'RB13','MVO','mbr_012'],[_ds(2),'e131','Chauffeur','mbr_008'],[_ds(2),'e131','Nozzle','mbr_004'],[_ds(2),'Tk13','Chauffeur','mbr_018'],[_ds(2),'Tk13','Irons','mbr_004'],[_ds(2),'Tk13','Roof','mbr_006'],[_ds(2),'a139','Technician','mbr_005'],[_ds(3),'e132','Chauffeur','mbr_018'],[_ds(3),'e132','Officer','mbr_011'],[_ds(3),'e131','Officer','mbr_002'],[_ds(3),'Mu13','EMT','mbr_010'],[_ds(3),'Mu13','EMT','mbr_016'],[_ds(4),'e131','Chauffeur','rbvfc_admin_001'],[_ds(4),'Tk13','Irons','mbr_014'],[_ds(4),'a139','Driver','mbr_010'],[_ds(5),'e131','Layout','mbr_006'],[_ds(5),'e132','Backup','mbr_005'],[_ds(5),'Tk13','Can','mbr_004'],[_ds(7),'e131','Chauffeur','mbr_008'],[_ds(7),'e131','Officer','mbr_015'],[_ds(7),'e131','Nozzle','mbr_014'],[_ds(7),'Tk13','Chauffeur','mbr_018'],[_ds(7),'Tk13','Tiller','mbr_008'],[_ds(7),'a139','Driver','mbr_010'],[_ds(8),'e132','Chauffeur','mbr_003'],[_ds(8),'e132','Nozzle','mbr_007'],[_ds(8),'Mu13','EMT','mbr_016'],[_ds(9),'e131','Chauffeur','rbvfc_admin_001'],[_ds(9),'Tk13','Roof','mbr_006'],[_ds(9),'a139','Technician','mbr_005'],[_ds(10),'e131','Officer','mbr_002'],[_ds(10),'Tk13','Officer','mbr_011'],[_ds(10),'e132','Officer','mbr_003']];
-    state.staffingShifts = {};
-    _raw.forEach(function(r){ var k=r[0]+'_'+r[1]; if(!state.staffingShifts[k]) state.staffingShifts[k]={date:r[0],unit:r[1],assignments:[]}; state.staffingShifts[k].assignments.push({userId:r[3],position:r[2],signedUpAt:_ago(Math.floor(Math.random()*10),0)}); });
+    // staffingShifts = array of {id,date,unitId,positionIndex,position,memberId,clockedIn}
+    // UNIT_POSITIONS: e131[0=Chauffeur,1=Officer,2=Nozzle,3=Backup,4=Control,5=Layout]
+    //                 e132 same; Tk13[0=Chauffeur,1=Officer,2=Tiller,3=Irons,4=Can,5=Outside Vent,6=Roof]
+    //                 a139[0=Driver,1=Technician,2=3rd Seat]; Mu13[0=Paramedic,1=EMT]
+    //                 RB13[0=MVO,1=Mate]; FB13[0=MVO,1=Mate]
+    var _sid = 1;
+    function _sh(d,u,pi,pos,mid,ci){ return {id:'sh_'+String(_sid++).padStart(4,'0'),date:_ds(d),unitId:u,positionIndex:pi,position:pos,memberId:mid,clockedIn:!!ci,signedUpAt:_ago(d+1,0)}; }
+    state.staffingShifts = [
+      // Today
+      _sh(0,'e131',0,'Chauffeur','mbr_008'), _sh(0,'e131',1,'Officer','mbr_002'), _sh(0,'e131',2,'Nozzle','mbr_004'), _sh(0,'e131',3,'Backup','mbr_014'),
+      _sh(0,'Tk13',0,'Chauffeur','mbr_018'), _sh(0,'Tk13',2,'Tiller','mbr_008'), _sh(0,'Tk13',6,'Roof','mbr_006'),
+      _sh(0,'a139',0,'Driver','mbr_010'), _sh(0,'a139',1,'Technician','mbr_016'),
+      _sh(0,'Mu13',1,'EMT','mbr_010'),
+      // Yesterday
+      _sh(1,'e131',0,'Chauffeur','rbvfc_admin_001'), _sh(1,'e131',1,'Officer','mbr_015'),
+      _sh(1,'e132',0,'Chauffeur','mbr_018'), _sh(1,'e132',1,'Officer','mbr_003'), _sh(1,'e132',2,'Nozzle','mbr_007'),
+      _sh(1,'a139',0,'Driver','mbr_010'), _sh(1,'RB13',0,'MVO','mbr_012'),
+      // 2 days ago
+      _sh(2,'e131',0,'Chauffeur','mbr_008'), _sh(2,'e131',2,'Nozzle','mbr_004'),
+      _sh(2,'Tk13',0,'Chauffeur','mbr_018'), _sh(2,'Tk13',3,'Irons','mbr_004'), _sh(2,'Tk13',6,'Roof','mbr_006'),
+      _sh(2,'a139',1,'Technician','mbr_005'),
+      // 3 days ago
+      _sh(3,'e132',0,'Chauffeur','mbr_018'), _sh(3,'e132',1,'Officer','mbr_011'),
+      _sh(3,'e131',1,'Officer','mbr_002'), _sh(3,'Mu13',1,'EMT','mbr_010'), _sh(3,'Mu13',1,'EMT','mbr_016'),
+      // 4 days ago
+      _sh(4,'e131',0,'Chauffeur','rbvfc_admin_001'), _sh(4,'Tk13',3,'Irons','mbr_014'), _sh(4,'a139',0,'Driver','mbr_010'),
+      // 5 days ago
+      _sh(5,'e131',5,'Layout','mbr_006'), _sh(5,'e132',3,'Backup','mbr_005'), _sh(5,'Tk13',4,'Can','mbr_004'),
+      // 7 days ago
+      _sh(7,'e131',0,'Chauffeur','mbr_008'), _sh(7,'e131',1,'Officer','mbr_015'), _sh(7,'e131',2,'Nozzle','mbr_014'),
+      _sh(7,'Tk13',0,'Chauffeur','mbr_018'), _sh(7,'Tk13',2,'Tiller','mbr_008'), _sh(7,'a139',0,'Driver','mbr_010'),
+      // Upcoming shifts (future)
+      _sh(-1,'e131',0,'Chauffeur','mbr_018'), _sh(-1,'e131',1,'Officer','mbr_015'), _sh(-1,'e131',2,'Nozzle','mbr_006'),
+      _sh(-1,'Tk13',0,'Chauffeur','mbr_008'), _sh(-1,'Tk13',6,'Roof','mbr_014'),
+      _sh(-1,'a139',0,'Driver','mbr_010'), _sh(-1,'Mu13',1,'EMT','mbr_016'),
+      _sh(-2,'e131',0,'Chauffeur','rbvfc_admin_001'), _sh(-2,'e131',1,'Officer','mbr_002'), _sh(-2,'e132',0,'Chauffeur','mbr_003'),
+      _sh(-3,'Tk13',0,'Chauffeur','mbr_018'), _sh(-3,'a139',0,'Driver','mbr_010'), _sh(-3,'e132',1,'Officer','mbr_011')
+    ];
 
     state.specialEvents = [
       {id:'se_01',title:'Spring Equipment Fundraiser',date:_ds(-14),endDate:_ds(-13),startTime:'09:00',location:'Station 13 — 200 Crain Hwy',description:'Annual equipment fundraiser and open house.',totalNeeded:12,signups:[{memberId:'rbvfc_admin_001',signedUpAt:_ago(30,0),clockedIn:true,clockedInAt:_ago(14,1)},{memberId:'mbr_002',signedUpAt:_ago(28,0),clockedIn:true,clockedInAt:_ago(14,1)},{memberId:'mbr_003',signedUpAt:_ago(25,0),clockedIn:true,clockedInAt:_ago(14,2)},{memberId:'mbr_005',signedUpAt:_ago(20,0),clockedIn:true,clockedInAt:_ago(14,1)},{memberId:'mbr_007',signedUpAt:_ago(15,0),clockedIn:true,clockedInAt:_ago(14,3)},{memberId:'mbr_012',signedUpAt:_ago(10,0),clockedIn:false}]},
@@ -7020,7 +7139,8 @@ function renderUnitConfigCard() {
 
 // 7. getActiveUnits — returns array of unit IDs that are enabled in staffing config
 function getActiveUnits() {
-  var enabled = state.staffingEnabled || {};
+  var enabled = state.staffingEnabled;
+  if (!enabled) return UNITS.slice();
   return UNITS.filter(function(u){ return enabled[u] !== false; });
 }
 
@@ -7451,6 +7571,25 @@ function applyBulkEdit() {
 
       </div><!-- end clockCard -->
 
+      <!-- LOSAP Mini Status Card on Clock Screen -->
+      <div class="card" id="clockLosapCard" style="padding:14px 16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <span style="font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#888;">🏅 LOSAP Status</span>
+          <button onclick="showTab('losap')" style="background:none;border:none;color:#C8102E;font-size:11px;cursor:pointer;letter-spacing:1px;font-family:'Barlow Condensed',sans-serif;text-transform:uppercase;">View Details →</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="flex:1;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span id="clockLosapStatus" style="font-size:12px;color:#888;">— pts to qualify</span>
+              <span id="clockLosapPts" style="font-size:13px;font-weight:700;color:#F0F0F0;">0 / 50</span>
+            </div>
+            <div style="background:#1A1A1A;border-radius:4px;height:6px;overflow:hidden;">
+              <div id="clockLosapBar" style="height:6px;background:linear-gradient(90deg,#C8102E,#F5A623);border-radius:4px;transition:width .5s;width:0%;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div><!-- end section-clock -->
 
     <!-- ══════════════ LOSAP TAB ══════════════ -->
@@ -7460,7 +7599,7 @@ function applyBulkEdit() {
       <div id="losapBanner" class="qual-banner fail">
         <div class="qual-icon">⚠️</div>
         <div class="qual-text">
-          <h3>Not Yet Qualified</h3>
+          <h3 id="losapQualified">Not Yet Qualified</h3>
           <p id="losapBannerSub">Complete requirements to qualify for LOSAP benefits.</p>
         </div>
       </div>
@@ -7469,11 +7608,23 @@ function applyBulkEdit() {
       <div class="card" style="padding:16px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <span style="font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;color:#888;text-transform:uppercase;">Points Progress</span>
-          <span id="losapPointsLabel" style="font-size:13px;font-weight:700;color:#F0F0F0;">0 / 50 pts</span>
+          <span id="losapPointsLabel" style="font-size:13px;font-weight:700;color:#F0F0F0;"><span id="losapTotalPts">0</span> / 50 pts</span>
         </div>
         <div style="background:#1E1E1E;border-radius:4px;height:8px;overflow:hidden;">
           <div id="losapProgressBar" style="height:8px;background:linear-gradient(90deg,#C8102E,#F5A623);border-radius:4px;transition:width .5s;width:0%;"></div>
         </div>
+      </div>
+
+      <!-- Unit Response Breakdown -->
+      <div class="card" id="losapUnitBreakdownCard" style="display:none;">
+        <div class="card-header"><div class="icon">🚒</div><h2>Response Breakdown</h2></div>
+        <div id="losapUnitBreakdown"></div>
+      </div>
+
+      <!-- Ranking Status -->
+      <div class="card" id="losapRankingCard" style="display:none;">
+        <div class="card-header"><div class="icon">🏆</div><h2>Company Standing</h2></div>
+        <div id="losapRankingStatus"></div>
       </div>
 
       <!-- Pending Training Submissions (member view) -->
@@ -7486,7 +7637,16 @@ function applyBulkEdit() {
       <div class="card">
         <div class="card-header"><div class="icon">📊</div><h2>Activity History</h2></div>
         <div id="activityHistoryContainer">
-          <p style="color:#666;font-size:13px;text-align:center;padding:16px;">No activities logged yet.</p>
+          <table style="width:100%;border-collapse:collapse;">
+            <thead><tr>
+              <th style="text-align:left;padding:8px 10px;font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid #222;">Date</th>
+              <th style="text-align:left;padding:8px 10px;font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid #222;">Activity</th>
+              <th style="text-align:right;padding:8px 10px;font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid #222;">Pts</th>
+            </tr></thead>
+            <tbody id="losapActivityBody">
+              <tr><td colspan="3" style="text-align:center;padding:24px;color:#666;">No activities logged yet.</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -8415,7 +8575,7 @@ function applyBulkEdit() {
   </nav>
 
   <!-- More Sheet -->
-  <div id="moreSheet" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;align-items:flex-end;">
+  <div id="moreSheet" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;align-items:flex-end;" onclick="if(event.target===this)closeMoreMenu()">
     <div id="moreSheetPanel" style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:20px;width:100%;box-sizing:border-box;transform:translateY(100%);transition:transform .3s ease;">
       <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 20px;"></div>
       <button class="btn btn-secondary btn-full" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
