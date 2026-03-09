@@ -5219,25 +5219,129 @@ function boot() {
     if (saved) Object.assign(state, JSON.parse(saved));
   } catch(e) {}
 
-  // Auto-seed Admin member on first run if roster is empty
+  // ── DEMO SEED — loads full demo on any fresh browser / device ──
   if (!state.roster || state.roster.length === 0) {
-    if (!Array.isArray(state.roster)) state.roster = [];
-    var adminMember = {
-      id: 'mbr_admin_default',
-      first: 'Admin',
-      last: 'RBVFC',
-      memberId: '0000',
-      email: 'admin@RBVFC13.com',
-      rank: '',
-      appRole: 'admin',
-      pin: '1234',
-      active: true,
-      losapPositions: [],
-      additionalCerts: [],
-      unitPositions: {},
-      rideReport: ''
-    };
-    state.roster.push(adminMember);
+    var _N = Date.now();
+    var _ago = function(d,h){ return new Date(_N - d*864e5 - (h||0)*36e5).toISOString(); };
+    var _ds  = function(d){   return new Date(_N - d*864e5).toISOString().split('T')[0]; };
+
+    state.roster = [
+      {id:'rbvfc_admin_001',first:'Michael',last:'Caruso',memberId:'RBVFC-01',rank:'Assistant Chief',appRole:'admin',losapPositions:['President','Assistant Chief'],pin:'0000',active:true,ranks:['Assistant Chief'],additionalCerts:['Mate II','MVO','BRS','FADO','Tiller','AT','ATDA'],unitPositions:{e131:['Chauffeur','Layout'],Tk13:['Chauffeur','Tiller','Can','Roof'],a139:['Driver','3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_002',first:'James',last:'Hartley',memberId:'RBVFC-02',rank:'Captain',appRole:'officer',losapPositions:['Captain'],pin:'1234',active:true,ranks:['Captain'],additionalCerts:['MVO','BRS','FADO','Tiller'],unitPositions:{e131:['Officer','Nozzle'],Tk13:['Officer','Irons'],a139:['Driver']},rideReport:'eligible'},
+      {id:'mbr_003',first:'Sarah',last:'McKenna',memberId:'RBVFC-03',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS'],unitPositions:{e132:['Officer','Nozzle'],a139:['Technician']},rideReport:'eligible'},
+      {id:'mbr_004',first:'Derek',last:'Walton',memberId:'RBVFC-04',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller'],unitPositions:{e131:['Nozzle','Backup'],Tk13:['Irons','Can']},rideReport:'eligible'},
+      {id:'mbr_005',first:'Amanda',last:'Torres',memberId:'RBVFC-05',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Backup','Control'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_006',first:'Tyler',last:'Nguyen',memberId:'RBVFC-06',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','FADO'],unitPositions:{Tk13:['Roof','Outside Vent'],e131:['Layout']},rideReport:'eligible'},
+      {id:'mbr_007',first:'Brianna',last:'Collins',memberId:'RBVFC-07',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Nozzle'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_008',first:'Marcus',last:'Jenkins',memberId:'RBVFC-08',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','BRS'],unitPositions:{Tk13:['Chauffeur','Tiller'],e131:['Chauffeur']},rideReport:'eligible'},
+      {id:'mbr_009',first:'Kayla',last:'Ramirez',memberId:'RBVFC-09',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e131:['Control'],e132:['Control']},rideReport:'eligible'},
+      {id:'mbr_010',first:'Logan',last:'Pierce',memberId:'RBVFC-10',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{a139:['Driver'],Mu13:['EMT']},rideReport:'eligible'},
+      {id:'mbr_011',first:'Nicole',last:'Shaw',memberId:'RBVFC-11',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e132:['Officer'],Tk13:['Officer','Can']},rideReport:'eligible'},
+      {id:'mbr_012',first:'Chris',last:'Donnelly',memberId:'RBVFC-12',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{RB13:['MVO','Mate'],FB13:['MVO']},rideReport:'eligible'},
+      {id:'mbr_013',first:'Destiny',last:'Franklin',memberId:'RBVFC-13',rank:'Student',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Student'],additionalCerts:[],unitPositions:{},rideReport:'ineligible'},
+      {id:'mbr_014',first:'Ryan',last:'Kowalski',memberId:'RBVFC-14',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','AT'],unitPositions:{Tk13:['Roof','Irons'],e131:['Backup']},rideReport:'eligible'},
+      {id:'mbr_015',first:'Tamara',last:'Bishop',memberId:'RBVFC-15',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e131:['Officer'],a139:['Technician']},rideReport:'eligible'},
+      {id:'mbr_016',first:'Victor',last:'Espinoza',memberId:'RBVFC-16',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{Mu13:['EMT'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_017',first:'Hannah',last:'Reid',memberId:'RBVFC-17',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e132:['Layout']},rideReport:'eligible'},
+      {id:'mbr_018',first:'Elijah',last:'Thompson',memberId:'RBVFC-18',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','Tiller'],unitPositions:{Tk13:['Chauffeur','Outside Vent'],e132:['Chauffeur']},rideReport:'eligible'}
+    ];
+
+    state.sessions = [
+      {id:'s_a01',userId:'rbvfc_admin_001',start:_ago(0,2),activity:'duty',note:'Company Officer on Duty',end:null,duration:null},
+      {id:'s_a02',userId:'mbr_002',start:_ago(0,3),activity:'duty',note:'Engine 131 Coverage',end:null,duration:null},
+      {id:'s_a03',userId:'mbr_004',start:_ago(0,1),activity:'duty',note:'',end:null,duration:null},
+      {id:'s_a04',userId:'mbr_006',start:_ago(0,2),activity:'duty',note:'',end:null,duration:null},
+      {id:'s_a05',userId:'mbr_008',start:_ago(0,4),activity:'duty',note:'Tower 13 crew',end:null,duration:null},
+      {id:'s_a06',userId:'mbr_011',start:_ago(0,1),activity:'duty',note:'',end:null,duration:null},
+      {id:'s_a07',userId:'mbr_014',start:_ago(0,3),activity:'duty',note:'',end:null,duration:null},
+      {id:'s_a08',userId:'mbr_015',start:_ago(0,2),activity:'duty',note:'Lieutenant on duty',end:null,duration:null},
+      {id:'s_a09',userId:'mbr_018',start:_ago(0,1),activity:'duty',note:'',end:null,duration:null},
+      {id:'s_a10',userId:'mbr_003',start:_ago(0,5),activity:'drill',note:'Monthly drill night',end:null,duration:null},
+      {id:'s_a11',userId:'mbr_010',start:_ago(0,1),activity:'duty',note:'',end:null,duration:null},
+      {id:'s_p01',userId:'rbvfc_admin_001',start:_ago(1,6),activity:'duty',note:'',end:_ago(1,2),duration:4*36e5},
+      {id:'s_p02',userId:'mbr_003',start:_ago(2,4),activity:'drill',note:'',end:_ago(2,1),duration:3*36e5},
+      {id:'s_p03',userId:'mbr_005',start:_ago(3,5),activity:'duty',note:'',end:_ago(3,1),duration:4*36e5},
+      {id:'s_p04',userId:'mbr_007',start:_ago(4,3),activity:'duty',note:'',end:_ago(4,1),duration:2*36e5},
+      {id:'s_p05',userId:'mbr_009',start:_ago(5,2),activity:'meeting',note:'Monthly Company Meeting',end:_ago(5,.5),duration:1.5*36e5},
+      {id:'s_p06',userId:'mbr_012',start:_ago(6,4),activity:'duty',note:'',end:_ago(6,1),duration:3*36e5},
+      {id:'s_p07',userId:'mbr_016',start:_ago(7,3),activity:'duty',note:'',end:_ago(7,1),duration:2*36e5},
+      {id:'s_p08',userId:'mbr_017',start:_ago(8,4),activity:'drill',note:'Driver training',end:_ago(8,1),duration:3*36e5},
+      {id:'s_p09',userId:'mbr_004',start:_ago(2,3),activity:'duty',note:'',end:_ago(2,.5),duration:2.5*36e5},
+      {id:'s_p10',userId:'mbr_014',start:_ago(3,6),activity:'duty',note:'',end:_ago(3,2),duration:4*36e5}
+    ];
+
+    state.currentUserId = 'rbvfc_admin_001';
+    state.currentSession = state.sessions[0];
+    state.adminPin = '0000';
+
+    state.emergencyResponses = [
+      {id:'er_01',userId:'mbr_002',date:_ds(2),incidentNum:'26-001842',type:'Structure Fire',address:'412 Furnace Branch Rd, Glen Burnie',apparatus:'E131',position:'Officer',duration:95,notes:'2-story residential, extended operations',enteredBy:'mbr_002',status:'logged',createdAt:_ago(2,3)},
+      {id:'er_02',userId:'mbr_004',date:_ds(2),incidentNum:'26-001842',type:'Structure Fire',address:'412 Furnace Branch Rd, Glen Burnie',apparatus:'E131',position:'Nozzle',duration:95,notes:'',enteredBy:'mbr_004',status:'logged',createdAt:_ago(2,3)},
+      {id:'er_03',userId:'mbr_008',date:_ds(2),incidentNum:'26-001842',type:'Structure Fire',address:'412 Furnace Branch Rd, Glen Burnie',apparatus:'Tk13',position:'Chauffeur',duration:95,notes:'',enteredBy:'mbr_008',status:'logged',createdAt:_ago(2,3)},
+      {id:'er_04',userId:'mbr_003',date:_ds(5),incidentNum:'26-001790',type:'MVA w/ Entrapment',address:'Ritchie Hwy & Jumpers Hole Rd',apparatus:'E132',position:'Officer',duration:45,notes:'2 vehicle, 1 entrapment extricated',enteredBy:'mbr_003',status:'logged',createdAt:_ago(5,2)},
+      {id:'er_05',userId:'mbr_010',date:_ds(5),incidentNum:'26-001790',type:'MVA w/ Entrapment',address:'Ritchie Hwy & Jumpers Hole Rd',apparatus:'A139',position:'Driver',duration:45,notes:'',enteredBy:'mbr_010',status:'logged',createdAt:_ago(5,2)},
+      {id:'er_06',userId:'rbvfc_admin_001',date:_ds(7),incidentNum:'26-001744',type:'Working Fire — Commercial',address:'7200 Ritchie Hwy, Glen Burnie',apparatus:'E131',position:'Chauffeur',duration:180,notes:'3rd alarm commercial. Mutual aid from Glen Burnie & Linthicum.',enteredBy:'rbvfc_admin_001',status:'logged',createdAt:_ago(7,4)},
+      {id:'er_07',userId:'mbr_006',date:_ds(7),incidentNum:'26-001744',type:'Working Fire — Commercial',address:'7200 Ritchie Hwy, Glen Burnie',apparatus:'Tk13',position:'Roof',duration:180,notes:'',enteredBy:'mbr_006',status:'logged',createdAt:_ago(7,4)},
+      {id:'er_08',userId:'mbr_014',date:_ds(7),incidentNum:'26-001744',type:'Working Fire — Commercial',address:'7200 Ritchie Hwy, Glen Burnie',apparatus:'Tk13',position:'Irons',duration:180,notes:'',enteredBy:'mbr_014',status:'logged',createdAt:_ago(7,4)},
+      {id:'er_09',userId:'mbr_011',date:_ds(10),incidentNum:'26-001701',type:'EMS — Cardiac Arrest',address:'100 Hospital Dr, Glen Burnie',apparatus:'Mu13',position:'EMT',duration:30,notes:'BLS assist, patient transported',enteredBy:'mbr_011',status:'logged',createdAt:_ago(10,1)},
+      {id:'er_10',userId:'mbr_016',date:_ds(12),incidentNum:'26-001655',type:'Brush Fire',address:'Marley Station Mall, Glen Burnie',apparatus:'FB13',position:'MVO',duration:25,notes:'Small brush fire at rear of property',enteredBy:'mbr_016',status:'logged',createdAt:_ago(12,1)},
+      {id:'er_11',userId:'mbr_005',date:_ds(1),incidentNum:'26-001901',type:'Water Rescue',address:'Marley Creek off Shore Drive',apparatus:'RB13',position:'Mate',duration:60,notes:'Capsized kayak, 2 persons recovered',enteredBy:'mbr_005',status:'pending',createdAt:_ago(1,2)},
+      {id:'er_12',userId:'mbr_012',date:_ds(1),incidentNum:'26-001901',type:'Water Rescue',address:'Marley Creek off Shore Drive',apparatus:'RB13',position:'MVO',duration:60,notes:'',enteredBy:'mbr_012',status:'pending',createdAt:_ago(1,2)},
+      {id:'er_13',userId:'mbr_007',date:_ds(0),incidentNum:'26-001915',type:'MVA — No Injury',address:'Crain Hwy & Routes 100',apparatus:'E132',position:'Nozzle',duration:20,notes:'Minor fender bender, stood by for fuel spill',enteredBy:'mbr_007',status:'pending',createdAt:_ago(0,3)},
+      {id:'er_14',userId:'mbr_009',date:_ds(0),incidentNum:'26-001915',type:'MVA — No Injury',address:'Crain Hwy & Routes 100',apparatus:'E132',position:'Control',duration:20,notes:'',enteredBy:'mbr_009',status:'pending',createdAt:_ago(0,3)},
+      {id:'er_15',userId:'mbr_018',date:_ds(0),incidentNum:'26-001918',type:'CO Alarm',address:'3305 Benson Ave, Brooklyn',apparatus:'E132',position:'Chauffeur',duration:35,notes:'Gas company notified, occupants evacuated',enteredBy:'mbr_018',status:'pending',createdAt:_ago(0,1)}
+    ];
+
+    state.trainingSubmissions = [
+      {id:'tr_01',userId:'mbr_002',type:'Driver/Operator',description:'EVOC Recertification',hours:8,date:_ds(14),status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(12,0),submittedAt:_ago(14,0),points:8},
+      {id:'tr_02',userId:'mbr_003',type:'EMS CE',description:'ALS Airway Management — AACC',hours:4,date:_ds(20),status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(18,0),submittedAt:_ago(20,0),points:4},
+      {id:'tr_03',userId:'mbr_004',type:'Live Fire',description:'SMBC Live Fire Evolution — Drill Tower',hours:6,date:_ds(30),status:'approved',approvedBy:'mbr_002',approvedAt:_ago(28,0),submittedAt:_ago(30,0),points:6},
+      {id:'tr_04',userId:'mbr_006',type:'Aerial Operations',description:'Tower Ladder Operations & Aerial Placement',hours:8,date:_ds(45),status:'approved',approvedBy:'mbr_002',approvedAt:_ago(43,0),submittedAt:_ago(45,0),points:8},
+      {id:'tr_05',userId:'mbr_008',type:'Technical Rescue',description:'Extrication Level I — AACO Tech Rescue',hours:16,date:_ds(60),status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(58,0),submittedAt:_ago(60,0),points:16},
+      {id:'tr_06',userId:'mbr_011',type:'Hazmat',description:'HazMat Awareness Annual Refresher',hours:4,date:_ds(18),status:'approved',approvedBy:'mbr_002',approvedAt:_ago(16,0),submittedAt:_ago(18,0),points:4},
+      {id:'tr_07',userId:'mbr_015',type:'ICS/NIMS',description:'ICS-300 Intermediate Incident Command',hours:16,date:_ds(55),status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(53,0),submittedAt:_ago(55,0),points:16},
+      {id:'tr_08',userId:'mbr_014',type:'Rope Rescue',description:'Rope Rescue Technician Level I',hours:24,date:_ds(75),status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(73,0),submittedAt:_ago(75,0),points:24},
+      {id:'tr_09',userId:'mbr_010',type:'EMS CE',description:'Pediatric ALS Update — AACO EMS',hours:4,date:_ds(22),status:'approved',approvedBy:'mbr_003',approvedAt:_ago(20,0),submittedAt:_ago(22,0),points:4},
+      {id:'tr_10',userId:'mbr_018',type:'Driver/Operator',description:'Initial Tiller Operator Certification',hours:32,date:_ds(90),status:'approved',approvedBy:'mbr_002',approvedAt:_ago(88,0),submittedAt:_ago(90,0),points:32},
+      {id:'tr_11',userId:'mbr_007',type:'Live Fire',description:'Flashover Recognition & Avoidance',hours:4,date:_ds(35),status:'approved',approvedBy:'mbr_002',approvedAt:_ago(33,0),submittedAt:_ago(35,0),points:4},
+      {id:'tr_12',userId:'mbr_005',type:'Company Drill',description:'Hose evolution & ground ladder deployment',hours:3,date:_ds(7),status:'approved',approvedBy:'mbr_003',approvedAt:_ago(5,0),submittedAt:_ago(7,0),points:3},
+      {id:'tr_13',userId:'mbr_009',type:'Firefighter I',description:'FF1 Practical Skills — Week 6',hours:8,date:_ds(3),status:'pending',submittedAt:_ago(3,0),points:8},
+      {id:'tr_14',userId:'mbr_013',type:'Student Ride-Along',description:'Observation ride-along Engine 131',hours:4,date:_ds(14),status:'pending',submittedAt:_ago(14,0),points:4},
+      {id:'tr_15',userId:'mbr_017',type:'Firefighter I',description:'FF1 Module 4 — Forcible Entry',hours:6,date:_ds(5),status:'pending',submittedAt:_ago(5,0),points:6},
+      {id:'tr_16',userId:'mbr_012',type:'Water Rescue',description:'Swift Water Rescue Awareness — AACO FD',hours:8,date:_ds(2),status:'pending',submittedAt:_ago(2,0),points:8},
+      {id:'tr_17',userId:'mbr_016',type:'EMS CE',description:'Mass Casualty Incident Triage Refresher',hours:4,date:_ds(4),status:'pending',submittedAt:_ago(4,0),points:4},
+      {id:'tr_18',userId:'mbr_004',type:'Aerial Operations',description:'Elevated Master Stream Operations',hours:4,date:_ds(1),status:'pending',submittedAt:_ago(1,0),points:4}
+    ];
+
+    // LOSAP activities
+    var _mPts = {'rbvfc_admin_001':220,'mbr_002':195,'mbr_003':178,'mbr_004':165,'mbr_005':142,'mbr_006':158,'mbr_007':134,'mbr_008':171,'mbr_009':89,'mbr_010':147,'mbr_011':162,'mbr_012':138,'mbr_013':45,'mbr_014':176,'mbr_015':188,'mbr_016':121,'mbr_017':72,'mbr_018':167};
+    var _aTypes = [{t:'Emergency Response',p:1},{t:'Duty',p:1},{t:'Drill',p:2},{t:'Meeting',p:2},{t:'Training',p:3},{t:'Community Event',p:2}];
+    state.losapActivities = [];
+    var _lid = 1;
+    Object.keys(_mPts).forEach(function(uid){
+      var target=_mPts[uid], running=0, d=180;
+      while(running<target && d>=0){
+        var a=_aTypes[Math.floor(Math.random()*_aTypes.length)], pts=a.p*(Math.random()>.7?2:1);
+        running+=pts;
+        state.losapActivities.push({id:'la_'+String(_lid++).padStart(4,'0'),userId:uid,type:a.t,date:_ds(d),points:pts,description:a.t,approvedBy:'rbvfc_admin_001',createdAt:_ago(d,2)});
+        d-=Math.floor(Math.random()*5+1);
+      }
+    });
+
+    // Staffing shifts
+    var _raw=[[_ds(0),'e131','Chauffeur','mbr_008'],[_ds(0),'e131','Officer','mbr_002'],[_ds(0),'e131','Nozzle','mbr_004'],[_ds(0),'e131','Backup','mbr_014'],[_ds(0),'Tk13','Chauffeur','mbr_018'],[_ds(0),'Tk13','Tiller','mbr_008'],[_ds(0),'Tk13','Roof','mbr_006'],[_ds(0),'a139','Driver','mbr_010'],[_ds(0),'a139','Technician','mbr_016'],[_ds(1),'e131','Chauffeur','rbvfc_admin_001'],[_ds(1),'e131','Officer','mbr_015'],[_ds(1),'e132','Chauffeur','mbr_018'],[_ds(1),'e132','Officer','mbr_003'],[_ds(1),'e132','Nozzle','mbr_007'],[_ds(1),'a139','Driver','mbr_010'],[_ds(1),'RB13','MVO','mbr_012'],[_ds(2),'e131','Chauffeur','mbr_008'],[_ds(2),'e131','Nozzle','mbr_004'],[_ds(2),'Tk13','Chauffeur','mbr_018'],[_ds(2),'Tk13','Irons','mbr_004'],[_ds(2),'Tk13','Roof','mbr_006'],[_ds(2),'a139','Technician','mbr_005'],[_ds(3),'e132','Chauffeur','mbr_018'],[_ds(3),'e132','Officer','mbr_011'],[_ds(3),'e131','Officer','mbr_002'],[_ds(3),'Mu13','EMT','mbr_010'],[_ds(3),'Mu13','EMT','mbr_016'],[_ds(4),'e131','Chauffeur','rbvfc_admin_001'],[_ds(4),'Tk13','Irons','mbr_014'],[_ds(4),'a139','Driver','mbr_010'],[_ds(5),'e131','Layout','mbr_006'],[_ds(5),'e132','Backup','mbr_005'],[_ds(5),'Tk13','Can','mbr_004'],[_ds(7),'e131','Chauffeur','mbr_008'],[_ds(7),'e131','Officer','mbr_015'],[_ds(7),'e131','Nozzle','mbr_014'],[_ds(7),'Tk13','Chauffeur','mbr_018'],[_ds(7),'Tk13','Tiller','mbr_008'],[_ds(7),'a139','Driver','mbr_010'],[_ds(8),'e132','Chauffeur','mbr_003'],[_ds(8),'e132','Nozzle','mbr_007'],[_ds(8),'Mu13','EMT','mbr_016'],[_ds(9),'e131','Chauffeur','rbvfc_admin_001'],[_ds(9),'Tk13','Roof','mbr_006'],[_ds(9),'a139','Technician','mbr_005'],[_ds(10),'e131','Officer','mbr_002'],[_ds(10),'Tk13','Officer','mbr_011'],[_ds(10),'e132','Officer','mbr_003']];
+    state.staffingShifts = {};
+    _raw.forEach(function(r){ var k=r[0]+'_'+r[1]; if(!state.staffingShifts[k]) state.staffingShifts[k]={date:r[0],unit:r[1],assignments:[]}; state.staffingShifts[k].assignments.push({userId:r[3],position:r[2],signedUpAt:_ago(Math.floor(Math.random()*10),0)}); });
+
+    state.specialEvents = [
+      {id:'se_01',title:'Spring Equipment Fundraiser',date:_ds(-14),endDate:_ds(-13),startTime:'09:00',location:'Station 13 — 200 Crain Hwy',description:'Annual equipment fundraiser and open house.',totalNeeded:12,signups:[{memberId:'rbvfc_admin_001',signedUpAt:_ago(30,0),clockedIn:true,clockedInAt:_ago(14,1)},{memberId:'mbr_002',signedUpAt:_ago(28,0),clockedIn:true,clockedInAt:_ago(14,1)},{memberId:'mbr_003',signedUpAt:_ago(25,0),clockedIn:true,clockedInAt:_ago(14,2)},{memberId:'mbr_005',signedUpAt:_ago(20,0),clockedIn:true,clockedInAt:_ago(14,1)},{memberId:'mbr_007',signedUpAt:_ago(15,0),clockedIn:true,clockedInAt:_ago(14,3)},{memberId:'mbr_012',signedUpAt:_ago(10,0),clockedIn:false}]},
+      {id:'se_02',title:'Community Safety Day — Marley Elementary',date:_ds(-7),endDate:_ds(-7),startTime:'10:00',location:'Marley Elementary School',description:'Fire safety demos and truck tours for students.',totalNeeded:6,signups:[{memberId:'mbr_003',signedUpAt:_ago(21,0),clockedIn:true,clockedInAt:_ago(7,1)},{memberId:'mbr_009',signedUpAt:_ago(18,0),clockedIn:true,clockedInAt:_ago(7,1)},{memberId:'mbr_013',signedUpAt:_ago(14,0),clockedIn:true,clockedInAt:_ago(7,1)}]},
+      {id:'se_03',title:'Monthly Company Meeting',date:_ds(7),endDate:_ds(7),startTime:'19:00',location:'Station 13 — Bay Floor',description:'Monthly business meeting. Attendance required for LOSAP credit.',totalNeeded:0,signups:[{memberId:'rbvfc_admin_001',signedUpAt:_ago(5,0),clockedIn:false},{memberId:'mbr_002',signedUpAt:_ago(5,0),clockedIn:false},{memberId:'mbr_003',signedUpAt:_ago(4,0),clockedIn:false},{memberId:'mbr_004',signedUpAt:_ago(4,0),clockedIn:false},{memberId:'mbr_006',signedUpAt:_ago(3,0),clockedIn:false},{memberId:'mbr_008',signedUpAt:_ago(3,0),clockedIn:false},{memberId:'mbr_011',signedUpAt:_ago(2,0),clockedIn:false},{memberId:'mbr_014',signedUpAt:_ago(2,0),clockedIn:false},{memberId:'mbr_015',signedUpAt:_ago(1,0),clockedIn:false}]},
+      {id:'se_04',title:'Pancake Breakfast Fundraiser',date:_ds(21),endDate:_ds(21),startTime:'07:00',location:'Station 13 Bay Floor',description:'Annual pancake breakfast. Proceeds benefit apparatus fund.',totalNeeded:10,signups:[{memberId:'rbvfc_admin_001',signedUpAt:_ago(3,0),clockedIn:false},{memberId:'mbr_005',signedUpAt:_ago(3,0),clockedIn:false},{memberId:'mbr_007',signedUpAt:_ago(2,0),clockedIn:false},{memberId:'mbr_009',signedUpAt:_ago(1,0),clockedIn:false}]}
+    ];
+
+    state.staffingEnabled = {e131:true,e132:true,Tk13:true,a139:true,Mu13:true,U13:true,Br13:true,RB13:true,FB13:true,CH13:true};
+    state.companyName = 'RBVFC Station 13';
     save();
   }
 
