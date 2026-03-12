@@ -5942,7 +5942,16 @@ function renderCompanyLOSAP() {
   // 1. All members with an open clock session (end===null)
   (state.sessions||[]).filter(function(s){ return !s.end; }).forEach(function(s){
     if (!s.userId) return;
-    if (!clockedIn[s.userId]) {
+    // Check if this member also has a staffing assignment today — if so, show unit+position
+    var staffShift = (state.staffingShifts||[]).find(function(sh){
+      return sh.date === todayStr && sh.memberId === s.userId && sh.unitId;
+    });
+    if (staffShift) {
+      clockedIn[s.userId] = {
+        activity: (staffShift.unitId||'').toUpperCase(),
+        note: staffShift.position || ''
+      };
+    } else {
       clockedIn[s.userId] = {
         activity: activityLabels[s.activity] || s.activity || 'On Duty',
         note: s.note || ''
@@ -5950,9 +5959,9 @@ function renderCompanyLOSAP() {
     }
   });
 
-  // 2. Staffing shifts for today that are clocked in — these take priority (show unit + position)
+  // 2. Staffing shifts explicitly clocked in (via staffing Clock In button) also show — covers cases with no open session
   (state.staffingShifts||[]).filter(function(s){
-    return s.date === todayStr && s.clockedIn && s.memberId;
+    return s.date === todayStr && s.clockedIn && s.memberId && !clockedIn[s.memberId];
   }).forEach(function(s){
     clockedIn[s.memberId] = {
       activity: (s.unitId||'').toUpperCase(),
