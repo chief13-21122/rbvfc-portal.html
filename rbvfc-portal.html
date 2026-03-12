@@ -485,6 +485,14 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 .um-cb-label input[type=checkbox]:focus {
   outline:2px solid #C8102E;outline-offset:1px;
 }
+/* TV Board — public view scrollable columns */
+#tvBoard [style*="overflow-y:auto"]::-webkit-scrollbar { display:none; }
+#tvBoard [style*="overflow-y:auto"] { scrollbar-width:none; -ms-overflow-style:none; }
+@media screen {
+  body.public-view { overflow:hidden; margin:0; padding:0; }
+  body.public-view #app { height:100vh; overflow:hidden; }
+  body.public-view #scrollArea { overflow:hidden; height:100%; padding:0 !important; }
+}
 </style>
 <script>
 
@@ -6710,6 +6718,7 @@ function checkPublicViewMode() {
                  (fullHref.indexOf('%3Fview%3Dpublic') >= 0);
   if (!hasParam) return false;
   document.getElementById('loginOverlay').style.display = 'none';
+  document.body.classList.add('public-view');
   var app = document.getElementById('app');
   app.style.display = 'flex';
   app.style.flexDirection = 'column';
@@ -6722,10 +6731,14 @@ function checkPublicViewMode() {
 function renderPublicView() {
   var sa = document.getElementById('scrollArea');
   if (!sa) return;
-  var yr = new Date().getFullYear();
+  var yr  = new Date().getFullYear();
   var now = new Date();
-  var todayStr = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  var pad = function(n){ return String(n).padStart(2,'0'); };
+  var todayStr    = now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
+  var tomorrowObj = new Date(now); tomorrowObj.setDate(now.getDate()+1);
+  var tomorrowStr = tomorrowObj.getFullYear()+'-'+pad(tomorrowObj.getMonth()+1)+'-'+pad(tomorrowObj.getDate());
 
+  // LOSAP totals
   var totals = {};
   (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).forEach(function(m){
     totals[m.id] = { member:m, pts:0, responses:0 };
@@ -6738,104 +6751,184 @@ function renderPublicView() {
   });
   var sorted = Object.values(totals).sort(function(a,b){ return b.pts-a.pts; });
 
-  // Clocked-in members (real-time sessions + staffing shifts)
-  var clockedInIds = [];
-  if (state.currentSession && state.currentUserId) clockedInIds.push(state.currentUserId);
-  (state.staffingShifts||[]).filter(function(s){ return s.date===todayStr && s.clockedIn; })
-    .forEach(function(s){ if (clockedInIds.indexOf(s.memberId)<0) clockedInIds.push(s.memberId); });
-  // Scheduled today
-  var scheduled = (state.staffingShifts||[]).filter(function(s){ return s.date===todayStr && s.status==='assigned'; });
+  // Open sessions (clocked in via clock tab)
+  var openSessions = {};
+  (state.sessions||[]).filter(function(s){ return !s.end && s.userId; }).forEach(function(s){
+    openSessions[s.userId] = true;
+  });
+
   var logoSrc = getLogoData();
 
-  var html = '<div style="padding:16px;max-width:1400px;margin:0 auto;">'
-    + '<div style="text-align:center;margin-bottom:20px;">'
-    + (logoSrc ? '<img src="'+logoSrc+'" style="max-height:80px;max-width:160px;object-fit:contain;margin-bottom:10px;">' : '')
-    + '<div style="font-family:Barlow Condensed,sans-serif;font-size:24px;font-weight:900;color:#C8102E;letter-spacing:3px;text-transform:uppercase;">RBVFC Portal</div>'
-    + '<div style="font-size:12px;color:#666;letter-spacing:2px;margin-top:2px;">'+now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})+'</div>'
+  // Header
+  var html = '<div id="tvBoard" style="display:flex;flex-direction:column;height:100vh;overflow:hidden;background:#0A0A0A;font-family:Barlow Condensed,sans-serif;box-sizing:border-box;">'
+
+    // ── Top bar ──
+    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 20px;background:#111;border-bottom:2px solid #C8102E;flex-shrink:0;">'
+    +   '<div style="display:flex;align-items:center;gap:14px;">'
+    +     (logoSrc ? '<img src="'+logoSrc+'" style="height:44px;width:auto;object-fit:contain;">' : '')
+    +     '<div>'
+    +       '<div style="font-size:22px;font-weight:900;color:#C8102E;letter-spacing:3px;text-transform:uppercase;line-height:1;">RIVIERA BEACH VFC</div>'
+    +       '<div style="font-size:11px;color:#666;letter-spacing:2px;text-transform:uppercase;">Member Portal — Live Board</div>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div style="text-align:right;">'
+    +     '<div id="tvClock" style="font-family:Bebas Neue,sans-serif;font-size:36px;color:#F0F0F0;line-height:1;letter-spacing:2px;"></div>'
+    +     '<div style="font-size:12px;color:#666;letter-spacing:1px;">'+now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})+'</div>'
+    +   '</div>'
     + '</div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;margin-top:16px;">'
-    + '<div style="background:#1A1A1A;border:1px solid #2A2A2A;border-radius:12px;padding:16px;">'
-    + '<div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:700;color:#F0F0F0;letter-spacing:2px;text-transform:uppercase;margin-bottom:14px;">TODAY\'S ON DUTY</div>'
-    + (clockedInIds.length === 0
-      ? '<div style="color:#555;font-size:13px;text-align:center;padding:24px;">No members currently on duty.</div>'
-      : clockedInIds.map(function(mid) {
-          var m = (state.roster||[]).find(function(x){ return x.id===mid; });
-          if (!m) return '';
-          var sh = (state.staffingShifts||[]).find(function(s){ return s.memberId===mid&&s.date===todayStr&&s.clockedIn; });
-          var pos = sh ? (sh.position||'') : '';
-          return '<div style="background:#1E2E1E;border:1px solid #27AE60;border-radius:8px;padding:8px 14px;margin-bottom:6px;">'
-            + '<div style="font-weight:700;font-size:14px;color:#F0F0F0;">\u25CF '+m.last+', '+m.first+'</div>'
-            + (pos ? '<div style="font-size:11px;color:#27AE60;margin-top:2px;">'+pos+'</div>' : '')
+
+    // ── Column grid ──
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 280px;gap:0;flex:1;overflow:hidden;">'
+
+    // ── Col 1: Today Staffing ──
+    + buildPublicStaffingCol(todayStr, now, openSessions, 'TODAY\'S STAFFING', '#C8102E', true)
+
+    // ── Col 2: Tomorrow Staffing ──
+    + buildPublicStaffingCol(tomorrowStr, tomorrowObj, openSessions, 'TOMORROW\'S STAFFING', '#F5A623', false)
+
+    // ── Col 3: LOSAP Leaderboard ──
+    + '<div style="display:flex;flex-direction:column;border-right:1px solid #1E1E1E;overflow:hidden;">'
+    +   '<div style="padding:10px 14px;background:#111;border-bottom:1px solid #1E1E1E;flex-shrink:0;">'
+    +     '<span style="font-size:14px;font-weight:700;color:#F0F0F0;letter-spacing:2px;text-transform:uppercase;">'+yr+' LOSAP LEADERBOARD</span>'
+    +   '</div>'
+    +   '<div style="flex:1;overflow-y:auto;padding:8px 0;">'
+    +   sorted.map(function(row, i){
+          var m = row.member;
+          var q = row.pts >= 50;
+          var ci = openSessions[m.id];
+          var medals = ['','🥇','🥈','🥉'];
+          var isTop  = i < 3;
+          var rowBgs = ['','rgba(255,215,0,0.06)','rgba(192,192,192,0.06)','rgba(205,127,50,0.06)'];
+          return '<div style="display:flex;align-items:center;gap:8px;padding:5px 14px;'+(isTop?'background:'+rowBgs[i+1]+';':i%2?'background:rgba(255,255,255,0.015);':'')+(ci?'border-left:2px solid #27AE60;':'border-left:2px solid transparent;')+'">'
+            + '<div style="width:24px;text-align:center;font-size:'+(isTop?'16':'11')+'px;color:#555;">'+(isTop?medals[i+1]:i+1)+'</div>'
+            + '<div style="flex:1;min-width:0;">'
+            +   '<div style="font-size:13px;font-weight:700;color:#F0F0F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+m.last+', '+m.first+'</div>'
+            +   (ci ? '<div style="font-size:9px;color:#27AE60;letter-spacing:1px;">ON DUTY</div>' : '')
+            + '</div>'
+            + '<div style="font-family:Bebas Neue,sans-serif;font-size:22px;color:'+(q?'#27AE60':'#555')+';line-height:1;min-width:36px;text-align:right;">'+row.pts+'</div>'
+            + '<div style="width:14px;text-align:center;">'+(q?'<span style="color:#27AE60;font-size:10px;">✓</span>':'')+'</div>'
             + '</div>';
-        }).join(''))
+        }).join('')
+    +   '</div>'
     + '</div>'
-    + '<div style="background:#1A1A1A;border:1px solid #2A2A2A;border-radius:12px;padding:16px;">'
-    + '<div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:700;color:#F0F0F0;letter-spacing:2px;text-transform:uppercase;margin-bottom:14px;">'+yr+' LOSAP LEADERBOARD</div>'
-    + '<table style="width:100%;border-collapse:collapse;font-size:13px;">'
-    + '<thead><tr style="border-bottom:1px solid #333;">'
-    + '<th style="padding:6px 8px;text-align:left;color:#555;">#</th>'
-    + '<th style="padding:6px 8px;text-align:left;color:#555;">Member</th>'
-    + '<th style="padding:6px 8px;text-align:right;color:#27AE60;font-family:Bebas Neue,sans-serif;font-size:14px;">Pts</th>'
-    + '<th style="padding:6px 8px;text-align:right;color:#555;">Calls</th>'
-    + '<th style="padding:6px 8px;text-align:center;color:#555;">Status</th>'
-    + '</tr></thead><tbody>'
-    + sorted.map(function(row, i) {
-        var q = row.pts >= 50;
-        return '<tr style="border-bottom:1px solid #1E1E1E;">'
-          + '<td style="padding:7px 8px;color:#555;font-size:12px;">'+(i+1)+'</td>'
-          + '<td style="padding:7px 8px;font-weight:600;color:#F0F0F0;">'+row.member.last+', '+row.member.first+'</td>'
-          + '<td style="padding:7px 8px;text-align:right;font-family:Bebas Neue,sans-serif;font-size:20px;font-weight:700;color:'+(q?'#27AE60':'#F0F0F0')+';">'+row.pts+'</td>'
-          + '<td style="padding:7px 8px;text-align:right;color:#AAA;">'+row.responses+'</td>'
-          + '<td style="padding:7px 8px;text-align:center;">'+(q?'<span style="color:#27AE60;font-weight:700;">QUALIFIED</span>':'<span style="color:#555;">—</span>')+'</td>'
-          + '</tr>';
-      }).join('')
-    + '</tbody></table></div>'
-    + '</div>'
-    + '</div>'
-    + buildPublicSpecialEvents(todayStr)
-    + '</div>';
+
+    // ── Col 4: Special Events ──
+    + buildPublicEventsCol(todayStr, tomorrowStr)
+
+    + '</div>' // end grid
+    + '</div>'; // end tvBoard
 
   sa.innerHTML = html;
+
+  // Live clock
+  function tickClock() {
+    var el = document.getElementById('tvClock');
+    if (!el) return;
+    var t = new Date();
+    var h = t.getHours(), m = t.getMinutes(), s = t.getSeconds();
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    el.textContent = h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + ' ' + ampm;
+  }
+  tickClock();
+  if (window._tvClockInterval) clearInterval(window._tvClockInterval);
+  window._tvClockInterval = setInterval(tickClock, 1000);
 }
 
-function buildPublicSpecialEvents(todayStr) {
+function buildPublicStaffingCol(dateStr, dateObj, openSessions, title, accentColor, isToday) {
+  var dayLabel = dateObj.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'});
+  var activeUnits = (typeof UNITS !== 'undefined' ? UNITS : []).filter(function(u){
+    return !(state.staffingEnabled && state.staffingEnabled[u] === false);
+  });
+
+  // Build unit → members map for this date
+  var unitMap = {};
+  activeUnits.forEach(function(u){ unitMap[u] = []; });
+  (state.staffingShifts||[]).filter(function(s){ return s.date === dateStr && s.memberId; }).forEach(function(s){
+    if (!unitMap[s.unitId]) unitMap[s.unitId] = [];
+    unitMap[s.unitId].push(s);
+  });
+
+  // Only show units that have at least one assignment OR are always-shown
+  var usedUnits = activeUnits.filter(function(u){ return unitMap[u] && unitMap[u].length > 0; });
+
+  var unitsHtml = '';
+  if (usedUnits.length === 0) {
+    unitsHtml = '<div style="color:#444;font-size:12px;text-align:center;padding:24px 14px;">No staffing scheduled.</div>';
+  } else {
+    unitsHtml = usedUnits.map(function(unitId){
+      var shifts = unitMap[unitId] || [];
+      var unitLabel = (typeof UNIT_LABELS !== 'undefined' && UNIT_LABELS[unitId]) ? UNIT_LABELS[unitId] : unitId.toUpperCase();
+      var memberRows = shifts.sort(function(a,b){ return (a.positionIndex||0)-(b.positionIndex||0); }).map(function(sh){
+        var m = (state.roster||[]).find(function(x){ return x.id === sh.memberId; });
+        var name = m ? m.last+', '+m.first : sh.memberId;
+        var isClockedIn = sh.clockedIn || openSessions[sh.memberId];
+        return '<div style="display:flex;align-items:center;gap:6px;padding:3px 0;">'
+          + '<div style="width:6px;height:6px;border-radius:50%;background:'+(isClockedIn?'#27AE60':'#333')+';flex-shrink:0;'+(isClockedIn?'box-shadow:0 0 4px #27AE60;':'')+'"></div>'
+          + '<div style="flex:1;min-width:0;">'
+          +   '<div style="font-size:12px;font-weight:'+(isClockedIn?'700':'500')+';color:'+(isClockedIn?'#F0F0F0':'#888')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+name+'</div>'
+          +   (sh.position ? '<div style="font-size:10px;color:#555;letter-spacing:.5px;">'+sh.position+'</div>' : '')
+          + '</div>'
+          + '</div>';
+      }).join('');
+      return '<div style="margin-bottom:10px;">'
+        + '<div style="font-size:11px;font-weight:700;color:'+accentColor+';letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;border-bottom:1px solid #1E1E1E;padding-bottom:3px;">'+unitLabel+'</div>'
+        + memberRows
+        + '</div>';
+    }).join('');
+  }
+
+  return '<div style="display:flex;flex-direction:column;border-right:1px solid #1E1E1E;overflow:hidden;">'
+    + '<div style="padding:10px 14px;background:#111;border-bottom:1px solid '+accentColor+';flex-shrink:0;display:flex;align-items:baseline;gap:8px;">'
+    +   '<span style="font-size:14px;font-weight:700;color:#F0F0F0;letter-spacing:2px;text-transform:uppercase;">'+title+'</span>'
+    +   '<span style="font-size:11px;color:#555;">'+dayLabel+'</span>'
+    + '</div>'
+    + '<div style="flex:1;overflow-y:auto;padding:10px 14px;">'
+    + unitsHtml
+    + '</div>'
+    + '</div>';
+}
+
+function buildPublicEventsCol(todayStr, tomorrowStr) {
   var events = (state.specialEvents||[]).filter(function(ev){ return ev.date >= todayStr; })
-    .sort(function(a,b){ return a.date.localeCompare(b.date) || (a.time||'').localeCompare(b.time||''); });
-  if (!events.length) return '';
+    .sort(function(a,b){ return a.date.localeCompare(b.date)||(a.time||'').localeCompare(b.time||''); });
 
-  var rows = events.map(function(ev) {
-    var dateObj = new Date(ev.date + 'T12:00:00');
-    var isToday = ev.date === todayStr;
-    var signups = (ev.signups||[]).length;
-    var timeFmt = '';
-    if (ev.time) {
-      var parts = ev.time.split(':');
-      var h = parseInt(parts[0]), m = parts[1]||'00';
-      timeFmt = (h>12?h-12:(h||12))+':'+m+' '+(h>=12?'PM':'AM');
-    }
-    var dateDay = dateObj.getDate();
-    var dateMon = dateObj.toLocaleDateString('en-US',{month:'short'});
-    return '<div style="background:#111;border:1px solid '+(isToday?'#C8102E':'#2A2A2A')+';border-radius:10px;padding:14px 18px;display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:10px;">'
-      + '<div style="min-width:56px;text-align:center;background:'+(isToday?'rgba(200,16,46,0.12)':'#1A1A1A')+';border:1px solid '+(isToday?'#C8102E':'#333')+';border-radius:8px;padding:8px 6px;">'
-      + '<div style="font-family:Bebas Neue,sans-serif;font-size:28px;line-height:1;color:'+(isToday?'#C8102E':'#F0F0F0')+';">'+dateDay+'</div>'
-      + '<div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;">'+dateMon+'</div>'
-      + '</div>'
-      + '<div style="flex:1;min-width:140px;">'
-      + (isToday ? '<div style="font-size:10px;font-weight:700;color:#C8102E;letter-spacing:2px;text-transform:uppercase;margin-bottom:3px;">TODAY</div>' : '')
-      + '<div style="font-size:15px;font-weight:700;color:#F0F0F0;margin-bottom:4px;">'+ev.title+'</div>'
-      + ((ev.location||timeFmt) ? '<div style="font-size:12px;color:#888;">'+(timeFmt?'\u23F0 '+timeFmt:'')+(timeFmt&&ev.location?' &nbsp;&middot;&nbsp; ':'')+(ev.location?'\uD83D\uDCCD '+ev.location:'')+'</div>' : '')
-      + (ev.desc ? '<div style="font-size:12px;color:#666;margin-top:4px;">'+ev.desc+'</div>' : '')
-      + '</div>'
-      + '<div style="text-align:center;min-width:52px;">'
-      + '<div style="font-family:Bebas Neue,sans-serif;font-size:26px;color:#27AE60;line-height:1;">'+signups+'</div>'
-      + '<div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;">Signed Up</div>'
-      + '</div>'
-      + '</div>';
-  }).join('');
+  var evHtml = '';
+  if (!events.length) {
+    evHtml = '<div style="color:#444;font-size:12px;text-align:center;padding:24px 14px;">No upcoming events.</div>';
+  } else {
+    evHtml = events.map(function(ev){
+      var dateObj = new Date(ev.date+'T12:00:00');
+      var isToday    = ev.date === todayStr;
+      var isTomorrow = ev.date === tomorrowStr;
+      var tag = isToday ? 'TODAY' : isTomorrow ? 'TOMORROW' : dateObj.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      var tagColor = isToday ? '#C8102E' : isTomorrow ? '#F5A623' : '#555';
+      var timeFmt = '';
+      if (ev.time) {
+        var parts = ev.time.split(':'), h = parseInt(parts[0]), m = parts[1]||'00';
+        timeFmt = (h>12?h-12:(h||12))+':'+m+' '+(h>=12?'PM':'AM');
+      }
+      var signups = (ev.signups||[]).length;
+      return '<div style="padding:10px 0;border-bottom:1px solid #1A1A1A;">'
+        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">'
+        +   '<span style="font-size:9px;font-weight:700;color:'+tagColor+';letter-spacing:2px;background:rgba(200,16,46,0.08);border:1px solid '+tagColor+';border-radius:4px;padding:1px 5px;">'+tag+'</span>'
+        +   (timeFmt ? '<span style="font-size:10px;color:#666;">\u23F0 '+timeFmt+'</span>' : '')
+        + '</div>'
+        + '<div style="font-size:13px;font-weight:700;color:#F0F0F0;line-height:1.2;margin-bottom:2px;">'+ev.title+'</div>'
+        + (ev.location ? '<div style="font-size:10px;color:#666;">\uD83D\uDCCD '+ev.location+'</div>' : '')
+        + (ev.desc ? '<div style="font-size:10px;color:#555;margin-top:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+ev.desc+'</div>' : '')
+        + '<div style="font-size:10px;color:#27AE60;margin-top:4px;">\u2713 '+signups+' signed up</div>'
+        + '</div>';
+    }).join('');
+  }
 
-  return '<div style="margin-top:20px;background:#1A1A1A;border:1px solid #2A2A2A;border-radius:12px;padding:16px;">'
-    + '<div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:700;color:#F0F0F0;letter-spacing:2px;text-transform:uppercase;margin-bottom:14px;">\uD83D\uDCC5 UPCOMING SPECIAL EVENTS</div>'
-    + rows
+  return '<div style="display:flex;flex-direction:column;overflow:hidden;">'
+    + '<div style="padding:10px 14px;background:#111;border-bottom:1px solid #1E1E1E;flex-shrink:0;">'
+    +   '<span style="font-size:14px;font-weight:700;color:#F0F0F0;letter-spacing:2px;text-transform:uppercase;">\uD83D\uDCC5 Events</span>'
+    + '</div>'
+    + '<div style="flex:1;overflow-y:auto;padding:10px 14px;">'
+    + evHtml
+    + '</div>'
     + '</div>';
 }
 
