@@ -5274,7 +5274,10 @@ function boot() {
   } catch(e) {}
 
   // ── DEMO SEED — loads full demo on any fresh browser / device ──
-  if (!state.roster || state.roster.length === 0) {
+  // Check for Caruso specifically — handles stale/wiped localStorage too
+  var _adminExists = state.roster && state.roster.some(function(m){ return m.id === 'rbvfc_admin_001'; });
+  if (!state.roster || state.roster.length === 0 || !_adminExists) {
+    state.roster = []; // clear any partial/corrupted roster before re-seeding
     var _N = Date.now();
     var _ago = function(d,h){ return new Date(_N - d*864e5 - (h||0)*36e5).toISOString(); };
     var _ds  = function(d){   return new Date(_N - d*864e5).toISOString().split('T')[0]; };
@@ -5473,10 +5476,11 @@ function boot() {
   try { checkYearEndBanner(); } catch(e){}
 
   // Auto-login if user was previously logged in
+  // Wrapped in setTimeout so DOM is fully ready before launchApp fires
   if (state.currentUserId) {
     var savedMember = (state.roster||[]).find(function(m){ return m.id===state.currentUserId && m.active!==false; });
     if (savedMember) {
-      launchApp(savedMember);
+      setTimeout(function(){ launchApp(savedMember); }, 50);
       return;
     } else {
       // Invalid saved user - clear and show login
@@ -5560,6 +5564,21 @@ function loadDemoData() {
   renderLoginMemberList();
   document.getElementById('setupPanel').style.display = 'none';
   showToast('🎭 Demo data loaded! PIN: admin=1234, members=5678');
+}
+
+// Dev shortcut — immediately logs in as Caruso (admin) without needing the roster populated
+function devLogin() {
+  var admin = (state.roster||[]).find(function(m){ return m.id === 'rbvfc_admin_001'; });
+  if (!admin) {
+    // Roster somehow still empty — force a full reload which will re-seed
+    localStorage.removeItem('rbvfc');
+    showToast('⚠️ Cleared stale data — reloading…');
+    setTimeout(function(){ location.reload(); }, 800);
+    return;
+  }
+  state.currentUserId = admin.id;
+  save();
+  launchApp(admin);
 }
 
 function doLogin() {
@@ -8683,8 +8702,11 @@ function applyBulkEdit() {
       <input type="password" id="loginPin" placeholder="Enter PIN" maxlength="8" inputmode="numeric"
         style="width:100%;font-size:15px;letter-spacing:4px;" onkeydown="if(event.key==='Enter')doLogin()">
     </div>
-    <button class="btn btn-primary btn-full" style="font-size:16px;padding:14px;">Sign In</button>
+    <button class="btn btn-primary btn-full" style="font-size:16px;padding:14px;" onclick="doLogin()">Sign In</button>
     <div id="loginError" style="display:none;text-align:center;color:#E74C3C;font-size:13px;margin-top:12px;"></div>
+
+    <!-- Dev Login — quick access during development -->
+    <button id="devLoginBtn" onclick="devLogin()" style="width:100%;margin-top:10px;padding:10px;background:#1A1A1A;border:1px dashed #333;border-radius:8px;color:#F5A623;font-size:12px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">🔓 Dev Login — Caruso / Admin (PIN 0000)</button>
 
     <!-- First-time setup -->
     <div id="firstTimeSetup" style="margin-top:32px;padding-top:20px;border-top:1px solid #1E1E1E;">
