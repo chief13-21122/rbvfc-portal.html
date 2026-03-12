@@ -759,6 +759,9 @@ function updateClockUI(in_) {
   var dot    = document.getElementById('headerDot');
   var pill   = document.getElementById('clockStatusPill');
   var nameEl = document.getElementById('clockMemberName');
+  var staffBadge = document.getElementById('clockStaffingBadge');
+  var staffUnit  = document.getElementById('clockStaffingUnit');
+  var staffPos   = document.getElementById('clockStaffingPos');
   // Buttons
   if (inBtn)  inBtn.style.display  = in_ ? 'none' : 'flex';
   if (outBtn) outBtn.style.display = in_ ? 'flex' : 'none';
@@ -771,6 +774,24 @@ function updateClockUI(in_) {
     if (in_) {
       var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
       nameEl.textContent = me ? (me.last.toUpperCase() + ' ' + me.first.toUpperCase()) : '';
+    }
+  }
+  // Staffing assignment badge
+  if (staffBadge) {
+    if (in_) {
+      var todayStr = new Date().toISOString().slice(0,10);
+      var myShift = (state.staffingShifts||[]).find(function(s){
+        return s.date === todayStr && s.memberId === state.currentUserId && s.unitId;
+      });
+      if (myShift) {
+        staffBadge.style.display = 'block';
+        if (staffUnit) staffUnit.textContent = (typeof UNIT_LABELS !== 'undefined' && UNIT_LABELS[myShift.unitId]) ? UNIT_LABELS[myShift.unitId] : (myShift.unitId||'').toUpperCase();
+        if (staffPos)  staffPos.textContent  = myShift.position || '';
+      } else {
+        staffBadge.style.display = 'none';
+      }
+    } else {
+      staffBadge.style.display = 'none';
     }
   }
   // Header badge
@@ -7674,6 +7695,13 @@ function applyBulkEdit() {
           <!-- Member name — shown when clocked in -->
           <div id="clockMemberName" style="display:none;font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:3px;color:#2ECC71;margin-top:10px;text-shadow:0 0 20px rgba(46,204,113,0.4);"></div>
 
+          <!-- Staffing assignment badge — shown when on duty via staffing -->
+          <div id="clockStaffingBadge" style="display:none;margin:8px auto 0;width:fit-content;background:rgba(200,16,46,0.1);border:1px solid rgba(200,16,46,0.4);border-radius:8px;padding:6px 16px;text-align:center;">
+            <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#C8102E;margin-bottom:2px;">STAFFING ASSIGNMENT</div>
+            <div id="clockStaffingUnit" style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px;color:#F0F0F0;line-height:1;"></div>
+            <div id="clockStaffingPos" style="font-size:12px;color:#888;letter-spacing:1px;margin-top:1px;"></div>
+          </div>
+
           <!-- Elapsed timer — shown when clocked in -->
           <div id="clockTimer" style="display:none;margin-top:6px;">
             <div id="clockTimerDisplay" style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:600;letter-spacing:3px;color:#555;text-transform:uppercase;"></div>
@@ -7773,7 +7801,36 @@ function applyBulkEdit() {
     <!-- ══════════════ LOSAP TAB ══════════════ -->
     <div id="section-losap" class="section">
 
-      <!-- LOSAP qualification banner -->
+      <!-- WHAT IS LOSAP collapsible -->
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div class="card-header" onclick="toggleLosapInfo()" style="cursor:pointer;user-select:none;padding:14px 16px;">
+          <div class="icon">❓</div>
+          <h2>What is LOSAP?</h2>
+          <span id="losapInfoChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transform:rotate(-90deg);transition:transform .2s;">▼</span>
+        </div>
+        <div id="losapInfoBody" style="display:none;padding:0 16px 16px;">
+          <p style="font-size:13px;color:#AAA;line-height:1.6;margin-bottom:10px;">
+            <strong style="color:#F0F0F0;">LOSAP</strong> (Length of Service Award Program) is a Maryland state benefit program that rewards active volunteer fire and EMS members for their service to the community.
+          </p>
+          <p style="font-size:13px;color:#AAA;line-height:1.6;margin-bottom:10px;">
+            Members who earn <strong style="color:#F5A623;">50 or more points</strong> in a calendar year qualify for an annual benefit payment deposited into a tax-deferred retirement account.
+          </p>
+          <div style="background:#111;border:1px solid #222;border-radius:8px;padding:12px;margin-bottom:10px;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#C8102E;margin-bottom:8px;">How Points Are Earned</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;">
+              <div style="font-size:12px;color:#888;">🚒 Emergency Response</div><div style="font-size:12px;color:#F0F0F0;text-align:right;">1 pt each</div>
+              <div style="font-size:12px;color:#888;">🏛 Company Meeting</div><div style="font-size:12px;color:#F0F0F0;text-align:right;">1 pt (max 10)</div>
+              <div style="font-size:12px;color:#888;">📋 Board Meeting</div><div style="font-size:12px;color:#F0F0F0;text-align:right;">1 pt (max 10)</div>
+              <div style="font-size:12px;color:#888;">📚 Training / Drill</div><div style="font-size:12px;color:#F0F0F0;text-align:right;">2 pts/hr (max 20)</div>
+              <div style="font-size:12px;color:#888;">🕐 Station Duty</div><div style="font-size:12px;color:#F0F0F0;text-align:right;">3 pts/hr (max 25)</div>
+              <div style="font-size:12px;color:#888;">🏅 Elected Position</div><div style="font-size:12px;color:#F0F0F0;text-align:right;">25 pts (max 25)</div>
+            </div>
+          </div>
+          <p style="font-size:12px;color:#666;line-height:1.5;margin:0;">
+            Questions? Contact your LOSAP Committee Chair or visit <a href="https://mfri.org" target="_blank" style="color:#C8102E;">mfri.org</a> for official program details.
+          </p>
+        </div>
+      </div>
       <div id="losapBanner" class="qual-banner fail">
         <div class="qual-icon">⚠️</div>
         <div class="qual-text">
