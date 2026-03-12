@@ -3458,7 +3458,6 @@ function renderStaffingBoard() {
       html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;flex-wrap:wrap;">';
       html += '<div style="min-width:130px;">';
       html += '<div style="font-size:12px;color:#888;font-weight:600;">'+posName+'</div>';
-      if (minRank) html += '<div style="font-size:10px;color:#555;">min: '+minRank+'</div>';
       html += '</div>';
 
       if (isEmpty) {
@@ -3570,7 +3569,7 @@ function openSignUpModal(date, unitId, posIdx, posName) {
   document.getElementById('suHours').value = '24';
   var minRank = POSITION_MIN_RANK[posName];
   var rankEl = document.getElementById('suRankReq');
-  if (rankEl) rankEl.textContent = minRank ? 'Requires: ' + minRank + ' or above' : 'No rank requirement';
+  if (rankEl) rankEl.textContent = minRank ? 'Recommended: ' + minRank + ' or above' : '';
   modal.style.display = 'flex';
 }
 
@@ -3663,13 +3662,6 @@ function confirmSignUp() {
 
   var uid = state.currentUserId;
   var me = (state.roster||[]).find(function(m){ return m.id===uid; });
-
-  // Rank advisory (warn but don't block — officer can override via assign)
-  if (me && POSITION_MIN_RANK[posName] && !memberMeetsRank(me, posName)) {
-    var minRank = POSITION_MIN_RANK[posName];
-    // Just warn — allow the sign-up anyway
-    console.warn(posName+' recommends '+minRank+'. Member rank: '+(me.ranks||[me.rank]).join('/'));
-  }
 
   // Block sign-up for past dates
   var today = new Date().toISOString().slice(0,10);
@@ -8845,7 +8837,7 @@ function applyBulkEdit() {
   <div style="background:#1A1A1A;border:1px solid #333;border-radius:14px;padding:24px;width:90%;max-width:420px;">
     <div style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;color:#F0F0F0;margin-bottom:2px;" id="suModalUnit">Sign Up</div>
     <div id="suModalDate" style="font-size:13px;color:#888;margin-bottom:4px;"></div>
-    <div id="suRankReq" style="font-size:11px;color:#F5A623;margin-bottom:14px;"></div>
+    <div id="suRankReq" style="font-size:11px;color:#888;margin-bottom:14px;"></div>
     <!-- Hidden state fields -->
     <input type="hidden" id="suDate">
     <input type="hidden" id="suUnitId">
@@ -8860,8 +8852,8 @@ function applyBulkEdit() {
       <input type="number" id="suHours" value="24" min="1" max="72" step="0.5" style="width:100%;">
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
-      <button class="btn btn-success btn-full">✋ Confirm Sign Up</button>
-      <button class="btn btn-secondary">Cancel</button>
+      <button class="btn btn-success btn-full" onclick="confirmSignUp()">✋ Confirm Sign Up</button>
+      <button class="btn btn-secondary" onclick="closeSignUpModal()">Cancel</button>
     </div>
   </div>
 </div>
