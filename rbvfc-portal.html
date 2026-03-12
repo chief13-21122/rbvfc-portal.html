@@ -3327,16 +3327,17 @@ function renderUnitDisplayFilter() {
   container.innerHTML = activeUnits.map(function(u) {
     var shown = state.unitDisplayFilter[u] !== false; // default shown
     var label = UNIT_LABELS[u] || u;
-    return '<label style="display:flex;align-items:center;gap:4px;padding:4px 10px;background:#181818;border:1px solid '+(shown?'#C8102E':'#333')+';border-radius:6px;font-size:11px;color:#CCC;cursor:pointer;" onchange="toggleUnitDisplay(\''+u+'\')">'
+    return '<label style="display:flex;align-items:center;gap:4px;padding:4px 10px;background:#181818;border:1px solid '+(shown?'#C8102E':'#333')+';border-radius:6px;font-size:11px;color:#CCC;cursor:pointer;" onchange="toggleUnitDisplay(this,\''+u+'\')">'
       +'<input type="checkbox" '+(shown?'checked':'')+' style="margin:0;accent-color:#C8102E;"> '+label+'</label>';
   }).join('');
 }
 
 function toggleUnitDisplay(lbl, unitId) {
   if (!state.unitDisplayFilter) state.unitDisplayFilter = {};
-  var cb = lbl.querySelector('input');
-  state.unitDisplayFilter[unitId] = cb.checked;
-  lbl.style.borderColor = cb.checked ? '#C8102E' : '#333';
+  var cb = (lbl && lbl.querySelector) ? lbl.querySelector('input') : null;
+  var checked = cb ? cb.checked : false;
+  state.unitDisplayFilter[unitId] = checked;
+  if (lbl && lbl.style) lbl.style.borderColor = checked ? '#C8102E' : '#333';
   save();
   renderStaffingBoard();
 }
@@ -6666,7 +6667,20 @@ function initPublicLinkCard() {
   var el = document.getElementById('publicLinkText');
   if (!el) return;
   var base = window.location.href.split('?')[0].split('#')[0];
-  el.textContent = base + '?view=public';
+  var isFile = base.indexOf('file://') === 0;
+  if (isFile) {
+    el.textContent = base + '?view=public';
+    var note = document.getElementById('publicLinkLocalNote');
+    if (!note) {
+      note = document.createElement('p');
+      note.id = 'publicLinkLocalNote';
+      note.style.cssText = 'font-size:11px;color:#F5A623;margin-top:8px;line-height:1.5;';
+      note.innerHTML = '⚠️ <strong>Local file:</strong> The Preview button works on this device. To share with others, upload the portal to a web host (e.g. GitHub Pages) first.';
+      el.parentElement.parentElement.appendChild(note);
+    }
+  } else {
+    el.textContent = base + '?view=public';
+  }
 }
 
 function copyPublicLink() {
@@ -6674,13 +6688,13 @@ function copyPublicLink() {
   if (!el) return;
   var text = el.textContent;
   if (navigator.clipboard) {
-    navigator.clipboard.writeText(text).then(function() { showToast('\u2705 Link copied!'); });
+    navigator.clipboard.writeText(text).then(function() { showToast('✅ Link copied!'); });
   } else {
     var ta = document.createElement('textarea');
     ta.value = text; document.body.appendChild(ta);
     ta.select(); document.execCommand('copy');
     document.body.removeChild(ta);
-    showToast('\u2705 Link copied!');
+    showToast('✅ Link copied!');
   }
 }
 
@@ -6690,7 +6704,11 @@ function openPublicView() {
 }
 
 function checkPublicViewMode() {
-  if (window.location.search.indexOf('view=public') < 0) return false;
+  var fullHref = window.location.href;
+  var hasParam = (window.location.search.indexOf('view=public') >= 0) ||
+                 (fullHref.indexOf('?view=public') >= 0) ||
+                 (fullHref.indexOf('%3Fview%3Dpublic') >= 0);
+  if (!hasParam) return false;
   document.getElementById('loginOverlay').style.display = 'none';
   var app = document.getElementById('app');
   app.style.display = 'flex';
@@ -6773,9 +6791,52 @@ function renderPublicView() {
       }).join('')
     + '</tbody></table></div>'
     + '</div>'
+    + '</div>'
+    + buildPublicSpecialEvents(todayStr)
     + '</div>';
 
   sa.innerHTML = html;
+}
+
+function buildPublicSpecialEvents(todayStr) {
+  var events = (state.specialEvents||[]).filter(function(ev){ return ev.date >= todayStr; })
+    .sort(function(a,b){ return a.date.localeCompare(b.date) || (a.time||'').localeCompare(b.time||''); });
+  if (!events.length) return '';
+
+  var rows = events.map(function(ev) {
+    var dateObj = new Date(ev.date + 'T12:00:00');
+    var isToday = ev.date === todayStr;
+    var signups = (ev.signups||[]).length;
+    var timeFmt = '';
+    if (ev.time) {
+      var parts = ev.time.split(':');
+      var h = parseInt(parts[0]), m = parts[1]||'00';
+      timeFmt = (h>12?h-12:(h||12))+':'+m+' '+(h>=12?'PM':'AM');
+    }
+    var dateDay = dateObj.getDate();
+    var dateMon = dateObj.toLocaleDateString('en-US',{month:'short'});
+    return '<div style="background:#111;border:1px solid '+(isToday?'#C8102E':'#2A2A2A')+';border-radius:10px;padding:14px 18px;display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:10px;">'
+      + '<div style="min-width:56px;text-align:center;background:'+(isToday?'rgba(200,16,46,0.12)':'#1A1A1A')+';border:1px solid '+(isToday?'#C8102E':'#333')+';border-radius:8px;padding:8px 6px;">'
+      + '<div style="font-family:Bebas Neue,sans-serif;font-size:28px;line-height:1;color:'+(isToday?'#C8102E':'#F0F0F0')+';">'+dateDay+'</div>'
+      + '<div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;">'+dateMon+'</div>'
+      + '</div>'
+      + '<div style="flex:1;min-width:140px;">'
+      + (isToday ? '<div style="font-size:10px;font-weight:700;color:#C8102E;letter-spacing:2px;text-transform:uppercase;margin-bottom:3px;">TODAY</div>' : '')
+      + '<div style="font-size:15px;font-weight:700;color:#F0F0F0;margin-bottom:4px;">'+ev.title+'</div>'
+      + ((ev.location||timeFmt) ? '<div style="font-size:12px;color:#888;">'+(timeFmt?'\u23F0 '+timeFmt:'')+(timeFmt&&ev.location?' &nbsp;&middot;&nbsp; ':'')+(ev.location?'\uD83D\uDCCD '+ev.location:'')+'</div>' : '')
+      + (ev.desc ? '<div style="font-size:12px;color:#666;margin-top:4px;">'+ev.desc+'</div>' : '')
+      + '</div>'
+      + '<div style="text-align:center;min-width:52px;">'
+      + '<div style="font-family:Bebas Neue,sans-serif;font-size:26px;color:#27AE60;line-height:1;">'+signups+'</div>'
+      + '<div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;">Signed Up</div>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+
+  return '<div style="margin-top:20px;background:#1A1A1A;border:1px solid #2A2A2A;border-radius:12px;padding:16px;">'
+    + '<div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:700;color:#F0F0F0;letter-spacing:2px;text-transform:uppercase;margin-bottom:14px;">\uD83D\uDCC5 UPCOMING SPECIAL EVENTS</div>'
+    + rows
+    + '</div>';
 }
 
 
@@ -8581,9 +8642,9 @@ function applyBulkEdit() {
         <p style="font-size:13px;color:#888;margin-bottom:12px;">Share this link to display today's staffing board and company LOSAP leaderboard — no login required.</p>
         <div style="background:#111;border:1px solid #333;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:8px;margin-bottom:10px;">
           <div id="publicLinkText" style="flex:1;font-size:12px;color:#AAA;word-break:break-all;font-family:monospace;"></div>
-          <button class="btn btn-sm btn-secondary" style="flex-shrink:0;">📋 Copy</button>
+          <button class="btn btn-sm btn-secondary" style="flex-shrink:0;" onclick="copyPublicLink()">📋 Copy</button>
         </div>
-        <button class="btn btn-sm btn-secondary" style="width:100%;">👁 Preview</button>
+        <button class="btn btn-sm btn-secondary" style="width:100%;" onclick="openPublicView()">👁 Preview</button>
       </div>
 
     </div><!-- end section-admin -->
