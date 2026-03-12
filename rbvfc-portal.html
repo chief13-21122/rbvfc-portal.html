@@ -2221,6 +2221,7 @@ function onAdminTabShow() {
   renderUmRanksGrid([]);
   renderAdminRoster();
   renderClockedInPanel();
+  populateViewAsDropdown();
   var urlInput=document.getElementById('sheetUrlInput');
   if (urlInput&&state.sheetWebhookUrl) urlInput.value=state.sheetWebhookUrl;
   // Collapse all cards on open
@@ -5303,21 +5304,36 @@ function boot() {
     state.adminPin = '0000';
 
     state.emergencyResponses = [
-      {id:'er_01',userId:'mbr_002',date:_ds(2),incidentNum:'26-001842',type:'Structure Fire',address:'412 Furnace Branch Rd, Glen Burnie',apparatus:'E131',position:'Officer',duration:95,notes:'2-story residential, extended operations',enteredBy:'mbr_002',status:'logged',createdAt:_ago(2,3)},
-      {id:'er_02',userId:'mbr_004',date:_ds(2),incidentNum:'26-001842',type:'Structure Fire',address:'412 Furnace Branch Rd, Glen Burnie',apparatus:'E131',position:'Nozzle',duration:95,notes:'',enteredBy:'mbr_004',status:'logged',createdAt:_ago(2,3)},
-      {id:'er_03',userId:'mbr_008',date:_ds(2),incidentNum:'26-001842',type:'Structure Fire',address:'412 Furnace Branch Rd, Glen Burnie',apparatus:'Tk13',position:'Chauffeur',duration:95,notes:'',enteredBy:'mbr_008',status:'logged',createdAt:_ago(2,3)},
-      {id:'er_04',userId:'mbr_003',date:_ds(5),incidentNum:'26-001790',type:'MVA w/ Entrapment',address:'Ritchie Hwy & Jumpers Hole Rd',apparatus:'E132',position:'Officer',duration:45,notes:'2 vehicle, 1 entrapment extricated',enteredBy:'mbr_003',status:'logged',createdAt:_ago(5,2)},
-      {id:'er_05',userId:'mbr_010',date:_ds(5),incidentNum:'26-001790',type:'MVA w/ Entrapment',address:'Ritchie Hwy & Jumpers Hole Rd',apparatus:'A139',position:'Driver',duration:45,notes:'',enteredBy:'mbr_010',status:'logged',createdAt:_ago(5,2)},
-      {id:'er_06',userId:'rbvfc_admin_001',date:_ds(7),incidentNum:'26-001744',type:'Working Fire — Commercial',address:'7200 Ritchie Hwy, Glen Burnie',apparatus:'E131',position:'Chauffeur',duration:180,notes:'3rd alarm commercial. Mutual aid from Glen Burnie & Linthicum.',enteredBy:'rbvfc_admin_001',status:'logged',createdAt:_ago(7,4)},
-      {id:'er_07',userId:'mbr_006',date:_ds(7),incidentNum:'26-001744',type:'Working Fire — Commercial',address:'7200 Ritchie Hwy, Glen Burnie',apparatus:'Tk13',position:'Roof',duration:180,notes:'',enteredBy:'mbr_006',status:'logged',createdAt:_ago(7,4)},
-      {id:'er_08',userId:'mbr_014',date:_ds(7),incidentNum:'26-001744',type:'Working Fire — Commercial',address:'7200 Ritchie Hwy, Glen Burnie',apparatus:'Tk13',position:'Irons',duration:180,notes:'',enteredBy:'mbr_014',status:'logged',createdAt:_ago(7,4)},
-      {id:'er_09',userId:'mbr_011',date:_ds(10),incidentNum:'26-001701',type:'EMS — Cardiac Arrest',address:'100 Hospital Dr, Glen Burnie',apparatus:'Mu13',position:'EMT',duration:30,notes:'BLS assist, patient transported',enteredBy:'mbr_011',status:'logged',createdAt:_ago(10,1)},
-      {id:'er_10',userId:'mbr_016',date:_ds(12),incidentNum:'26-001655',type:'Brush Fire',address:'Marley Station Mall, Glen Burnie',apparatus:'FB13',position:'MVO',duration:25,notes:'Small brush fire at rear of property',enteredBy:'mbr_016',status:'logged',createdAt:_ago(12,1)},
-      {id:'er_11',userId:'mbr_005',date:_ds(1),incidentNum:'26-001901',type:'Water Rescue',address:'Marley Creek off Shore Drive',apparatus:'RB13',position:'Mate',duration:60,notes:'Capsized kayak, 2 persons recovered',enteredBy:'mbr_005',status:'pending',createdAt:_ago(1,2)},
-      {id:'er_12',userId:'mbr_012',date:_ds(1),incidentNum:'26-001901',type:'Water Rescue',address:'Marley Creek off Shore Drive',apparatus:'RB13',position:'MVO',duration:60,notes:'',enteredBy:'mbr_012',status:'pending',createdAt:_ago(1,2)},
-      {id:'er_13',userId:'mbr_007',date:_ds(0),incidentNum:'26-001915',type:'MVA — No Injury',address:'Crain Hwy & Routes 100',apparatus:'E132',position:'Nozzle',duration:20,notes:'Minor fender bender, stood by for fuel spill',enteredBy:'mbr_007',status:'pending',createdAt:_ago(0,3)},
-      {id:'er_14',userId:'mbr_009',date:_ds(0),incidentNum:'26-001915',type:'MVA — No Injury',address:'Crain Hwy & Routes 100',apparatus:'E132',position:'Control',duration:20,notes:'',enteredBy:'mbr_009',status:'pending',createdAt:_ago(0,3)},
-      {id:'er_15',userId:'mbr_018',date:_ds(0),incidentNum:'26-001918',type:'CO Alarm',address:'3305 Benson Ave, Brooklyn',apparatus:'E132',position:'Chauffeur',duration:35,notes:'Gas company notified, occupants evacuated',enteredBy:'mbr_018',status:'pending',createdAt:_ago(0,1)}
+      // Structure Fire — 3 days ago — E131+Tk13 crew
+      {id:'er_01',date:_ds(3),incidentNum:'26-001842',type:'Structure Fire',address:'412 Furnace Branch Rd, Glen Burnie',units:['e131','Tk13'],members:['rbvfc_admin_001','mbr_002','mbr_004','mbr_008','mbr_014','mbr_018'],apparatus:'E131/Tk13',alarmTime:'14:22',clearTime:'17:05',notes:'2-story residential, extended operations',loggedBy:'rbvfc_admin_001',createdAt:_ago(3,6)},
+      // MVA w/ Entrapment — 6 days ago — E132+A139
+      {id:'er_02',date:_ds(6),incidentNum:'26-001790',type:'MVA w/ Entrapment',address:'Ritchie Hwy & Jumpers Hole Rd',units:['e132','a139'],members:['mbr_003','mbr_005','mbr_007','mbr_009','mbr_010','mbr_016'],apparatus:'E132/A139',alarmTime:'09:14',clearTime:'10:02',notes:'2 vehicle, 1 entrapment extricated',loggedBy:'mbr_003',createdAt:_ago(6,2)},
+      // Working Fire — Commercial — 8 days ago — E131+Tk13+A139
+      {id:'er_03',date:_ds(8),incidentNum:'26-001744',type:'Working Fire — Commercial',address:'7200 Ritchie Hwy, Glen Burnie',units:['e131','Tk13','a139'],members:['rbvfc_admin_001','mbr_002','mbr_006','mbr_008','mbr_010','mbr_014','mbr_015','mbr_018'],apparatus:'E131/Tk13/A139',alarmTime:'21:45',clearTime:'02:12',notes:'3rd alarm commercial. Mutual aid from Glen Burnie & Linthicum.',loggedBy:'rbvfc_admin_001',createdAt:_ago(8,4)},
+      // EMS — Cardiac Arrest — 11 days ago — Mu13
+      {id:'er_04',date:_ds(11),incidentNum:'26-001701',type:'EMS — Cardiac Arrest',address:'100 Hospital Dr, Glen Burnie',units:['Mu13'],members:['mbr_010','mbr_011','mbr_016'],apparatus:'Mu13',alarmTime:'03:18',clearTime:'03:52',notes:'BLS assist, patient transported',loggedBy:'mbr_010',createdAt:_ago(11,1)},
+      // Brush Fire — 13 days ago — FB13
+      {id:'er_05',date:_ds(13),incidentNum:'26-001655',type:'Brush Fire',address:'Marley Station Mall, Glen Burnie',units:['FB13'],members:['mbr_012','mbr_016','mbr_017'],apparatus:'FB13',alarmTime:'11:30',clearTime:'12:05',notes:'Small brush fire at rear of property',loggedBy:'mbr_016',createdAt:_ago(13,1)},
+      // Water Rescue — 2 days ago — RB13
+      {id:'er_06',date:_ds(2),incidentNum:'26-001901',type:'Water Rescue',address:'Marley Creek off Shore Drive',units:['RB13'],members:['mbr_005','mbr_012','mbr_017'],apparatus:'RB13',alarmTime:'16:40',clearTime:'17:44',notes:'Capsized kayak, 2 persons recovered',loggedBy:'mbr_012',createdAt:_ago(2,2)},
+      // MVA No Injury — 1 day ago — E132
+      {id:'er_07',date:_ds(1),incidentNum:'26-001915',type:'MVA — No Injury',address:'Crain Hwy & Routes 100',units:['e132'],members:['mbr_003','mbr_007','mbr_009','mbr_011'],apparatus:'E132',alarmTime:'07:52',clearTime:'08:20',notes:'Minor fender bender, stood by for fuel spill',loggedBy:'mbr_003',createdAt:_ago(1,3)},
+      // CO Alarm — today — E132
+      {id:'er_08',date:_ds(0),incidentNum:'26-001918',type:'CO Alarm',address:'3305 Benson Ave, Brooklyn',units:['e132'],members:['mbr_003','mbr_007','mbr_018'],apparatus:'E132',alarmTime:'13:05',clearTime:'13:42',notes:'Gas company notified, occupants evacuated',loggedBy:'mbr_018',createdAt:_ago(0,1)},
+      // Gas Leak — 15 days ago — E131+E132
+      {id:'er_09',date:_ds(15),incidentNum:'26-001620',type:'Gas Leak — Natural Gas',address:'8506 Crain Hwy, Glen Burnie',units:['e131','e132'],members:['mbr_002','mbr_004','mbr_006','mbr_013','mbr_015'],apparatus:'E131/E132',alarmTime:'19:33',clearTime:'20:15',notes:'BGE responded, evacuated 6 units',loggedBy:'mbr_002',createdAt:_ago(15,2)},
+      // Rubbish Fire — 20 days ago — E131
+      {id:'er_10',date:_ds(20),incidentNum:'26-001555',type:'Rubbish Fire',address:'Glen Burnie Park, Glen Burnie',units:['e131'],members:['mbr_004','mbr_008','mbr_014'],apparatus:'E131',alarmTime:'22:10',clearTime:'22:38',notes:'Dumpster fire, extinguished on arrival',loggedBy:'mbr_008',createdAt:_ago(20,1)},
+      // EMS Assist — 25 days ago — A139+Mu13
+      {id:'er_11',date:_ds(25),incidentNum:'26-001480',type:'EMS Assist',address:'200 Ritchie Hwy, Glen Burnie',units:['a139','Mu13'],members:['mbr_005','mbr_010','mbr_016'],apparatus:'A139/Mu13',alarmTime:'06:44',clearTime:'07:12',notes:'Fall victim, ALS intercept',loggedBy:'mbr_010',createdAt:_ago(25,1)},
+      // Structure Fire — 35 days ago — E131+Tk13+E132
+      {id:'er_12',date:_ds(35),incidentNum:'26-001310',type:'Structure Fire',address:'105 Marley Neck Rd, Glen Burnie',units:['e131','Tk13','e132'],members:['rbvfc_admin_001','mbr_002','mbr_003','mbr_006','mbr_008','mbr_011','mbr_014','mbr_015','mbr_018'],apparatus:'E131/Tk13/E132',alarmTime:'03:12',clearTime:'06:50',notes:'2-alarm row house, overhaul operations',loggedBy:'rbvfc_admin_001',createdAt:_ago(35,5)},
+      // Haz-Mat — 45 days ago — U13
+      {id:'er_13',date:_ds(45),incidentNum:'26-001100',type:'Hazardous Material',address:'Baltimore Washington Hwy, Elkridge',units:['U13'],members:['mbr_006','mbr_011','mbr_014','mbr_017'],apparatus:'U13',alarmTime:'15:55',clearTime:'18:20',notes:'Chemical spill, HazMat Level I response',loggedBy:'mbr_014',createdAt:_ago(45,3)},
+      // Boat Fire — 50 days ago — RB13
+      {id:'er_14',date:_ds(50),incidentNum:'26-000988',type:'Boat Fire',address:'Marley Creek Marina',units:['RB13'],members:['mbr_009','mbr_012','mbr_013'],apparatus:'RB13',alarmTime:'11:20',clearTime:'12:45',notes:'25ft cabin cruiser, fire extinguished',loggedBy:'mbr_012',createdAt:_ago(50,2)},
+      // CO — 60 days ago — E132+A139
+      {id:'er_15',date:_ds(60),incidentNum:'26-000780',type:'CO Alarm',address:'4412 Oakwood Rd, Brooklyn Park',units:['e132','a139'],members:['mbr_003','mbr_005','mbr_007','mbr_009','mbr_010'],apparatus:'E132/A139',alarmTime:'02:30',clearTime:'03:10',notes:'Faulty furnace, 4 residents transported precautionary',loggedBy:'mbr_003',createdAt:_ago(60,2)}
     ];
 
     state.trainingSubmissions = [
@@ -5523,6 +5539,38 @@ function loadDemoData() {
 }
 
 // Dev shortcut — immediately logs in as Caruso (admin) without needing the roster populated
+function populateViewAsDropdown() {
+  var sel = document.getElementById('viewAsMemberSelect');
+  if (!sel) return;
+  var currentId = state._realUserId || state.currentUserId;
+  sel.innerHTML = '<option value="">— Pick a member —</option>';
+  (state.roster||[])
+    .filter(function(m){ return m.active !== false && m.id !== currentId; })
+    .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
+    .forEach(function(m){
+      var opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.last + ', ' + m.first + ' — ' + (m.rank||m.appRole||'');
+      sel.appendChild(opt);
+    });
+}
+
+function viewAsSelected() {
+  var sel = document.getElementById('viewAsMemberSelect');
+  if (!sel || !sel.value) { showToast('⚠️ Select a member first'); return; }
+  var memberId = sel.value;
+  var member = (state.roster||[]).find(function(m){ return m.id === memberId; });
+  if (!member) return;
+  // Save real user
+  state._realUserId = state._realUserId || state.currentUserId;
+  state.currentUserId = memberId;
+  var banner = document.getElementById('viewAsBanner');
+  var bannerName = document.getElementById('viewAsName');
+  if (banner) { banner.style.display = 'block'; document.getElementById('app').style.paddingTop = '32px'; }
+  if (bannerName) bannerName.textContent = member.last + ', ' + member.first;
+  launchApp(member);
+  showToast('👁 Viewing as ' + member.first + ' ' + member.last);
+}
 function devLogin() {
   var admin = (state.roster||[]).find(function(m){ return m.id === 'rbvfc_admin_001'; });
   if (!admin) {
@@ -7410,7 +7458,7 @@ function applyBulkEdit() {
 <!-- ═══ VIEW-AS BANNER ═══ -->
 <div id="viewAsBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#F5A623;color:#111;font-size:12px;font-weight:700;text-align:center;padding:8px 60px;box-sizing:border-box;">
   👁 Viewing as <span id="viewAsName"></span> &nbsp;·&nbsp;
-  <button style="background:none;border:1px solid #111;border-radius:4px;padding:1px 8px;cursor:pointer;font-size:11px;font-weight:700;">Exit View</button>
+  <button onclick="exitImpersonation()" style="background:none;border:1px solid #111;border-radius:4px;padding:1px 8px;cursor:pointer;font-size:11px;font-weight:700;">Exit View</button>
 </div>
 
 <!-- ═══ MAIN APP ═══ -->
@@ -7423,9 +7471,9 @@ function applyBulkEdit() {
       <div class="app-title">RBVFC MEMBER PORTAL</div>
       <div class="app-subtitle" id="appSubtitle">Riviera Beach Volunteer Fire Company</div>
     </div>
-    <button class="btn-logout" id="switchUserBtn" style="display:none;background:#1A2A1A;border-color:#27AE60;color:#27AE60;margin-right:6px;font-size:11px;" onclick="openSwitchUser()">👁 Switch</button>
+    <button class="btn-logout" id="switchUserBtn" style="display:none;background:#1A2A1A;border-color:#27AE60;color:#27AE60;margin-right:6px;font-size:11px;" onclick="openSwitchUser()">👁 View As</button>
     <button class="btn-logout" id="adminHeaderBtn" style="display:none;background:#C8102E;border-color:#C8102E;color:white;margin-right:6px;" onclick="showTab('admin')">⚙️</button>
-    <button class="btn-logout">Sign Out</button>
+    <button class="btn-logout" onclick="logout()">Sign Out</button>
   </div>
 
   <!-- Tab bar for secondary nav (approvals, log-entry) -->
@@ -7798,7 +7846,7 @@ function applyBulkEdit() {
           <div class="icon">🚒</div>
           <h2>Log Emergency Response</h2>
         </div>
-        <div class="alert info" style="margin-bottom:14px;">ℹ️ Officers/dispatchers enter all responses. CAD calls sync automatically from Gmail — use <strong>🔄 Sync New Calls</strong> on the Pending CAD Calls card to pull the latest.</div>
+        <div class="alert info" style="margin-bottom:14px;">ℹ️ It is the responsibility of the <strong>DRIVER</strong> to log emergency responses.</div>
         <div class="form-grid">
           <div class="form-group"><label>Date *</label><input type="date" id="erDate"></div>
           <div class="form-group"><label>Incident # (optional)</label><input type="text" id="erIncidentNum" placeholder="e.g. 24-01234"></div>
@@ -8182,7 +8230,23 @@ function applyBulkEdit() {
     <!-- ══════════════ ADMIN TAB ══════════════ -->
     <div id="section-admin" class="section">
 
-      <!-- Who's On Duty -->
+      <!-- View As Member -->
+      <div class="card" data-no-collapse="1" style="border-color:#27AE60;">
+        <div class="card-header" style="margin-bottom:12px;">
+          <div class="icon" style="background:rgba(39,174,96,.15);border-color:rgba(39,174,96,.4);">👁</div>
+          <h2>View As Member</h2>
+        </div>
+        <p style="font-size:13px;color:#888;margin-bottom:14px;">Switch your view to see the portal exactly as any member sees it. Use <strong style="color:#F5A623;">Exit View</strong> in the yellow banner to return.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+          <div class="form-group" style="flex:1;min-width:180px;margin:0;">
+            <label>Select Member</label>
+            <select id="viewAsMemberSelect" style="width:100%;font-size:14px;">
+              <option value="">— Pick a member —</option>
+            </select>
+          </div>
+          <button class="btn btn-secondary" style="border-color:#27AE60;color:#27AE60;white-space:nowrap;" onclick="viewAsSelected()">👁 View As Selected</button>
+        </div>
+      </div>
       <div class="card" data-no-collapse="1">
         <div class="card-header">
           <div class="icon">🟢</div><h2>Who's On Duty</h2>
