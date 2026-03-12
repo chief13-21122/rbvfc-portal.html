@@ -1464,50 +1464,6 @@ function renderRankingStatus(uid, yr) {
   container.innerHTML = html;
   if (card) card.style.display = 'block';
 }
-  var yrStr = String(yr);
-  var responses = state.emergencyResponses||[];
-
-  // Count EMS responses per member
-  var emsCounts = {}, fireCounts = {};
-  (state.roster||[]).forEach(function(m){ emsCounts[m.id]=0; fireCounts[m.id]=0; });
-  responses.filter(function(r){ return r.date&&r.date.startsWith(yrStr); }).forEach(function(r){
-    (r.members||[]).forEach(function(mid){
-      var hasEMS = (r.units||[]).some(function(u){ return EMS_UNITS.includes(u); });
-      var hasFire = (r.units||[]).some(function(u){ return FIRE_UNITS.includes(u); });
-      if (hasEMS) emsCounts[mid] = (emsCounts[mid]||0)+1;
-      if (hasFire) fireCounts[mid] = (fireCounts[mid]||0)+1;
-    });
-  });
-  // Sort
-  var emsSorted = Object.keys(emsCounts).sort(function(a,b){ return emsCounts[b]-emsCounts[a]; });
-  var fireSorted = Object.keys(fireCounts).sort(function(a,b){ return fireCounts[b]-fireCounts[a]; });
-  var emsRank = emsSorted.indexOf(uid)+1;
-  var fireRank = fireSorted.indexOf(uid)+1;
-  var myEMS = emsCounts[uid]||0;
-  var myFire = fireCounts[uid]||0;
-
-  var html = '';
-  if (myEMS>0) {
-    var emsTop5 = emsRank>=1&&emsRank<=5;
-    html += '<div style="padding:10px;border-radius:8px;background:'+(emsTop5?'#0A2A1A':'#1A1A1A')+';border:1px solid '+(emsTop5?'#27AE60':'#333')+';margin-bottom:8px;">'+
-      '<div style="font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">EMS Responses (a139/Mu13)</div>'+
-      '<div style="display:flex;align-items:center;gap:8px;">'+
-      (emsTop5?'<span style="font-size:20px;">🏆</span>':'<span style="font-size:20px;">🚑</span>')+
-      '<div><div style="font-size:18px;font-weight:700;color:'+(emsTop5?'#27AE60':'#F0F0F0')+';">#'+emsRank+' of '+emsSorted.length+'</div>'+
-      '<div style="font-size:12px;color:#888;">'+myEMS+' responses'+(emsTop5?' — You are in the Top 5 EMS Responders! 🏆':'')+'</div></div></div></div>';
-  }
-  if (myFire>0) {
-    var fireTop5 = fireRank>=1&&fireRank<=5;
-    html += '<div style="padding:10px;border-radius:8px;background:'+(fireTop5?'#2A0A0A':'#1A1A1A')+';border:1px solid '+(fireTop5?'#C8102E':'#333')+';margin-bottom:8px;">'+
-      '<div style="font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Fire Responses</div>'+
-      '<div style="display:flex;align-items:center;gap:8px;">'+
-      (fireTop5?'<span style="font-size:20px;">🏆</span>':'<span style="font-size:20px;">🚒</span>')+
-      '<div><div style="font-size:18px;font-weight:700;color:'+(fireTop5?'#C8102E':'#F0F0F0')+';">#'+fireRank+' of '+fireSorted.length+'</div>'+
-      '<div style="font-size:12px;color:#888;">'+myFire+' responses'+(fireTop5?' — You are in the Top 5 Fire Responders! 🏆':'')+'</div></div></div></div>';
-  }
-  if (!myEMS&&!myFire) html = '<p style="color:#666;font-size:13px;">No responses logged yet for '+yr+'.</p>';
-  container.innerHTML = html;
-}
 
 // ═══════════════════════════════════════════════════
 //  HOURS LOG
