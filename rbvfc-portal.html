@@ -6920,6 +6920,24 @@ function renderPublicView() {
 }
 
 // ═══════════════════════════════════════════════════
+//  SHARED HELPERS
+// ═══════════════════════════════════════════════════
+function isCurrentUserOfficer() {
+  var me = (state.roster||[]).find(function(m){ return m.id === state.currentUserId; });
+  return !!(me && (me.appRole === 'officer' || me.appRole === 'admin'));
+}
+
+function escHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ═══════════════════════════════════════════════════
 //  TRAINING CLASSES
 // ═══════════════════════════════════════════════════
 
