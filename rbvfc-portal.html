@@ -3940,9 +3940,34 @@ function staffClockIn(elOrId) {
   var shiftId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
   if (!shift) return;
+  var now = new Date();
   shift.clockedIn = true;
-  shift.clockedInAt = new Date().toISOString();
+  shift.clockedInAt = now.toISOString();
   shift.status = 'active';
+
+  // Mirror into currentSession so Clock tab shows clocked-in state
+  if (!state.currentSession) {
+    var desc = (UNIT_LABELS[shift.unitId]||shift.unitId) + (shift.position ? ' · ' + shift.position : '');
+    state.currentSession = {
+      id:        'sess_' + Date.now(),
+      userId:    state.currentUserId,
+      start:     now.toISOString(),
+      activity:  'duty',
+      desc:      desc,
+      shiftId:   shift.id,   // link back so clockOut can sync
+      end:       null,
+      duration:  null
+    };
+    // Start clock tab timer
+    if (typeof _clockTimerInterval !== 'undefined') {
+      if (_clockTimerInterval) clearInterval(_clockTimerInterval);
+      _clockTimerInterval = setInterval(tickClockTimer, 1000);
+    }
+    try { updateClockUI(true); } catch(e){}
+    try { updateClockStats(); } catch(e){}
+    try { updateStats(); } catch(e){}
+  }
+
   save();
   renderStaffingBoard();
   renderMyShifts();
@@ -6342,6 +6367,30 @@ function restoreClockState() {
     state.currentSession = null;
     save();
   }
+  // If no open session but member has a clockedIn staffing shift today → restore it
+  if (!state.currentSession && state.currentUserId) {
+    var todayStr = new Date().toISOString().slice(0,10);
+    var activeShift = (state.staffingShifts||[]).find(function(s){
+      return s.memberId === state.currentUserId &&
+             s.date === todayStr &&
+             s.clockedIn === true &&
+             !s.clockedOut;
+    });
+    if (activeShift) {
+      var desc = (UNIT_LABELS[activeShift.unitId]||activeShift.unitId) + (activeShift.position ? ' · ' + activeShift.position : '');
+      state.currentSession = {
+        id:       'sess_restored_' + activeShift.id,
+        userId:   state.currentUserId,
+        start:    activeShift.clockedInAt || new Date().toISOString(),
+        activity: 'duty',
+        desc:     desc,
+        shiftId:  activeShift.id,
+        end:      null,
+        duration: null
+      };
+      save();
+    }
+  }
   var isIn = !!(state.currentSession && state.currentSession.userId === state.currentUserId);
   // ALWAYS update UI to correct state — never leave buttons in ambiguous state
   try { updateClockUI(isIn); } catch(e){}
@@ -6439,6 +6488,18 @@ function clockOut() {
   state.sessions = state.sessions || [];
   state.sessions.push(sess);
   state.currentSession = null;
+
+  // If this session was linked to a staffing shift, mark that shift as clocked out
+  if (sess.shiftId) {
+    var linkedShift = (state.staffingShifts||[]).find(function(s){ return s.id===sess.shiftId; });
+    if (linkedShift) {
+      linkedShift.clockedOut    = true;
+      linkedShift.clockedOutAt  = sess.end;
+      linkedShift.clockedIn     = false;
+      linkedShift.status        = 'completed';
+    }
+  }
+
   save();
   clearInterval(_clockTimerInterval);
   _clockTimerInterval = null;
@@ -6446,6 +6507,8 @@ function clockOut() {
   renderShiftHistory();
   // Update stats
   try { updateClockStats(); } catch(e) {}
+  try { renderStaffingBoard(); } catch(e) {}
+  try { renderMyShifts(); } catch(e) {}
   var cdEl=document.getElementById('clockDesc'); if(cdEl) cdEl.value='';
   try { onClockActivityChange(); } catch(e){}
   showToast('🔴 Clocked out — ' + formatDuration(sess.duration));
@@ -7796,11 +7859,6 @@ function applyBulkEdit() {
         </div>
       </div>
 
-    </div><!-- end section-clock -->
-
-    <!-- ══════════════ LOSAP TAB ══════════════ -->
-    <div id="section-losap" class="section">
-
       <!-- WHAT IS LOSAP collapsible -->
       <div class="card" style="padding:0;overflow:hidden;">
         <div class="card-header" onclick="toggleLosapInfo()" style="cursor:pointer;user-select:none;padding:14px 16px;">
@@ -7831,6 +7889,11 @@ function applyBulkEdit() {
           </p>
         </div>
       </div>
+    </div><!-- end section-clock -->
+
+    <!-- ══════════════ LOSAP TAB ══════════════ -->
+    <div id="section-losap" class="section">
+
       <div id="losapBanner" class="qual-banner fail">
         <div class="qual-icon">⚠️</div>
         <div class="qual-text">
