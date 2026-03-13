@@ -326,7 +326,7 @@ main{padding:16px;max-width:900px;margin:0 auto;}
 .qual-banner{background:linear-gradient(135deg,rgba(46,204,113,.15),rgba(46,204,113,.05));border:1px solid rgba(46,204,113,.3);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;}
 .qual-banner.warn{background:linear-gradient(135deg,rgba(245,166,35,.15),rgba(245,166,35,.05));border-color:rgba(245,166,35,.3);}
 .qual-banner.fail{background:linear-gradient(135deg,rgba(200,16,46,.15),rgba(200,16,46,.05));border-color:rgba(200,16,46,.3);}
-.qual-banner.pass{background:linear-gradient(135deg,rgba(46,204,113,.18),rgba(46,204,113,.06));border-color:rgba(46,204,113,.4);}
+.qual-banner.pass{background:linear-gradient(135deg,rgba(39,174,96,.28),rgba(46,204,113,.12)) !important;border-color:rgba(46,204,113,.6) !important;}
 .qual-icon{font-size:28px;}
 .qual-text h3{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700;letter-spacing:1px;color:var(--green);margin-bottom:2px;}
 .qual-banner.warn .qual-text h3{color:var(--gold);}
@@ -4272,6 +4272,69 @@ function renderCustomGroupsList() {
   }).join('');
 }
 
+function initStaffingNeedsDate() {
+  var el = document.getElementById('staffingNeedsDate');
+  if (!el) return;
+  // Default to tomorrow
+  var d = new Date(); d.setDate(d.getDate()+1);
+  el.value = d.toISOString().slice(0,10);
+}
+
+function fillStaffingNeedsMessage() {
+  var dateEl = document.getElementById('staffingNeedsDate');
+  var dateStr = dateEl ? dateEl.value : '';
+  if (!dateStr) {
+    showToast('⚠️ Pick a date first.'); return;
+  }
+  var d = new Date(dateStr+'T12:00:00');
+  var dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+  var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var dateLabel = dayName+' '+monthNames[d.getMonth()]+' '+d.getDate();
+
+  // Only flag the units on the staffing board
+  var activeUnits = (typeof UNITS !== 'undefined' ? UNITS : []).filter(function(u){
+    return !(state.staffingEnabled && state.staffingEnabled[u] === false);
+  });
+
+  // Determine filled positions for this date
+  var filledByUnit = {};
+  activeUnits.forEach(function(u){ filledByUnit[u] = []; });
+  (state.staffingShifts||[]).filter(function(s){ return s.date===dateStr && s.memberId; }).forEach(function(s){
+    if (!filledByUnit[s.unitId]) filledByUnit[s.unitId] = [];
+    filledByUnit[s.unitId].push(s.position);
+  });
+
+  // Compare against min required positions (first N of UNIT_POSITIONS where N=UNIT_MIN_STAFF)
+  var needsParts = [];
+  activeUnits.forEach(function(unitId){
+    var allPos = UNIT_POSITIONS[unitId] || [];
+    var minStaff = UNIT_MIN_STAFF[unitId] || 1;
+    var required = allPos.slice(0, minStaff); // first positions are the critical ones
+    var filled = filledByUnit[unitId] || [];
+    var missing = required.filter(function(pos){
+      return filled.indexOf(pos) < 0;
+    });
+    if (missing.length > 0) {
+      var label = (typeof UNIT_LABELS !== 'undefined' && UNIT_LABELS[unitId]) ? UNIT_LABELS[unitId] : unitId;
+      needsParts.push(label+' needs '+missing.join(', '));
+    }
+  });
+
+  var msgEl = document.getElementById('staffingAlertMsg');
+  if (!msgEl) return;
+
+  if (!needsParts.length) {
+    msgEl.value = '✅ '+dateLabel+' — All units are fully staffed. No help needed.';
+    showToast('✅ All units staffed for '+dateLabel+'.');
+    return;
+  }
+
+  var msg = '🚨 Need staffing for '+dateLabel+': '+needsParts.join('; ')+'. Please sign up or reply if available.';
+  msgEl.value = msg;
+  showToast('📋 Needs filled in for '+dateLabel+'.');
+}
+
+
 function sendStaffingAlert() {
   var msg = ((document.getElementById('staffingAlertMsg')||{}).value||'').trim();
   if (!msg) { showToast('⚠️ Enter an alert message first.'); return; }
@@ -5303,24 +5366,24 @@ function boot() {
     var _ds  = function(d){   return new Date(_N - d*864e5).toISOString().split('T')[0]; };
 
     state.roster = [
-      {id:'rbvfc_admin_001',first:'Michael',last:'Caruso',memberId:'50-1042',rank:'Assistant Chief',appRole:'admin',losapPositions:['President','Assistant Chief'],pin:'0000',active:true,ranks:['Assistant Chief'],additionalCerts:['Mate II','MVO','BRS','FADO','Tiller','AT','ATDA'],unitPositions:{e131:['Chauffeur','Layout'],Tk13:['Chauffeur','Tiller','Can','Roof'],a139:['Driver','3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_002',first:'James',last:'Hartley',memberId:'50-1095',rank:'Captain',appRole:'officer',losapPositions:['Captain'],pin:'1234',active:true,ranks:['Captain'],additionalCerts:['MVO','BRS','FADO','Tiller'],unitPositions:{e131:['Officer','Nozzle'],Tk13:['Officer','Irons'],a139:['Driver']},rideReport:'eligible'},
-      {id:'mbr_003',first:'Sarah',last:'McKenna',memberId:'50-1118',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS'],unitPositions:{e132:['Officer','Nozzle'],a139:['Technician']},rideReport:'eligible'},
-      {id:'mbr_004',first:'Derek',last:'Walton',memberId:'50-1203',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller'],unitPositions:{e131:['Nozzle','Backup'],Tk13:['Irons','Can']},rideReport:'eligible'},
-      {id:'mbr_005',first:'Amanda',last:'Torres',memberId:'50-1267',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Backup','Control'],a139:['3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_006',first:'Tyler',last:'Nguyen',memberId:'50-1334',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','FADO'],unitPositions:{Tk13:['Roof','Outside Vent'],e131:['Layout']},rideReport:'eligible'},
-      {id:'mbr_007',first:'Brianna',last:'Collins',memberId:'50-1389',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Nozzle'],a139:['3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_008',first:'Marcus',last:'Jenkins',memberId:'50-1421',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','BRS'],unitPositions:{Tk13:['Chauffeur','Tiller'],e131:['Chauffeur']},rideReport:'eligible'},
-      {id:'mbr_009',first:'Kayla',last:'Ramirez',memberId:'50-1456',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e131:['Control'],e132:['Control']},rideReport:'eligible'},
-      {id:'mbr_010',first:'Logan',last:'Pierce',memberId:'50-1512',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{a139:['Driver'],Mu13:['EMT']},rideReport:'eligible'},
-      {id:'mbr_011',first:'Nicole',last:'Shaw',memberId:'50-1578',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e132:['Officer'],Tk13:['Officer','Can']},rideReport:'eligible'},
-      {id:'mbr_012',first:'Chris',last:'Donnelly',memberId:'50-1603',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{RB13:['MVO','Mate'],FB13:['MVO']},rideReport:'eligible'},
-      {id:'mbr_013',first:'Destiny',last:'Franklin',memberId:'50-1647',rank:'Student',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Student'],additionalCerts:[],unitPositions:{},rideReport:'ineligible'},
-      {id:'mbr_014',first:'Ryan',last:'Kowalski',memberId:'50-1689',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','AT'],unitPositions:{Tk13:['Roof','Irons'],e131:['Backup']},rideReport:'eligible'},
-      {id:'mbr_015',first:'Tamara',last:'Bishop',memberId:'50-1724',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e131:['Officer'],a139:['Technician']},rideReport:'eligible'},
-      {id:'mbr_016',first:'Victor',last:'Espinoza',memberId:'50-1768',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{Mu13:['EMT'],a139:['3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_017',first:'Hannah',last:'Reid',memberId:'50-1812',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e132:['Layout']},rideReport:'eligible'},
-      {id:'mbr_018',first:'Elijah',last:'Thompson',memberId:'50-1855',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','Tiller'],unitPositions:{Tk13:['Chauffeur','Outside Vent'],e132:['Chauffeur']},rideReport:'eligible'}
+      {id:'rbvfc_admin_001',first:'Michael',last:'Caruso',memberId:'1042',rank:'Assistant Chief',appRole:'admin',losapPositions:['President','Assistant Chief'],pin:'0000',active:true,ranks:['Assistant Chief'],additionalCerts:['Mate II','MVO','BRS','FADO','Tiller','AT','ATDA'],unitPositions:{e131:['Chauffeur','Layout'],Tk13:['Chauffeur','Tiller','Can','Roof'],a139:['Driver','3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_002',first:'James',last:'Hartley',memberId:'1095',rank:'Captain',appRole:'officer',losapPositions:['Captain'],pin:'1234',active:true,ranks:['Captain'],additionalCerts:['MVO','BRS','FADO','Tiller'],unitPositions:{e131:['Officer','Nozzle'],Tk13:['Officer','Irons'],a139:['Driver']},rideReport:'eligible'},
+      {id:'mbr_003',first:'Sarah',last:'McKenna',memberId:'1118',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS'],unitPositions:{e132:['Officer','Nozzle'],a139:['Technician']},rideReport:'eligible'},
+      {id:'mbr_004',first:'Derek',last:'Walton',memberId:'1203',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller'],unitPositions:{e131:['Nozzle','Backup'],Tk13:['Irons','Can']},rideReport:'eligible'},
+      {id:'mbr_005',first:'Amanda',last:'Torres',memberId:'1267',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Backup','Control'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_006',first:'Tyler',last:'Nguyen',memberId:'1334',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','FADO'],unitPositions:{Tk13:['Roof','Outside Vent'],e131:['Layout']},rideReport:'eligible'},
+      {id:'mbr_007',first:'Brianna',last:'Collins',memberId:'1389',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Nozzle'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_008',first:'Marcus',last:'Jenkins',memberId:'1421',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','BRS'],unitPositions:{Tk13:['Chauffeur','Tiller'],e131:['Chauffeur']},rideReport:'eligible'},
+      {id:'mbr_009',first:'Kayla',last:'Ramirez',memberId:'1456',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e131:['Control'],e132:['Control']},rideReport:'eligible'},
+      {id:'mbr_010',first:'Logan',last:'Pierce',memberId:'1512',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{a139:['Driver'],Mu13:['EMT']},rideReport:'eligible'},
+      {id:'mbr_011',first:'Nicole',last:'Shaw',memberId:'1578',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e132:['Officer'],Tk13:['Officer','Can']},rideReport:'eligible'},
+      {id:'mbr_012',first:'Chris',last:'Donnelly',memberId:'1603',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{RB13:['MVO','Mate'],FB13:['MVO']},rideReport:'eligible'},
+      {id:'mbr_013',first:'Destiny',last:'Franklin',memberId:'1647',rank:'Student',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Student'],additionalCerts:[],unitPositions:{},rideReport:'ineligible'},
+      {id:'mbr_014',first:'Ryan',last:'Kowalski',memberId:'1689',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','AT'],unitPositions:{Tk13:['Roof','Irons'],e131:['Backup']},rideReport:'eligible'},
+      {id:'mbr_015',first:'Tamara',last:'Bishop',memberId:'1724',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e131:['Officer'],a139:['Technician']},rideReport:'eligible'},
+      {id:'mbr_016',first:'Victor',last:'Espinoza',memberId:'1768',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{Mu13:['EMT'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_017',first:'Hannah',last:'Reid',memberId:'1812',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e132:['Layout']},rideReport:'eligible'},
+      {id:'mbr_018',first:'Elijah',last:'Thompson',memberId:'1855',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','Tiller'],unitPositions:{Tk13:['Chauffeur','Outside Vent'],e132:['Chauffeur']},rideReport:'eligible'}
     ];
 
     state.sessions = [
@@ -7577,7 +7640,7 @@ function buildPublicCombinedRespondersCol(yr, todayStr) {
             + '<div style="font-family:Bebas Neue,sans-serif;font-size:34px;color:'+accent+';line-height:1;min-width:36px;text-align:right;">'+row.count+'</div>'
             + '</div>';
         }).join('');
-    return '<div style="padding:7px 14px 3px;background:'+accent+'0F;border-top:1px solid #1A1A1A;flex-shrink:0;">'
+    return '<div style="padding:8px 14px 4px;background:'+accent+'0F;border-top:1px solid #1A1A1A;flex-shrink:0;">'
       +   '<div style="font-size:11px;font-weight:700;letter-spacing:2px;color:'+accent+';text-transform:uppercase;">'+icon+' '+label+'</div>'
       + '</div>'
       + rowsHtml;
@@ -7715,10 +7778,10 @@ function buildPublicOnDutyCol(openSessions, todayStr) {
   function dutyRow(row) {
     var m = row.member;
     var badge = row.unit
-      ? '<div style="font-size:9px;color:#27AE60;letter-spacing:1px;margin-top:1px;">'+row.unit+(row.pos?' \u00b7 '+row.pos:'')+'</div>'
+      ? '<div style="font-size:11px;color:#27AE60;letter-spacing:1px;margin-top:1px;">'+row.unit+(row.pos?' \u00b7 '+row.pos:'')+'</div>'
       : (row.desc
-          ? '<div style="font-size:9px;color:#27AE60;letter-spacing:1px;margin-top:1px;">'+row.desc+'</div>'
-          : '<div style="font-size:9px;color:#555;letter-spacing:1px;margin-top:1px;">Station Duty</div>');
+          ? '<div style="font-size:11px;color:#27AE60;letter-spacing:1px;margin-top:1px;">'+row.desc+'</div>'
+          : '<div style="font-size:11px;color:#555;letter-spacing:1px;margin-top:1px;">Station Duty</div>');
     return '<div style="display:flex;align-items:center;gap:8px;padding:5px 14px;border-left:3px solid #27AE60;">'
       + '<div style="width:8px;height:8px;border-radius:50%;background:#27AE60;flex-shrink:0;box-shadow:0 0 6px #27AE60;"></div>'
       + '<div style="flex:1;min-width:0;">'
@@ -7857,13 +7920,13 @@ function buildPublicStaffingCol(dateStr, dateObj, openSessions, title, accentCol
         return '<div style="display:flex;align-items:center;gap:6px;padding:3px 0;">'
           + '<div style="width:6px;height:6px;border-radius:50%;background:'+(isClockedIn?'#27AE60':'#333')+';flex-shrink:0;'+(isClockedIn?'box-shadow:0 0 4px #27AE60;':'')+'"></div>'
           + '<div style="flex:1;min-width:0;">'
-          +   '<div style="font-size:12px;font-weight:'+(isClockedIn?'700':'500')+';color:'+(isClockedIn?'#F0F0F0':'#888')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+name+'</div>'
+          +   '<div style="font-size:14px;font-weight:'+(isClockedIn?'700':'500')+';color:'+(isClockedIn?'#F0F0F0':'#888')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+name+'</div>'
           +   (sh.position ? '<div style="font-size:10px;color:#555;letter-spacing:.5px;">'+sh.position+'</div>' : '')
           + '</div>'
           + '</div>';
       }).join('');
       return '<div style="margin-bottom:10px;">'
-        + '<div style="font-size:11px;font-weight:700;color:'+accentColor+';letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;border-bottom:1px solid #1E1E1E;padding-bottom:3px;">'+unitLabel+'</div>'
+        + '<div style="font-size:12px;font-weight:700;color:'+accentColor+';letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;border-bottom:1px solid #1E1E1E;padding-bottom:3px;">'+unitLabel+'</div>'
         + memberRows
         + '</div>';
     }).join('');
@@ -7872,7 +7935,7 @@ function buildPublicStaffingCol(dateStr, dateObj, openSessions, title, accentCol
   return '<div style="display:flex;flex-direction:column;border-right:1px solid #1E1E1E;overflow:hidden;">'
     + '<div style="padding:10px 14px;background:#111;border-bottom:1px solid '+accentColor+';flex-shrink:0;display:flex;align-items:baseline;gap:8px;">'
     +   '<span style="font-size:14px;font-weight:700;color:#F0F0F0;letter-spacing:2px;text-transform:uppercase;">'+title+'</span>'
-    +   '<span style="font-size:11px;color:#555;">'+dayLabel+'</span>'
+    +   '<span style="font-size:12px;color:#666;">'+dayLabel+'</span>'
     + '</div>'
     + '<div style="flex:1;overflow-y:auto;padding:10px 14px;">'
     + unitsHtml
@@ -7902,7 +7965,7 @@ function buildPublicEventsCol(todayStr, tomorrowStr) {
       var signups = (ev.signups||[]).length;
       return '<div style="padding:10px 0;border-bottom:1px solid #1A1A1A;">'
         + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">'
-        +   '<span style="font-size:9px;font-weight:700;color:'+tagColor+';letter-spacing:2px;background:rgba(200,16,46,0.08);border:1px solid '+tagColor+';border-radius:4px;padding:1px 5px;">'+tag+'</span>'
+        +   '<span style="font-size:11px;font-weight:700;color:'+tagColor+';letter-spacing:2px;background:rgba(200,16,46,0.08);border:1px solid '+tagColor+';border-radius:4px;padding:2px 7px;">'+tag+'</span>'
         +   (timeFmt ? '<span style="font-size:10px;color:#666;">\u23F0 '+timeFmt+'</span>' : '')
         + '</div>'
         + '<div style="font-size:13px;font-weight:700;color:#F0F0F0;line-height:1.2;margin-bottom:2px;">'+ev.title+'</div>'
@@ -7913,10 +7976,10 @@ function buildPublicEventsCol(todayStr, tomorrowStr) {
           +   '<div style="font-size:9px;font-weight:700;color:#27AE60;letter-spacing:1px;text-transform:uppercase;margin-bottom:3px;">\u2713 '+signups+' Signed Up</div>'
           +   (ev.signups||[]).map(function(sg){
                 var sm = (state.roster||[]).find(function(x){ return x.id===sg.memberId; });
-                return sm ? '<div style="font-size:10px;color:#888;line-height:1.4;">'+sm.last+', '+sm.first+'</div>' : '';
+                return sm ? '<div style="font-size:12px;color:#888;line-height:1.4;">'+sm.last+', '+sm.first+'</div>' : '';
               }).join('')
           + '</div>'
-          : '<div style="font-size:10px;color:#444;margin-top:4px;">No sign-ups yet</div>'
+          : '<div style="font-size:12px;color:#444;margin-top:4px;">No sign-ups yet</div>'
         )
         + '</div>';
     }).join('');
@@ -8169,7 +8232,7 @@ function downloadLosapReport() {
     +     '<div style="font-size:11px;font-weight:700;letter-spacing:2px;color:#c00;text-transform:uppercase;margin-bottom:4px;">RBVFC Station 13</div>'
     +     '<h1>' + esc(member.first) + ' ' + esc(member.last) + '</h1>'
     +     '<div class="meta">'
-    +       'Badge: ' + esc(member.badge||'—') + ' &nbsp;&bull;&nbsp; Rank: ' + esc(member.rank||'—') + '<br>'
+    +       'Badge: ' + esc(member.memberId ? '50-'+member.memberId : '—') + ' &nbsp;&bull;&nbsp; Rank: ' + esc(member.rank||'—') + '<br>'
     +       'Report Year: <strong>' + yrS + '</strong> &nbsp;&bull;&nbsp; Generated: ' + new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})
     +     '</div>'
     +   '</div>'
@@ -9242,9 +9305,14 @@ function applyBulkEdit() {
           <div id="alertIndividualList" style="display:none;max-height:200px;overflow-y:auto;border:1px solid #2A2A2A;border-radius:8px;padding:8px;margin-bottom:12px;"></div>
           <div class="form-group">
             <label>Message</label>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+              <div style="font-size:11px;color:#666;flex-shrink:0;">Auto-fill from day's needs:</div>
+              <input type="date" id="staffingNeedsDate" style="flex:1;min-width:110px;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:6px 10px;font-size:12px;" />
+              <button class="btn btn-secondary" style="font-size:12px;padding:6px 12px;white-space:nowrap;" onclick="fillStaffingNeedsMessage()">📋 Fill Needs</button>
+            </div>
             <textarea id="staffingAlertMsg" rows="3" placeholder="Type your alert message…" style="width:100%;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:10px;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
           </div>
-          <button class="btn btn-primary btn-full">📢 Send Alert</button>
+          <button class="btn btn-primary btn-full" onclick="sendStaffingAlert()">📢 Send Alert</button>
           <div id="alertHistory" style="margin-top:16px;"></div>
         </div>
 
@@ -9258,7 +9326,7 @@ function applyBulkEdit() {
             <div id="customGroupsList"></div>
             <div style="display:flex;gap:8px;margin-top:10px;">
               <input type="text" id="newGroupName" placeholder="New group name…" style="flex:1;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:8px 10px;font-size:13px;">
-              <button class="btn btn-secondary">＋ Create</button>
+              <button class="btn btn-secondary" onclick="openCreateGroupModal()">＋ Create</button>
             </div>
           </div>
         </div>
