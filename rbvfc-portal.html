@@ -44,6 +44,7 @@ body{
   display:flex;
   flex-direction:column;
   overflow:hidden;
+  transition:padding-top .2s ease;
 }
 
 
@@ -716,6 +717,7 @@ function updateClock() {
 //  NAVIGATION
 // ═══════════════════════════════════════════════════
 function showTab(id) {
+  setTimeout(_adjustAppTopPad, 50);
   document.querySelectorAll('.section').forEach(function(s){ s.classList.remove('active'); });
   document.querySelectorAll('.nav-tab').forEach(function(t){ t.classList.remove('active'); });
   document.querySelectorAll('.bnav-btn').forEach(function(b){ b.classList.remove('active'); });
@@ -812,7 +814,7 @@ function showReminder(elapsed) {
   var el = document.getElementById('reminderElapsed'); if(el) el.textContent = formatElapsed(elapsed);
   o.style.display = 'flex';
 }
-function clockOutFromReminder() { dismissReminder(); toggleClock(); }
+function clockOutFromReminder() { _hideTopBanner('clockReminderTopBanner'); toggleClock(); }
 
 // ═══════════════════════════════════════════════════
 //  STATS
@@ -4141,21 +4143,57 @@ function checkStaffingReminders() {
     if (hour >= 6) { s.reminded = true; save(); showStaffingReminder(s); }
   });
 }
-function showStaffingReminder(shift) {
-  var el = document.getElementById('staffingReminderBanner');
+// ─── UNIFIED TOP-BANNER HELPERS ─────────────────────────────
+function _showTopBanner(id, bgColor, accentColor, icon, title, body, buttons) {
+  var el = document.getElementById(id);
   if (!el) {
     el = document.createElement('div');
-    el.id = 'staffingReminderBanner';
-    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#F5A623;color:#000;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;box-shadow:0 4px 20px rgba(0,0,0,.5);';
+    el.id = id;
     document.body.appendChild(el);
   }
-  el.innerHTML = '<div style="font-weight:700;font-size:14px;">⏰ SHIFT REMINDER: '+UNIT_LABELS[shift.unitId]+' — '+shift.position+' today ('+shiftLabel(shift)+'). Please clock in!</div>'+
-    '<button onclick="staffClockInFromBanner(\''+shift.id+'\')" style="background:#000;color:#F5A623;border:none;padding:8px 16px;border-radius:6px;font-weight:700;cursor:pointer;">Clock In Now</button>'+
-    '<button onclick="dismissReminder()" style="background:transparent;border:1px solid #000;color:#000;padding:8px 12px;border-radius:6px;cursor:pointer;">Dismiss</button>';
+  var btnHtml = buttons.map(function(b){
+    return '<button onclick="'+b.fn+'" style="flex-shrink:0;background:'+b.bg+';color:'+b.color+';border:1px solid '+b.border+';padding:9px 18px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap;letter-spacing:.5px;">'+b.label+'</button>';
+  }).join('');
+  el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:'+bgColor+';border-bottom:3px solid '+accentColor+';color:#F0F0F0;padding:14px 20px;box-shadow:0 4px 24px rgba(0,0,0,.7);display:flex;align-items:center;gap:14px;flex-wrap:wrap;';
+  el.innerHTML = '<span style="font-size:22px;flex-shrink:0;">'+icon+'</span>'
+    + '<div style="flex:1;min-width:0;">'
+    +   '<div style="font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:'+accentColor+';margin-bottom:2px;">'+title+'</div>'
+    +   '<div style="font-size:14px;font-weight:600;color:#F0F0F0;line-height:1.3;">'+body+'</div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+btnHtml+'</div>';
   el.style.display = 'flex';
+  // Push app content down so banner doesn't overlap
+  _adjustAppTopPad();
+}
+function _hideTopBanner(id) {
+  var el = document.getElementById(id);
+  if (el) el.style.display = 'none';
+  _adjustAppTopPad();
+}
+function _adjustAppTopPad() {
+  var totalH = 0;
+  ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el && el.style.display !== 'none') totalH += el.offsetHeight;
+  });
+  var app = document.getElementById('app');
+  if (app) app.style.paddingTop = totalH > 0 ? (totalH+4)+'px' : '';
+}
+
+function showStaffingReminder(shift) {
+  _showTopBanner(
+    'staffingReminderBanner',
+    '#1A1200', '#F5A623', '⏰',
+    'SHIFT REMINDER — ACKNOWLEDGMENT REQUIRED',
+    UNIT_LABELS[shift.unitId]+' · '+shift.position+' · '+shiftLabel(shift)+' — Please clock in!',
+    [
+      { label:'🟢 Clock In Now', fn:"staffClockInFromBanner('"+shift.id+"')", bg:'#F5A623', color:'#000', border:'#F5A623' },
+      { label:'Acknowledge', fn:"dismissReminder()", bg:'transparent', color:'#F5A623', border:'#F5A623' }
+    ]
+  );
 }
 function staffClockInFromBanner(shiftId) { staffClockIn(shiftId); dismissReminder(); }
-function dismissReminder() { var el=document.getElementById('staffingReminderBanner'); if(el) el.style.display='none'; }
+function dismissReminder() { _hideTopBanner('staffingReminderBanner'); }
 
 // ── ALERTS ────────────────────────────────────────────────────
 function autoFillAlertMsg() {
@@ -4868,38 +4906,32 @@ function renderAlertHistory() {
   container.innerHTML = html;
 }
 function renderMemberAlertBanner() {
-  var container = document.getElementById('staffingAlertBannerMember');
-  if (!container) return;
   var uid = state.currentUserId;
-  // Administrative/Auxiliary members don't receive staffing alerts
   var me = (state.roster||[]).find(function(m){ return m.id===uid; });
-  if (isAdminMember(me)) { container.innerHTML=''; return; }
-  // Find most recent alert within 24hrs that this member hasn't cleared
+  if (isAdminMember(me)) { _hideTopBanner('staffingAlertTopBanner'); return; }
+  // Find most recent uncleared alert within 24 hrs targeting this member
   var latest = (state.staffingAlerts||[]).find(function(a) {
     var age = (Date.now()-new Date(a.sentAt).getTime())/3600000;
     if (age > 24) return false;
-    var clears = a.clears || [];
-    if (clears.some(function(cl){ return cl.memberId===uid; })) return false;
-    // Check targeting: if targetMembers set, only show to those members
-    if (a.targetMembers && a.targetMembers.length) {
-      return a.targetMembers.indexOf(uid) > -1;
-    }
-    return true; // no targeting = all eligible members
+    if ((a.clears||[]).some(function(cl){ return cl.memberId===uid; })) return false;
+    if (a.targetMembers && a.targetMembers.length) return a.targetMembers.indexOf(uid) > -1;
+    return true;
   });
-  if (!latest) { container.innerHTML=''; return; }
+  if (!latest) { _hideTopBanner('staffingAlertTopBanner'); return; }
   var sender = (state.roster||[]).find(function(m){ return m.id===latest.sentBy; });
-  container.innerHTML = '<div style="background:#1A2A3A;border:1px solid #F5A623;border-radius:8px;padding:12px;margin-bottom:12px;">'
-    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">'
-    + '<div style="flex:1;">'
-    + '<div style="font-size:11px;color:#F5A623;font-weight:700;margin-bottom:4px;">📢 STAFFING ALERT'
-    + (sender ? ' <span style="font-weight:400;color:#888;">from '+sender.last+', '+sender.first+'</span>' : '')
-    + ((latest.groupLabel||latest.group) ? ' &nbsp;&middot;&nbsp; <span style="font-weight:400;color:#7EC8E3;">Sent to: '+(latest.groupLabel||getGroupLabel(latest.group||'')||'')+'</span>' : '')
-    + '</div>'
-    + '<div style="font-size:13px;color:#F0F0F0;white-space:pre-line;">'+latest.msg+'</div>'
-    + '</div>'
-    + '<button onclick="clearStaffingAlert(\'' + latest.id + '\')" style="flex-shrink:0;background:#0A1A2A;border:1px solid #F5A623;color:#F5A623;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">✓ Clear</button>'
-    + '</div>'
-    + '</div>';
+  var fromStr = sender ? ' · From: '+sender.last+', '+sender.first : '';
+  var toStr   = latest.groupLabel ? ' · To: '+latest.groupLabel : '';
+  _showTopBanner(
+    'staffingAlertTopBanner',
+    '#0D1A2A', '#F5A623', '📢',
+    'STAFFING ALERT — ACKNOWLEDGMENT REQUIRED' + fromStr + toStr,
+    latest.msg,
+    [{ label:'✓ Acknowledge', fn:"ackStaffingAlert('"+latest.id+"')", bg:'#F5A623', color:'#000', border:'#F5A623' }]
+  );
+}
+function ackStaffingAlert(alertId) {
+  clearStaffingAlert(alertId);
+  _hideTopBanner('staffingAlertTopBanner');
 }
 
 // ── HELPERS ───────────────────────────────────────────────────
@@ -5710,6 +5742,52 @@ function boot() {
 
     state.staffingEnabled = {e131:true,e132:true,Tk13:true,a139:true,Mu13:true,U13:true,Br13:true,RB13:true,FB13:true,CH13:true};
     state.companyName = 'RBVFC Station 13';
+
+    // ── DEMO TRAINING CLASSES ─────────────────────────────────
+    state.trainingClasses = [
+      {
+        id: 'cls_demo_01',
+        name: 'Firefighter I Certification Course',
+        description: 'Maryland MFRI FFI certification curriculum. Covers fire behavior, hose operations, forcible entry, search & rescue, and ladder work.',
+        instructor: 'Lt. T. Bishop',
+        startDate: _ds(28),
+        endDate:   _ds(-42),
+        daysOfWeek: [1, 3, 5],
+        startTime: '1830',
+        endTime:   '2130',
+        members: ['mbr_009','mbr_013','mbr_017'],
+        active: true,
+        createdAt: _ago(35, 0)
+      },
+      {
+        id: 'cls_demo_02',
+        name: 'EMS Refresher & CPR Recertification',
+        description: 'Annual EMS skills refresher including BLS updates, AED recertification, and patient assessment review. Required for all EMS-certified members.',
+        instructor: 'Capt. J. Hartley',
+        startDate: _ds(7),
+        endDate:   _ds(-14),
+        daysOfWeek: [2, 4],
+        startTime: '1900',
+        endTime:   '2100',
+        members: ['mbr_010','mbr_016','mbr_005','mbr_007'],
+        active: true,
+        createdAt: _ago(10, 0)
+      },
+      {
+        id: 'cls_demo_03',
+        name: 'Pump Operations & Driver Certification',
+        description: 'FADO/Chauffeur certification prep. Covers pump theory, hydraulics, relay operations, and practical driving evaluations on E131 and E132.',
+        instructor: 'A/C M. Caruso',
+        startDate: _ds(21),
+        endDate:   _ds(-21),
+        daysOfWeek: [6],
+        startTime: '0800',
+        endTime:   '1200',
+        members: ['mbr_004','mbr_006','mbr_009','mbr_014'],
+        active: true,
+        createdAt: _ago(25, 0)
+      }
+    ];
     save();
   }
 
@@ -8429,26 +8507,36 @@ document.addEventListener('DOMContentLoaded', function() {
 // 1. Clock reminder check (runs every 60s via setInterval)
 function checkClockReminder() {
   if (!state.currentSession) return;
-  var reminderEl = document.getElementById('clockReminder');
-  if (!reminderEl) return;
   var start = state.currentSession.start;
   if (!start) return;
-  var elapsed = (Date.now() - new Date(start).getTime()) / 1000 / 60 / 60; // hours
+  // Don't re-show if already dismissed in the last 2 hours
+  var lastDismiss = state.currentSession.reminderDismissed;
+  if (lastDismiss && (Date.now()-new Date(lastDismiss).getTime()) < 2*3600000) return;
+  var elapsed = (Date.now() - new Date(start).getTime()) / 1000 / 60 / 60;
   if (elapsed >= 4) {
-    reminderEl.style.display = 'block';
+    var hrs = elapsed.toFixed(1);
+    _showTopBanner(
+      'clockReminderTopBanner',
+      '#0A1A0A', '#7EC850', '⏰',
+      '4-HOUR CHECK-IN — ACKNOWLEDGMENT REQUIRED',
+      'You have been clocked in for '+hrs+' hours. Are you still on duty?',
+      [
+        { label:'✅ Still On Duty', fn:'ackClockReminder()', bg:'#27AE60', color:'#000', border:'#27AE60' },
+        { label:'🔴 Clock Me Out', fn:'clockOutFromReminder()', bg:'transparent', color:'#E74C3C', border:'#E74C3C' }
+      ]
+    );
   }
 }
 
-// 2. Dismiss the 4-hour clock-in reminder
-function dismissClockReminder() {
-  var reminderEl = document.getElementById('clockReminder');
-  if (reminderEl) reminderEl.style.display = 'none';
-  // Reset reminder timer by updating session touch time
+// 2. Dismiss/acknowledge the 4-hour clock-in reminder
+function dismissClockReminder() { ackClockReminder(); }
+function ackClockReminder() {
+  _hideTopBanner('clockReminderTopBanner');
   if (state.currentSession) {
     state.currentSession.reminderDismissed = new Date().toISOString();
     save();
   }
-  showToast('✅ Reminder dismissed. Stay safe!');
+  showToast('✅ Acknowledged — will check again in 2 hours.');
 }
 
 // 3. Cancel sign-up modal (standalone modal cancel button)
@@ -8947,15 +9035,7 @@ function applyBulkEdit() {
             </button>
           </div>
 
-          <!-- 4-hour reminder -->
-          <div id="clockReminder" style="display:none;margin-top:16px;background:#1A2400;border:1px solid #7EC850;border-left:4px solid #7EC850;border-radius:10px;padding:14px 16px;">
-            <div style="font-size:11px;color:#A8E060;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">⏰ 4-Hour Check-In</div>
-            <div style="font-size:13px;color:#E0F0C0;margin-bottom:10px;">You've been clocked in for <strong style="color:#C8F060;">4+ hours</strong>. Are you still on duty?</div>
-            <div style="display:flex;gap:8px;">
-              <button class="btn btn-sm" style="background:#2A4A00;border:1px solid #7EC850;color:#A8E060;font-size:12px;padding:6px 14px;border-radius:8px;">✅ Still on duty</button>
-              <button class="btn btn-sm" style="background:#3A1A1A;border:1px solid #C8102E;color:#FF6B6B;font-size:12px;padding:6px 14px;border-radius:8px;">🔴 Clock me out</button>
-            </div>
-          </div>
+          <!-- 4-hour check-in now uses top banner (clockReminderTopBanner) -->
         </div>
 
         <!-- Stats row -->
