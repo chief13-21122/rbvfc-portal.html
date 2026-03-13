@@ -821,18 +821,12 @@ function updateStats() {
   var uid = state.currentUserId;
   var myPts = calcMemberLOSAP(uid, yr);
   var pe = document.getElementById('statPoints'); if(pe) pe.textContent = myPts;
-  // Clock-screen LOSAP mini-card
-  var ptsEl  = document.getElementById('clockLosapPts');
-  var barEl  = document.getElementById('clockLosapBar');
-  var statEl = document.getElementById('clockLosapStatus');
   var banner = document.getElementById('losapBanner');
-  if (ptsEl)  ptsEl.textContent = myPts + ' / 50';
-  if (barEl)  barEl.style.width = Math.min(100,(myPts/50)*100)+'%';
-  if (statEl) { statEl.textContent = myPts>=50 ? '✓ LOSAP QUALIFIED' : (50-myPts)+' pts to qualify'; statEl.style.color = myPts>=50?'#27AE60':'#888'; }
   if (banner) {
     banner.className = 'qual-banner '+(myPts>=50?'pass':'fail');
-    var h3 = banner.querySelector('h3'); if(h3) h3.textContent = myPts>=50?'✓ LOSAP QUALIFIED':'Not Yet Qualified';
-    var sub = document.getElementById('losapBannerSub'); if(sub) sub.textContent = myPts>=50?'You have met the '+yr+' LOSAP requirement.':(50-myPts)+' more points needed to qualify.';
+    var h3 = banner.querySelector('h3'); if(h3) h3.textContent = myPts>=50?'🎉 LOSAP QUALIFIED!':'Not Yet Qualified';
+    var sub = document.getElementById('losapBannerSub'); if(sub) sub.textContent = myPts>=50?'Congratulations! You have met the '+yr+' LOSAP requirement.':(50-myPts)+' more points needed to qualify.';
+    var qi = document.getElementById('losapQualIcon'); if(qi) qi.textContent = myPts>=50?'🎊':'⚠️';
   }
 }
 
@@ -1388,7 +1382,7 @@ function renderLOSAP() {
   var pe = document.getElementById('losapTotalPts'); if(pe) pe.textContent = totalPts;
   var qe = document.getElementById('losapQualified');
   if (qe) {
-    qe.textContent = totalPts>=50 ? '✓ LOSAP QUALIFIED' : (50-totalPts)+' pts to qualify';
+    qe.textContent = totalPts>=50 ? '🎉 LOSAP QUALIFIED!' : (50-totalPts)+' pts to qualify';
     qe.style.color = totalPts>=50 ? '#27AE60' : '#E74C3C';
   }
   // Progress bar
@@ -5295,24 +5289,24 @@ function boot() {
     var _ds  = function(d){   return new Date(_N - d*864e5).toISOString().split('T')[0]; };
 
     state.roster = [
-      {id:'rbvfc_admin_001',first:'Michael',last:'Caruso',memberId:'50-01',rank:'Assistant Chief',appRole:'admin',losapPositions:['President','Assistant Chief'],pin:'0000',active:true,ranks:['Assistant Chief'],additionalCerts:['Mate II','MVO','BRS','FADO','Tiller','AT','ATDA'],unitPositions:{e131:['Chauffeur','Layout'],Tk13:['Chauffeur','Tiller','Can','Roof'],a139:['Driver','3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_002',first:'James',last:'Hartley',memberId:'50-02',rank:'Captain',appRole:'officer',losapPositions:['Captain'],pin:'1234',active:true,ranks:['Captain'],additionalCerts:['MVO','BRS','FADO','Tiller'],unitPositions:{e131:['Officer','Nozzle'],Tk13:['Officer','Irons'],a139:['Driver']},rideReport:'eligible'},
-      {id:'mbr_003',first:'Sarah',last:'McKenna',memberId:'50-03',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS'],unitPositions:{e132:['Officer','Nozzle'],a139:['Technician']},rideReport:'eligible'},
-      {id:'mbr_004',first:'Derek',last:'Walton',memberId:'50-04',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller'],unitPositions:{e131:['Nozzle','Backup'],Tk13:['Irons','Can']},rideReport:'eligible'},
-      {id:'mbr_005',first:'Amanda',last:'Torres',memberId:'50-05',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Backup','Control'],a139:['3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_006',first:'Tyler',last:'Nguyen',memberId:'50-06',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','FADO'],unitPositions:{Tk13:['Roof','Outside Vent'],e131:['Layout']},rideReport:'eligible'},
-      {id:'mbr_007',first:'Brianna',last:'Collins',memberId:'50-07',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Nozzle'],a139:['3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_008',first:'Marcus',last:'Jenkins',memberId:'50-08',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','BRS'],unitPositions:{Tk13:['Chauffeur','Tiller'],e131:['Chauffeur']},rideReport:'eligible'},
-      {id:'mbr_009',first:'Kayla',last:'Ramirez',memberId:'50-09',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e131:['Control'],e132:['Control']},rideReport:'eligible'},
-      {id:'mbr_010',first:'Logan',last:'Pierce',memberId:'50-10',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{a139:['Driver'],Mu13:['EMT']},rideReport:'eligible'},
-      {id:'mbr_011',first:'Nicole',last:'Shaw',memberId:'50-11',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e132:['Officer'],Tk13:['Officer','Can']},rideReport:'eligible'},
-      {id:'mbr_012',first:'Chris',last:'Donnelly',memberId:'50-12',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{RB13:['MVO','Mate'],FB13:['MVO']},rideReport:'eligible'},
-      {id:'mbr_013',first:'Destiny',last:'Franklin',memberId:'50-13',rank:'Student',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Student'],additionalCerts:[],unitPositions:{},rideReport:'ineligible'},
-      {id:'mbr_014',first:'Ryan',last:'Kowalski',memberId:'50-14',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','AT'],unitPositions:{Tk13:['Roof','Irons'],e131:['Backup']},rideReport:'eligible'},
-      {id:'mbr_015',first:'Tamara',last:'Bishop',memberId:'50-15',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e131:['Officer'],a139:['Technician']},rideReport:'eligible'},
-      {id:'mbr_016',first:'Victor',last:'Espinoza',memberId:'50-16',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{Mu13:['EMT'],a139:['3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_017',first:'Hannah',last:'Reid',memberId:'50-17',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e132:['Layout']},rideReport:'eligible'},
-      {id:'mbr_018',first:'Elijah',last:'Thompson',memberId:'50-18',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','Tiller'],unitPositions:{Tk13:['Chauffeur','Outside Vent'],e132:['Chauffeur']},rideReport:'eligible'}
+      {id:'rbvfc_admin_001',first:'Michael',last:'Caruso',memberId:'50-1042',rank:'Assistant Chief',appRole:'admin',losapPositions:['President','Assistant Chief'],pin:'0000',active:true,ranks:['Assistant Chief'],additionalCerts:['Mate II','MVO','BRS','FADO','Tiller','AT','ATDA'],unitPositions:{e131:['Chauffeur','Layout'],Tk13:['Chauffeur','Tiller','Can','Roof'],a139:['Driver','3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_002',first:'James',last:'Hartley',memberId:'50-1095',rank:'Captain',appRole:'officer',losapPositions:['Captain'],pin:'1234',active:true,ranks:['Captain'],additionalCerts:['MVO','BRS','FADO','Tiller'],unitPositions:{e131:['Officer','Nozzle'],Tk13:['Officer','Irons'],a139:['Driver']},rideReport:'eligible'},
+      {id:'mbr_003',first:'Sarah',last:'McKenna',memberId:'50-1118',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS'],unitPositions:{e132:['Officer','Nozzle'],a139:['Technician']},rideReport:'eligible'},
+      {id:'mbr_004',first:'Derek',last:'Walton',memberId:'50-1203',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller'],unitPositions:{e131:['Nozzle','Backup'],Tk13:['Irons','Can']},rideReport:'eligible'},
+      {id:'mbr_005',first:'Amanda',last:'Torres',memberId:'50-1267',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Backup','Control'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_006',first:'Tyler',last:'Nguyen',memberId:'50-1334',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','FADO'],unitPositions:{Tk13:['Roof','Outside Vent'],e131:['Layout']},rideReport:'eligible'},
+      {id:'mbr_007',first:'Brianna',last:'Collins',memberId:'50-1389',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Nozzle'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_008',first:'Marcus',last:'Jenkins',memberId:'50-1421',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','BRS'],unitPositions:{Tk13:['Chauffeur','Tiller'],e131:['Chauffeur']},rideReport:'eligible'},
+      {id:'mbr_009',first:'Kayla',last:'Ramirez',memberId:'50-1456',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e131:['Control'],e132:['Control']},rideReport:'eligible'},
+      {id:'mbr_010',first:'Logan',last:'Pierce',memberId:'50-1512',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{a139:['Driver'],Mu13:['EMT']},rideReport:'eligible'},
+      {id:'mbr_011',first:'Nicole',last:'Shaw',memberId:'50-1578',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e132:['Officer'],Tk13:['Officer','Can']},rideReport:'eligible'},
+      {id:'mbr_012',first:'Chris',last:'Donnelly',memberId:'50-1603',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{RB13:['MVO','Mate'],FB13:['MVO']},rideReport:'eligible'},
+      {id:'mbr_013',first:'Destiny',last:'Franklin',memberId:'50-1647',rank:'Student',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Student'],additionalCerts:[],unitPositions:{},rideReport:'ineligible'},
+      {id:'mbr_014',first:'Ryan',last:'Kowalski',memberId:'50-1689',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','AT'],unitPositions:{Tk13:['Roof','Irons'],e131:['Backup']},rideReport:'eligible'},
+      {id:'mbr_015',first:'Tamara',last:'Bishop',memberId:'50-1724',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e131:['Officer'],a139:['Technician']},rideReport:'eligible'},
+      {id:'mbr_016',first:'Victor',last:'Espinoza',memberId:'50-1768',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{Mu13:['EMT'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_017',first:'Hannah',last:'Reid',memberId:'50-1812',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e132:['Layout']},rideReport:'eligible'},
+      {id:'mbr_018',first:'Elijah',last:'Thompson',memberId:'50-1855',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','Tiller'],unitPositions:{Tk13:['Chauffeur','Outside Vent'],e132:['Chauffeur']},rideReport:'eligible'}
     ];
 
     state.sessions = [
@@ -8573,24 +8567,7 @@ function applyBulkEdit() {
 
       </div><!-- end clockCard -->
 
-      <!-- LOSAP Mini Status Card on Clock Screen -->
-      <div class="card" id="clockLosapCard" style="padding:14px 16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <span style="font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#888;">🏅 LOSAP Status</span>
-          <button onclick="showTab('losap')" style="background:none;border:none;color:#C8102E;font-size:11px;cursor:pointer;letter-spacing:1px;font-family:'Barlow Condensed',sans-serif;text-transform:uppercase;">View Details →</button>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div style="flex:1;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-              <span id="clockLosapStatus" style="font-size:12px;color:#888;">— pts to qualify</span>
-              <span id="clockLosapPts" style="font-size:13px;font-weight:700;color:#F0F0F0;">0 / 50</span>
-            </div>
-            <div style="background:#1A1A1A;border-radius:4px;height:6px;overflow:hidden;">
-              <div id="clockLosapBar" style="height:6px;background:linear-gradient(90deg,#C8102E,#F5A623);border-radius:4px;transition:width .5s;width:0%;"></div>
-            </div>
-          </div>
-        </div>
-      </div>
+
 
       <!-- My Classes Today -->
       <div class="card" id="myClassesTodayCard" style="display:none;padding:0;overflow:hidden;">
@@ -8640,7 +8617,7 @@ function applyBulkEdit() {
     <div id="section-losap" class="section">
 
       <div id="losapBanner" class="qual-banner fail">
-        <div class="qual-icon">⚠️</div>
+        <div class="qual-icon" id="losapQualIcon">⚠️</div>
         <div class="qual-text">
           <h3 id="losapQualified">Not Yet Qualified</h3>
           <p id="losapBannerSub">Complete requirements to qualify for LOSAP benefits.</p>
