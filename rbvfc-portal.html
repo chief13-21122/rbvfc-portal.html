@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>RBVFC Member Portal</title>
+<title>RBVFC LOSAP Member Portal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -1493,7 +1493,7 @@ function renderRankingStatus(uid, yr) {
   }
   if (!myEMS&&!myFire) html = '<p style="color:#666;font-size:13px;padding:10px;">No responses logged yet for '+yr+'.</p>';
   container.innerHTML = html;
-  if (card) card.style.display = 'block';
+  if (card) card.style.display = 'block'; var _rb=document.getElementById('losapRankingBody'); if(_rb) _rb.style.display='block';
 }
 
 // ═══════════════════════════════════════════════════
@@ -2425,7 +2425,7 @@ function copyAppsScript() {
 }
 function getAppsScriptCode() {
   var lines = [
-    "// ── RBVFC Member LOSAP Portal — Google Apps Script ──",
+    "// ── RBVFC LOSAP Member Portal — Google Apps Script ──",
     "// SETUP:",
     "// 1. Replace YOUR_SHEET_ID_HERE with your Google Sheet ID",
     "//    (the long string between /d/ and /edit in your Sheet URL)",
@@ -2592,7 +2592,7 @@ function getAppsScriptCode() {
     "  s.clearContents();",
     "  s.appendRow(['Last Sync', meta && meta.syncTime ? new Date(meta.syncTime).toLocaleString() : new Date().toLocaleString()]);",
     "  s.appendRow(['Station', meta && meta.station ? meta.station : 'Riviera Beach VFC - Company 13']);",
-    "  s.appendRow(['Source', 'RBVFC Member LOSAP Portal']);",
+    "  s.appendRow(['Source', 'RBVFC LOSAP Member Portal']);",
     "}",
     "",
     "function fmt(sheet, cols, color) {",
@@ -5293,24 +5293,24 @@ function boot() {
     var _ds  = function(d){   return new Date(_N - d*864e5).toISOString().split('T')[0]; };
 
     state.roster = [
-      {id:'rbvfc_admin_001',first:'Michael',last:'Caruso',memberId:'RBVFC-01',rank:'Assistant Chief',appRole:'admin',losapPositions:['President','Assistant Chief'],pin:'0000',active:true,ranks:['Assistant Chief'],additionalCerts:['Mate II','MVO','BRS','FADO','Tiller','AT','ATDA'],unitPositions:{e131:['Chauffeur','Layout'],Tk13:['Chauffeur','Tiller','Can','Roof'],a139:['Driver','3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_002',first:'James',last:'Hartley',memberId:'RBVFC-02',rank:'Captain',appRole:'officer',losapPositions:['Captain'],pin:'1234',active:true,ranks:['Captain'],additionalCerts:['MVO','BRS','FADO','Tiller'],unitPositions:{e131:['Officer','Nozzle'],Tk13:['Officer','Irons'],a139:['Driver']},rideReport:'eligible'},
-      {id:'mbr_003',first:'Sarah',last:'McKenna',memberId:'RBVFC-03',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS'],unitPositions:{e132:['Officer','Nozzle'],a139:['Technician']},rideReport:'eligible'},
-      {id:'mbr_004',first:'Derek',last:'Walton',memberId:'RBVFC-04',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller'],unitPositions:{e131:['Nozzle','Backup'],Tk13:['Irons','Can']},rideReport:'eligible'},
-      {id:'mbr_005',first:'Amanda',last:'Torres',memberId:'RBVFC-05',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Backup','Control'],a139:['3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_006',first:'Tyler',last:'Nguyen',memberId:'RBVFC-06',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','FADO'],unitPositions:{Tk13:['Roof','Outside Vent'],e131:['Layout']},rideReport:'eligible'},
-      {id:'mbr_007',first:'Brianna',last:'Collins',memberId:'RBVFC-07',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Nozzle'],a139:['3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_008',first:'Marcus',last:'Jenkins',memberId:'RBVFC-08',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','BRS'],unitPositions:{Tk13:['Chauffeur','Tiller'],e131:['Chauffeur']},rideReport:'eligible'},
-      {id:'mbr_009',first:'Kayla',last:'Ramirez',memberId:'RBVFC-09',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e131:['Control'],e132:['Control']},rideReport:'eligible'},
-      {id:'mbr_010',first:'Logan',last:'Pierce',memberId:'RBVFC-10',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{a139:['Driver'],Mu13:['EMT']},rideReport:'eligible'},
-      {id:'mbr_011',first:'Nicole',last:'Shaw',memberId:'RBVFC-11',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e132:['Officer'],Tk13:['Officer','Can']},rideReport:'eligible'},
-      {id:'mbr_012',first:'Chris',last:'Donnelly',memberId:'RBVFC-12',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{RB13:['MVO','Mate'],FB13:['MVO']},rideReport:'eligible'},
-      {id:'mbr_013',first:'Destiny',last:'Franklin',memberId:'RBVFC-13',rank:'Student',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Student'],additionalCerts:[],unitPositions:{},rideReport:'ineligible'},
-      {id:'mbr_014',first:'Ryan',last:'Kowalski',memberId:'RBVFC-14',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','AT'],unitPositions:{Tk13:['Roof','Irons'],e131:['Backup']},rideReport:'eligible'},
-      {id:'mbr_015',first:'Tamara',last:'Bishop',memberId:'RBVFC-15',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e131:['Officer'],a139:['Technician']},rideReport:'eligible'},
-      {id:'mbr_016',first:'Victor',last:'Espinoza',memberId:'RBVFC-16',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{Mu13:['EMT'],a139:['3rd Seat']},rideReport:'eligible'},
-      {id:'mbr_017',first:'Hannah',last:'Reid',memberId:'RBVFC-17',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e132:['Layout']},rideReport:'eligible'},
-      {id:'mbr_018',first:'Elijah',last:'Thompson',memberId:'RBVFC-18',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','Tiller'],unitPositions:{Tk13:['Chauffeur','Outside Vent'],e132:['Chauffeur']},rideReport:'eligible'}
+      {id:'rbvfc_admin_001',first:'Michael',last:'Caruso',memberId:'50-01',rank:'Assistant Chief',appRole:'admin',losapPositions:['President','Assistant Chief'],pin:'0000',active:true,ranks:['Assistant Chief'],additionalCerts:['Mate II','MVO','BRS','FADO','Tiller','AT','ATDA'],unitPositions:{e131:['Chauffeur','Layout'],Tk13:['Chauffeur','Tiller','Can','Roof'],a139:['Driver','3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_002',first:'James',last:'Hartley',memberId:'50-02',rank:'Captain',appRole:'officer',losapPositions:['Captain'],pin:'1234',active:true,ranks:['Captain'],additionalCerts:['MVO','BRS','FADO','Tiller'],unitPositions:{e131:['Officer','Nozzle'],Tk13:['Officer','Irons'],a139:['Driver']},rideReport:'eligible'},
+      {id:'mbr_003',first:'Sarah',last:'McKenna',memberId:'50-03',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS'],unitPositions:{e132:['Officer','Nozzle'],a139:['Technician']},rideReport:'eligible'},
+      {id:'mbr_004',first:'Derek',last:'Walton',memberId:'50-04',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller'],unitPositions:{e131:['Nozzle','Backup'],Tk13:['Irons','Can']},rideReport:'eligible'},
+      {id:'mbr_005',first:'Amanda',last:'Torres',memberId:'50-05',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Backup','Control'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_006',first:'Tyler',last:'Nguyen',memberId:'50-06',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','FADO'],unitPositions:{Tk13:['Roof','Outside Vent'],e131:['Layout']},rideReport:'eligible'},
+      {id:'mbr_007',first:'Brianna',last:'Collins',memberId:'50-07',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{e132:['Nozzle'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_008',first:'Marcus',last:'Jenkins',memberId:'50-08',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','BRS'],unitPositions:{Tk13:['Chauffeur','Tiller'],e131:['Chauffeur']},rideReport:'eligible'},
+      {id:'mbr_009',first:'Kayla',last:'Ramirez',memberId:'50-09',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e131:['Control'],e132:['Control']},rideReport:'eligible'},
+      {id:'mbr_010',first:'Logan',last:'Pierce',memberId:'50-10',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{a139:['Driver'],Mu13:['EMT']},rideReport:'eligible'},
+      {id:'mbr_011',first:'Nicole',last:'Shaw',memberId:'50-11',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e132:['Officer'],Tk13:['Officer','Can']},rideReport:'eligible'},
+      {id:'mbr_012',first:'Chris',last:'Donnelly',memberId:'50-12',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['BRS'],unitPositions:{RB13:['MVO','Mate'],FB13:['MVO']},rideReport:'eligible'},
+      {id:'mbr_013',first:'Destiny',last:'Franklin',memberId:'50-13',rank:'Student',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Student'],additionalCerts:[],unitPositions:{},rideReport:'ineligible'},
+      {id:'mbr_014',first:'Ryan',last:'Kowalski',memberId:'50-14',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','Tiller','AT'],unitPositions:{Tk13:['Roof','Irons'],e131:['Backup']},rideReport:'eligible'},
+      {id:'mbr_015',first:'Tamara',last:'Bishop',memberId:'50-15',rank:'Lieutenant',appRole:'officer',losapPositions:['Lieutenant'],pin:'1234',active:true,ranks:['Lieutenant'],additionalCerts:['MVO','BRS','FADO'],unitPositions:{e131:['Officer'],a139:['Technician']},rideReport:'eligible'},
+      {id:'mbr_016',first:'Victor',last:'Espinoza',memberId:'50-16',rank:'FFI',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFI'],additionalCerts:['MVO'],unitPositions:{Mu13:['EMT'],a139:['3rd Seat']},rideReport:'eligible'},
+      {id:'mbr_017',first:'Hannah',last:'Reid',memberId:'50-17',rank:'Probationary',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['Probationary'],additionalCerts:[],unitPositions:{e132:['Layout']},rideReport:'eligible'},
+      {id:'mbr_018',first:'Elijah',last:'Thompson',memberId:'50-18',rank:'FFII',appRole:'member',losapPositions:[],pin:'1234',active:true,ranks:['FFII'],additionalCerts:['MVO','BRS','Tiller'],unitPositions:{Tk13:['Chauffeur','Outside Vent'],e132:['Chauffeur']},rideReport:'eligible'}
     ];
 
     state.sessions = [
@@ -5386,7 +5386,21 @@ function boot() {
       // Boat Fire — 50 days ago — RB13
       {id:'er_14',date:_ds(50),incidentNum:'26-000988',type:'Boat Fire',address:'Marley Creek Marina',units:['RB13'],members:['mbr_009','mbr_012','mbr_013'],apparatus:'RB13',alarmTime:'11:20',clearTime:'12:45',notes:'25ft cabin cruiser, fire extinguished',loggedBy:'mbr_012',createdAt:_ago(50,2)},
       // CO — 60 days ago — E132+A139
-      {id:'er_15',date:_ds(60),incidentNum:'26-000780',type:'CO Alarm',address:'4412 Oakwood Rd, Brooklyn Park',units:['e132','a139'],members:['mbr_003','mbr_005','mbr_007','mbr_009','mbr_010'],apparatus:'E132/A139',alarmTime:'02:30',clearTime:'03:10',notes:'Faulty furnace, 4 residents transported precautionary',loggedBy:'mbr_003',createdAt:_ago(60,2)}
+      {id:'er_15',date:_ds(60),incidentNum:'26-000780',type:'CO Alarm',address:'4412 Oakwood Rd, Brooklyn Park',units:['e132','a139'],members:['mbr_003','mbr_005','mbr_007','mbr_009','mbr_010'],apparatus:'E132/A139',alarmTime:'02:30',clearTime:'03:10',notes:'Faulty furnace, 4 residents transported precautionary',loggedBy:'mbr_003',createdAt:_ago(60,2)},
+      // Working Fire — 70 days ago
+      {id:'er_16',date:_ds(70),incidentNum:'26-000650',type:'Structure Fire',address:'203 Crain Hwy S, Glen Burnie',units:['e131','Tk13'],members:['rbvfc_admin_001','mbr_002','mbr_004','mbr_006','mbr_014','mbr_018'],apparatus:'E131/Tk13',alarmTime:'18:44',clearTime:'21:10',notes:'1-alarm residential, fire in wall, overhaul 2hrs',loggedBy:'rbvfc_admin_001',createdAt:_ago(70,4)},
+      // EMS — 80 days ago
+      {id:'er_17',date:_ds(80),incidentNum:'26-000510',type:'EMS — Trauma',address:'BWI Airport Exit Ramp I-695',units:['a139','Mu13'],members:['mbr_005','mbr_010','mbr_016'],apparatus:'A139/Mu13',alarmTime:'07:22',clearTime:'08:05',notes:'Motorcycle vs guardrail, ALS transport to Shock Trauma',loggedBy:'mbr_010',createdAt:_ago(80,2)},
+      // Gas Leak — 85 days ago
+      {id:'er_18',date:_ds(85),incidentNum:'26-000445',type:'Gas Leak',address:'Route 10 & Marley Neck Blvd',units:['e131','e132'],members:['rbvfc_admin_001','mbr_003','mbr_007','mbr_011','mbr_015'],apparatus:'E131/E132',alarmTime:'15:10',clearTime:'16:30',notes:'Broken gas main — BGE shut-off, road closed 90 min',loggedBy:'mbr_003',createdAt:_ago(85,3)},
+      // MVA — 90 days ago
+      {id:'er_19',date:_ds(90),incidentNum:'26-000377',type:'MVA w/ Entrapment',address:'Ritchie Hwy & Jumpers Hole',units:['e132','a139'],members:['mbr_003','mbr_005','mbr_009','mbr_011','mbr_016'],apparatus:'E132/A139',alarmTime:'21:55',clearTime:'23:10',notes:'T-bone, driver extricated, ALS transport',loggedBy:'mbr_003',createdAt:_ago(90,3)},
+      // Brush Fire — 95 days ago
+      {id:'er_20',date:_ds(95),incidentNum:'26-000310',type:'Brush Fire',address:'Timber Forest Dr, Millersville',units:['FB13','e131'],members:['mbr_002','mbr_004','mbr_008','mbr_012','mbr_014'],apparatus:'FB13/E131',alarmTime:'12:14',clearTime:'13:40',notes:'3-acre brush fire, mutual aid requested from Millersville',loggedBy:'mbr_002',createdAt:_ago(95,2)},
+      // Structure Fire — 105 days ago
+      {id:'er_21',date:_ds(105),incidentNum:'26-000201',type:'Structure Fire',address:'800 Hammonds Lane, Brooklyn Park',units:['e132','Tk13','a139'],members:['mbr_002','mbr_003','mbr_006','mbr_007','mbr_011','mbr_015','mbr_018'],apparatus:'E132/Tk13/A139',alarmTime:'03:50',clearTime:'07:15',notes:'2-alarm row house block, 3 families displaced',loggedBy:'mbr_002',createdAt:_ago(105,5)},
+      // EMS — 110 days ago
+      {id:'er_22',date:_ds(110),incidentNum:'26-000150',type:'EMS — Cardiac',address:'200 Hospital Dr, Glen Burnie',units:['Mu13'],members:['mbr_010','mbr_016'],apparatus:'Mu13',alarmTime:'04:10',clearTime:'04:48',notes:'STEMI alert, patient transported Priority 1 to UM Baltimore Washington',loggedBy:'mbr_010',createdAt:_ago(110,1)}
     ];
 
     state.trainingSubmissions = [
@@ -5407,7 +5421,20 @@ function boot() {
       {id:'tr_15',userId:'mbr_017',type:'Firefighter I',description:'FF1 Module 4 — Forcible Entry',hours:6,date:_ds(5),status:'pending',submittedAt:_ago(5,0),points:6},
       {id:'tr_16',userId:'mbr_012',type:'Water Rescue',description:'Swift Water Rescue Awareness — AACO FD',hours:8,date:_ds(2),status:'pending',submittedAt:_ago(2,0),points:8},
       {id:'tr_17',userId:'mbr_016',type:'EMS CE',description:'Mass Casualty Incident Triage Refresher',hours:4,date:_ds(4),status:'pending',submittedAt:_ago(4,0),points:4},
-      {id:'tr_18',userId:'mbr_004',type:'Aerial Operations',description:'Elevated Master Stream Operations',hours:4,date:_ds(1),status:'pending',submittedAt:_ago(1,0),points:4}
+      {id:'tr_18',userId:'mbr_004',type:'Aerial Operations',description:'Elevated Master Stream Operations',hours:4,date:_ds(1),status:'pending',submittedAt:_ago(1,0),points:4},
+      // ── Drill history ────────────────────────────────────────────────────────
+      {id:'drill_01',type:'drill',submittedBy:'mbr_002',memberId:'mbr_002',members:['rbvfc_admin_001','mbr_002','mbr_004','mbr_006','mbr_008','mbr_014','mbr_018'],date:_ds(7),submittedDate:_ds(6),submittedAt:_ago(6,2),drillCode:'FF-301',drillName:'Hose Evolutions & Standpipe Operations',hours:3,pts:6,location:'Station 13 Drill Ground',notes:'3-inch lay, standpipe packs, 200ft high-rise pack deployment.',status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(5,0)},
+      {id:'drill_02',type:'drill',submittedBy:'mbr_003',memberId:'mbr_003',members:['mbr_003','mbr_005','mbr_007','mbr_009','mbr_010','mbr_016','mbr_017'],date:_ds(7),submittedDate:_ds(6),submittedAt:_ago(6,1),drillCode:'EMS-114',drillName:'Mass Casualty Triage — START Protocol',hours:3,pts:6,location:'Station 13 Bay',notes:'Tabletop + practical. All crews demonstrated correct START tagging.',status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(5,0)},
+      {id:'drill_03',type:'drill',submittedBy:'mbr_002',memberId:'mbr_002',members:['rbvfc_admin_001','mbr_002','mbr_003','mbr_004','mbr_006','mbr_008','mbr_011','mbr_014','mbr_015','mbr_018'],date:_ds(21),submittedDate:_ds(20),submittedAt:_ago(20,3),drillCode:'FF-215',drillName:'Ground Ladder Placement & Rescue Carry',hours:4,pts:8,location:'Station 13 Drill Ground',notes:'All members completed 24ft extension ladder raises and victim drag carries.',status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(19,0)},
+      {id:'drill_04',type:'drill',submittedBy:'mbr_015',memberId:'mbr_015',members:['mbr_003','mbr_005','mbr_007','mbr_009','mbr_010','mbr_013','mbr_015','mbr_016','mbr_017'],date:_ds(21),submittedDate:_ds(20),submittedAt:_ago(20,2),drillCode:'EMS-209',drillName:'Pediatric Emergency Assessment & Airway',hours:3,pts:6,location:'Station 13 Training Room',notes:'Pediatric BLS and airway management with mannequins. AACO EMS instructor.',status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(19,0)},
+      {id:'drill_05',type:'drill',submittedBy:'mbr_002',memberId:'mbr_002',members:['rbvfc_admin_001','mbr_002','mbr_004','mbr_006','mbr_008','mbr_011','mbr_014','mbr_018'],date:_ds(35),submittedDate:_ds(34),submittedAt:_ago(34,4),drillCode:'FF-422',drillName:'Forcible Entry — Conventional & Through-the-Lock',hours:4,pts:8,location:'Station 13 Drill Ground',notes:'Worked Halligan & flathead axe, K-tool, and through-the-lock techniques on practice doors.',status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(33,0)},
+      {id:'drill_06',type:'drill',submittedBy:'mbr_015',memberId:'mbr_015',members:['mbr_003','mbr_005','mbr_007','mbr_010','mbr_012','mbr_015','mbr_016','mbr_017'],date:_ds(35),submittedDate:_ds(34),submittedAt:_ago(34,3),drillCode:'WR-108',drillName:'Surface Water Rescue — Boat Handling & Throw Bag',hours:4,pts:8,location:'Marley Creek Boat Ramp',notes:'RB13 operations, throw bag rescue, victim recovery techniques.',status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(33,0)},
+      {id:'drill_07',type:'drill',submittedBy:'mbr_002',memberId:'mbr_002',members:['rbvfc_admin_001','mbr_002','mbr_004','mbr_006','mbr_008','mbr_009','mbr_011','mbr_014','mbr_015','mbr_017','mbr_018'],date:_ds(49),submittedDate:_ds(48),submittedAt:_ago(48,5),drillCode:'FF-510',drillName:'SCBA Confidence Course — Low Profile & Entanglement',hours:3,pts:6,location:'Station 13 Bay',notes:'Black-out mask evolutions, wall breach, low-crawl entanglement station. 100% pass rate.',status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(47,0)},
+      {id:'drill_08',type:'drill',submittedBy:'mbr_003',memberId:'mbr_003',members:['mbr_003','mbr_005','mbr_007','mbr_009','mbr_010','mbr_013','mbr_016','mbr_017'],date:_ds(49),submittedDate:_ds(48),submittedAt:_ago(48,4),drillCode:'EMS-305',drillName:'12-Lead Acquisition & Stroke Protocol',hours:3,pts:6,location:'Station 13 Training Room',notes:'12-lead practice with SimPad. All ALS providers successfully completed stroke assessment.',status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(47,0)},
+      {id:'drill_09',type:'drill',submittedBy:'mbr_002',memberId:'mbr_002',members:['rbvfc_admin_001','mbr_002','mbr_004','mbr_006','mbr_008','mbr_014','mbr_018'],date:_ds(63),submittedDate:_ds(62),submittedAt:_ago(62,3),drillCode:'FF-318',drillName:'Vehicle Extrication — Phase I & II',hours:4,pts:8,location:'Station 13 Drill Ground',notes:'Dash displacement, roof removal, door removal on junk vehicles. AACO Extrication Team observer.',status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(61,0)},
+      {id:'drill_10',type:'drill',submittedBy:'mbr_002',memberId:'mbr_002',members:['rbvfc_admin_001','mbr_002','mbr_003','mbr_004','mbr_005','mbr_006','mbr_007','mbr_008','mbr_010','mbr_011','mbr_014','mbr_015','mbr_018'],date:_ds(77),submittedDate:_ds(76),submittedAt:_ago(76,6),drillCode:'FF-100',drillName:'Annual Mayday / RIT / LUNAR Protocol Review',hours:4,pts:8,location:'Station 13 Bay & Drill Ground',notes:'Company-wide Mayday drill. RIT pack assembly, LUNAR transmissions, victim packaging. All crews evaluated.',status:'approved',approvedBy:'rbvfc_admin_001',approvedAt:_ago(75,0)},
+      // Pending drill
+      {id:'drill_11',type:'drill',submittedBy:'mbr_015',memberId:'mbr_015',members:['mbr_003','mbr_005','mbr_007','mbr_010','mbr_015','mbr_016'],date:_ds(4),submittedDate:_ds(3),submittedAt:_ago(3,2),drillCode:'EMS-401',drillName:'Obstetrical Emergency & Field Delivery',hours:2,pts:4,location:'Station 13 Training Room',notes:'OB emergency simulations, cord prolapse, breech presentation management.',status:'pending'}
     ];
 
     // LOSAP activities - use memberId, category, points to match CAT_CONFIG
@@ -6882,7 +6909,7 @@ function renderPublicView() {
     +     (logoSrc ? '<img src="'+logoSrc+'" style="height:44px;width:auto;object-fit:contain;">' : '')
     +     '<div>'
     +       '<div style="font-size:22px;font-weight:900;color:#C8102E;letter-spacing:3px;text-transform:uppercase;line-height:1;">RIVIERA BEACH VFC</div>'
-    +       '<div style="font-size:11px;color:#666;letter-spacing:2px;text-transform:uppercase;">Member Portal \u2014 Live Board</div>'
+    +       '<div style="font-size:11px;color:#666;letter-spacing:2px;text-transform:uppercase;">LOSAP Member Portal \u2014 Live Board</div>'
     +     '</div>'
     +   '</div>'
     +   '<div style="text-align:right;">'
@@ -7059,7 +7086,7 @@ function renderMyClassesToday() {
     if (card) card.style.display = 'none';
     return;
   }
-  if (card) card.style.display = 'block';
+  if (card) card.style.display = 'block'; var _rb=document.getElementById('losapRankingBody'); if(_rb) _rb.style.display='block';
 
   container.innerHTML = myClasses.map(function(cls) {
     var att = (state.classAttendance||[]).find(function(a){
@@ -8415,7 +8442,7 @@ function applyBulkEdit() {
   <div class="app-header" id="appHeader">
     <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAAF8WlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPHg6eG1wbWV0YSB4bWxuczp4PSdhZG9iZTpuczptZXRhLyc+CiAgICAgICAgPHJkZjpSREYgeG1sbnM6cmRmPSdodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjJz4KCiAgICAgICAgPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9JycKICAgICAgICB4bWxuczpkYz0naHR0cDovL3B1cmwub3JnL2RjL2VsZW1lbnRzLzEuMS8nPgogICAgICAgIDxkYzp0aXRsZT4KICAgICAgICA8cmRmOkFsdD4KICAgICAgICA8cmRmOmxpIHhtbDpsYW5nPSd4LWRlZmF1bHQnPkxvZ28gSWNvbiBCbGFjayBhbmQgV2hpdGUgQ29sb3I8L3JkZjpsaT4KICAgICAgICA8L3JkZjpBbHQ+CiAgICAgICAgPC9kYzp0aXRsZT4KICAgICAgICA8L3JkZjpEZXNjcmlwdGlvbj4KCiAgICAgICAgPC9yZGY6UkRGPgogICAgICAgIDwveDp4bXBtZXRhPgqBFQRkAAAAA3NCSVQICAjb4U/gAAAVJ0lEQVRoge2ZeZRU1Z3HP/e+16+ql+rq6o3eaKCBZhNBMIAoIAqKCyoaFU2iZtEkxpgYTZwkM5mYZGZixqiJiRqNJi6J0aiJGzFuqCiLCCKLLNK0Dd30Xvv63rtzfxQgIrKJycz5nXPPud977rv3fu69v/s750EfffTRRx999NFHH/+WRE9X4P8J0MRZM2fOdLZMm6nMqKxCbMHrSaORqAxUVFRQUVFBUVGRvp2e2tBay5VXXolpmvh8Pnw+H7quY4wBwHEcHMfBcRxs28YYg2VZWJaFaZpYloWmaei6jqZpKKWQUiKlREqJEAIhBFJKhBDsNJCSkiS09WiMQSmFUgqlFEoplFIopVBKIaVESolSCqUUSil+6vVSSqGUQimlUEq5qMBBKYVSSqWUSimlUkqllFIppVJKqZRSKaVSSqWUSimlUkqllFIppVRKqZRSKaVSSqWUSqWUSinVFklASmkA4AAAAAAASUVORK5CYII=" alt="RBVFC" style="height:32px;width:auto;object-fit:contain;" onerror="this.style.display='none'">
     <div style="flex:1;">
-      <div class="app-title">RBVFC MEMBER PORTAL</div>
+      <div class="app-title">RBVFC LOSAP MEMBER PORTAL</div>
       <div class="app-subtitle" id="appSubtitle">Riviera Beach Volunteer Fire Company</div>
     </div>
     <button class="btn-logout" id="switchUserBtn" style="display:none;background:#1A2A1A;border-color:#27AE60;color:#27AE60;margin-right:6px;font-size:11px;" onclick="openSwitchUser()">👁 View As</button>
@@ -8634,27 +8661,27 @@ function applyBulkEdit() {
       </div>
 
       <!-- Unit Response Breakdown -->
-      <div class="card" id="losapUnitBreakdownCard" style="display:none;">
-        <div class="card-header"><div class="icon">🚒</div><h2>Response Breakdown</h2></div>
-        <div id="losapUnitBreakdown"></div>
+      <div class="card" id="losapUnitBreakdownCard">
+        <div class="card-header" onclick="toggleStaffCard('losapUnitBreakBody','losapUnitBreakChev')" style="cursor:pointer;user-select:none;"><div class="icon">🚒</div><h2>Response Breakdown</h2><span id="losapUnitBreakChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span></div>
+        <div id="losapUnitBreakBody"><div id="losapUnitBreakdown"></div></div>
       </div>
 
       <!-- Ranking Status -->
-      <div class="card" id="losapRankingCard" style="display:none;">
-        <div class="card-header"><div class="icon">🏆</div><h2>Company Standing</h2></div>
-        <div id="losapRankingStatus"></div>
+      <div class="card" id="losapRankingCard">
+        <div class="card-header" onclick="toggleStaffCard('losapRankingBody','losapRankingChev')" style="cursor:pointer;user-select:none;"><div class="icon">🏆</div><h2>Company Standing</h2><span id="losapRankingChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span></div>
+        <div id="losapRankingBody"><div id="losapRankingStatus"></div></div>
       </div>
 
       <!-- Pending Training Submissions (member view) -->
-      <div id="myPendingTrainingCard" style="display:none;" class="card">
-        <div class="card-header"><div class="icon">⏳</div><h2>Pending Training</h2></div>
-        <div id="myPendingTrainingList"></div>
+      <div id="myPendingTrainingCard" class="card">
+        <div class="card-header" onclick="toggleStaffCard('myPendingTrainingBody','myPendingTrainingChev')" style="cursor:pointer;user-select:none;"><div class="icon">⏳</div><h2>Pending Training</h2><span id="myPendingTrainingChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span></div>
+        <div id="myPendingTrainingBody"><div id="myPendingTrainingList"></div></div>
       </div>
 
       <!-- LOSAP Activity History -->
       <div class="card">
-        <div class="card-header"><div class="icon">📊</div><h2>Activity History</h2></div>
-        <div id="activityHistoryContainer">
+        <div class="card-header" onclick="toggleStaffCard('losapActHistBody','losapActHistChev')" style="cursor:pointer;user-select:none;"><div class="icon">📊</div><h2>Activity History</h2><span id="losapActHistChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span></div>
+        <div id="losapActHistBody"><div id="activityHistoryContainer">
           <table style="width:100%;border-collapse:collapse;">
             <thead><tr>
               <th style="text-align:left;padding:8px 10px;font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid #222;">Date</th>
@@ -8665,7 +8692,7 @@ function applyBulkEdit() {
               <tr><td colspan="3" style="text-align:center;padding:24px;color:#666;">No activities logged yet.</td></tr>
             </tbody>
           </table>
-        </div>
+        </div></div></div>
       </div>
 
     </div><!-- end section-losap -->
@@ -8831,7 +8858,7 @@ function applyBulkEdit() {
           <h2>Pending CAD Calls</h2>
           <button class="btn btn-sm btn-primary" style="margin-left:auto;background:#1A3A5A;border-color:#2980B9;color:#7EC8E3;">🔄 Sync New Calls</button>
         </div>
-        <p style="font-size:12px;color:#666;margin-bottom:10px;">Calls fetched from Gmail CAD-Dispatch label. Click a call to auto-fill the log form. <strong style="color:#555;">New calls drop in automatically every 30 minutes.</strong></p>
+        <p style="font-size:12px;color:#666;margin-bottom:10px;"><strong style="color:#555;">Drops in automatically every 30 minutes.</strong></p>
         <div id="cadPendingContainer"></div>
       </div>
 
@@ -9719,7 +9746,7 @@ function applyBulkEdit() {
     <div style="text-align:center;margin-bottom:28px;">
       <img id="loginLogo" style="display:none;max-width:220px;max-height:180px;width:auto;height:auto;object-fit:contain;margin:0 auto 14px;filter:drop-shadow(0 2px 12px rgba(0,0,0,.6));" alt="Company Logo">
       <div id="loginLogoText" style="font-family:'Barlow Condensed',sans-serif;font-size:36px;font-weight:900;color:#C8102E;letter-spacing:4px;text-transform:uppercase;">RBVFC</div>
-      <div style="font-size:12px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-top:5px;">Member Portal</div>
+      <div style="font-size:12px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-top:5px;">LOSAP Member Portal</div>
     </div>
     <div class="form-group">
       <label>Member</label>
