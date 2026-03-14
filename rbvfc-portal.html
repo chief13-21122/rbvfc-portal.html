@@ -1768,7 +1768,7 @@ function buildMemberYearStats(memberId, yr) {
     .filter(function(a){ return a.memberId===memberId && a.status==='approved' && a.date && a.date.startsWith(String(yr)); }).length;
   return {
     name: m ? m.first+' '+m.last : memberId,
-    badge: m ? (m.memberId||'') : '',
+    badge: m ? (m.memberId ? '50-'+m.memberId : '') : '',
     rank: m ? ((m.ranks&&m.ranks.length?m.ranks.join(', '):m.rank)||'') : '',
     email: m ? (m.email||'') : '',
     pts: pts, hours: hours, responses: responses,
@@ -2194,7 +2194,7 @@ function renderAdminRoster() {
     tr.style.opacity=isActive?'1':'0.45';
     var cbCell='<td style="padding:8px 4px;text-align:center;"><input type="checkbox" class="bulkCb" data-mid="'+m.id+'" style="width:15px;height:15px;accent-color:#C8102E;" onclick="updateBulkEditBtn()"></td>';
     tr.innerHTML=cbCell+'<td style="padding:8px;"><strong>'+m.last+'</strong>, '+m.first+(isActive?'':' <span style="color:#E74C3C;font-size:11px;">[Inactive]</span>')+'</td>'+
-      '<td style="padding:8px;color:#888;font-size:12px;">'+(m.memberId||'—')+'</td>'+
+      '<td style="padding:8px;color:#888;font-size:12px;">'+(m.memberId?'50-'+m.memberId:'—')+'</td>'+
       '<td style="padding:8px;"><span class="pill '+(m.appRole==='admin'?'red':m.appRole==='officer'?'blue':'gray')+'" style="font-size:11px;">'+m.appRole+'</span></td>'+
       '<td style="padding:8px;font-size:11px;color:#AAA;">'+(positions.join(', ')||'—')+(m.rideReport==='ineligible'?' <span style="color:#E74C3C;font-size:10px;font-weight:700;">🚫INELIGIBLE</span>':(m.rideReport==='eligible'?' <span style="color:#27AE60;font-size:10px;">✅</span>':''))+'</td>'+
       '<td style="padding:8px;text-align:center;">'+(isClockedIn?'<span class="pill green" style="font-size:11px;">🟢 In</span>':'<span style="color:#555;font-size:12px;">—</span>')+'</td>'+
@@ -3128,6 +3128,26 @@ var UNIT_MIN_STAFF = {
   'CH13': 1
 };
 
+// Units that share the same crew and are staffed/displayed together
+var LINKED_UNIT_GROUPS = [
+  ['e131', 'Tk13']   // Engine 131 / Truck 13 share crew
+];
+function getLinkedGroup(unitId) {
+  for (var _g=0; _g<LINKED_UNIT_GROUPS.length; _g++) {
+    if (LINKED_UNIT_GROUPS[_g].indexOf(unitId) >= 0) return _g;
+  }
+  return -1;
+}
+function areUnitsLinked(unitA, unitB) {
+  var g = getLinkedGroup(unitA);
+  return g >= 0 && LINKED_UNIT_GROUPS[g].indexOf(unitB) >= 0;
+}
+function getLinkedPartners(unitId, inList) {
+  var g = getLinkedGroup(unitId);
+  if (g < 0) return [];
+  return LINKED_UNIT_GROUPS[g].filter(function(u){ return u !== unitId && (!inList || inList.indexOf(u) >= 0); });
+}
+
 // Rank hierarchy (higher index = higher rank)
 var RANK_ORDER = [
   'Administrative Member','Auxiliary Member','Probationary','EMT-P',
@@ -3456,108 +3476,165 @@ function renderStaffingBoard() {
 
   var html = '<div style="text-align:center;font-weight:700;font-size:16px;letter-spacing:2px;color:#C8102E;margin-bottom:16px;">\uD83D\uDCC5 '+formatDateLong(date)+'</div>';
 
-  enabledUnits.forEach(function(unitId) {
-    var positions  = UNIT_POSITIONS[unitId] || [];
-    var unitShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===unitId; });
-    var minStaff   = UNIT_MIN_STAFF[unitId] || 1;
-    var filledCount= positions.filter(function(pos,i){ return unitShifts.some(function(s){ return s.positionIndex===i && s.memberId; }); }).length;
-    var isMin  = filledCount >= minStaff;
-    var isFull = filledCount >= positions.length;
-    var statusColor = isFull ? '#27AE60' : (isMin ? '#F5A623' : '#E74C3C');
-    var statusText  = isFull ? '\u2713 FULLY STAFFED' : (isMin ? filledCount+'/'+positions.length+' MIN MET' : '\u26A0 '+filledCount+'/'+positions.length+' UNDERSTAFFED');
-    var borderCol   = isFull ? '#27AE60' : '#2A2A2A';
-    var bgStatus    = isFull ? '#1A3A1A' : (isMin ? '#2A2A00' : '#2A0A0A');
+  // Track rendered units so linked partners aren't drawn twice
+  var _rendered = {};
 
+  enabledUnits.forEach(function(unitId) {
+    if (_rendered[unitId]) return;
+
+    var linkedPartners = getLinkedPartners(unitId, enabledUnits);
+    var allUnitsInGroup = [unitId].concat(linkedPartners);
+    allUnitsInGroup.forEach(function(u){ _rendered[u] = true; });
+
+    // ── Build per-unit status helper ──
+    function unitStatus(uId) {
+      var positions  = UNIT_POSITIONS[uId] || [];
+      var uShifts    = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===uId; });
+      var minStaff   = UNIT_MIN_STAFF[uId] || 1;
+      var filled     = positions.filter(function(p,i){ return uShifts.some(function(s){ return s.positionIndex===i && s.memberId; }); }).length;
+      return { positions:positions, shifts:uShifts, minStaff:minStaff, filled:filled,
+               isMin:filled>=minStaff, isFull:filled>=positions.length };
+    }
+
+    var primarySt   = unitStatus(unitId);
+    var allStatuses = [primarySt].concat(linkedPartners.map(unitStatus));
+    var anyUnder    = allStatuses.some(function(s){ return !s.isMin; });
+    var allFull     = allStatuses.every(function(s){ return s.isFull; });
+
+    var statusColor = allFull ? '#27AE60' : (anyUnder ? '#E74C3C' : '#F5A623');
+    var bgStatus    = allFull ? '#1A3A1A' : (anyUnder ? '#2A0A0A' : '#2A2A00');
+    var borderCol   = allFull ? '#27AE60' : '#2A2A2A';
+    var statusText  = allFull ? '\u2713 FULLY STAFFED' : (anyUnder ? '\u26A0 UNDERSTAFFED' : 'MIN MET');
+    var isLinked    = linkedPartners.length > 0;
+
+    // ── Card header ──
     html += '<div style="background:#181818;border:1px solid '+borderCol+';border-left:4px solid '+statusColor+';border-radius:10px;padding:14px;margin-bottom:12px;">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px;">';
-    html += '<span style="font-size:18px;font-weight:700;letter-spacing:1.5px;color:#F0F0F0;">'+UNIT_LABELS[unitId]+'</span>';
+    if (isLinked) {
+      var combinedLabel = allUnitsInGroup.map(function(u){ return UNIT_LABELS[u]||u; }).join(' / ');
+      html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
+      html += '<span style="font-size:18px;font-weight:700;letter-spacing:1.5px;color:#F0F0F0;">'+combinedLabel+'</span>';
+      html += '<span style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;background:rgba(200,16,46,.15);border:1px solid rgba(200,16,46,.4);color:#C8102E;border-radius:4px;padding:2px 7px;">COMBINED CREW</span>';
+      html += '</div>';
+    } else {
+      html += '<span style="font-size:18px;font-weight:700;letter-spacing:1.5px;color:#F0F0F0;">'+UNIT_LABELS[unitId]+'</span>';
+    }
     html += '<span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;background:'+bgStatus+';color:'+statusColor+';">'+statusText+'</span>';
     html += '</div>';
 
-    positions.forEach(function(posName, posIdx) {
-      var shift = unitShifts.find(function(s){ return s.positionIndex===posIdx; });
-      var assignedMember = shift && shift.memberId ? (state.roster||[]).find(function(m){ return m.id===shift.memberId; }) : null;
-      var isMe      = shift && shift.memberId === uid;
-      var isEmpty   = !shift || !shift.memberId;
-      var clockedIn = shift && shift.clockedIn;
-      var minRank   = POSITION_MIN_RANK[posName];
+    // ── Position rows helper (shared for primary and linked units) ──
+    function renderUnitPositions(uId, uShifts, uPositions) {
+      uPositions.forEach(function(posName, posIdx) {
+        var shift          = uShifts.find(function(s){ return s.positionIndex===posIdx; });
+        var assignedMember = shift && shift.memberId ? (state.roster||[]).find(function(m){ return m.id===shift.memberId; }) : null;
+        var isMe    = shift && shift.memberId === uid;
+        var isEmpty = !shift || !shift.memberId;
+        var clockedIn = shift && shift.clockedIn;
 
-      html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;flex-wrap:wrap;">';
-      html += '<div style="min-width:130px;">';
-      html += '<div style="font-size:12px;color:#888;font-weight:600;">'+posName+'</div>';
-      html += '</div>';
-
-      if (isEmpty) {
-        html += '<div style="flex:1;font-size:13px;color:#666;font-style:italic;">\u2014 Open \u2014</div>';
-        var myShiftOnDate = (state.staffingShifts||[]).some(function(s){ return s.date===date && s.memberId===uid; });
-        // Administrative/Auxiliary members may only sign up for U13
-        var adminRestricted = isAdminMember(member) && unitId !== 'U13';
-        var isPastDate = date < new Date().toISOString().slice(0,10);
-        var isPastTime = false;
-        if (date === new Date().toISOString().slice(0,10)) {
-          // For today, block sign-up only if all common shift starts have passed (after 20:00)
-          var nowHour = new Date().getHours();
-          isPastTime = nowHour >= 20;
-        }
-        if (!myShiftOnDate && !adminRestricted && !isPastDate && !isPastTime) {
-          html += '<button class="btn btn-sm btn-success" onclick="openSignUpModal(\'' + date + '\',\'' + unitId + '\',' + posIdx + ',\'' + posName.replace(/'/g, "\\\\'") + '\')">\u270B Sign Up</button>';
-        } else if (!myShiftOnDate && adminRestricted && !isPastDate) {
-          html += '<span style="font-size:10px;color:#444;padding:4px 6px;">Admin only</span>';
-        }
-      } else {
-        var nameStr  = assignedMember ? assignedMember.last+', '+assignedMember.first+(isProbationary(assignedMember)?' [PROB]':'') : 'Unknown';
-        var rankStr  = assignedMember ? (assignedMember.ranks&&assignedMember.ranks.length?assignedMember.ranks.join(' / '):(assignedMember.rank||'')) : '';
-        var rankOk   = assignedMember ? memberMeetsRank(assignedMember, posName) : true;
-        var nameColor= isMe ? '#27AE60' : (!rankOk ? '#F5A623' : '#F0F0F0');
-        html += '<div style="flex:1;">';
-        html += '<div style="font-size:14px;font-weight:700;color:'+nameColor+';">'+nameStr+(isMe?' (You)':'')+(!rankOk?' \u26A0':'')+'</div>';
-        if (rankStr) html += '<div style="font-size:11px;color:#666;">'+rankStr+'</div>';
-        if (shift) html += '<div style="font-size:11px;color:#555;">'+shiftLabel(shift)+'</div>';
+        html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;flex-wrap:wrap;">';
+        html += '<div style="min-width:130px;">';
+        html += '<div style="font-size:12px;color:#888;font-weight:600;">'+posName+'</div>';
         html += '</div>';
 
-        if (isMe) {
-          if (!clockedIn) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+shift.id+'">&#128336; Clock In</button>';
-          else html += '<span style="font-size:11px;color:#27AE60;font-weight:700;">\u2713 In</span>';
-          if (!clockedIn) html += '<button class="btn btn-sm btn-secondary" onclick="editShift(this)" data-id="'+shift.id+'" style="margin-left:4px;font-size:10px;">Edit</button>';
-          html += '<button class="btn btn-sm btn-danger" onclick="cancelShift(this)" data-id="'+shift.id+'" style="margin-left:4px;">&#10005;</button>';
-        } else if (isOfficer) {
-          if (!clockedIn) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+shift.id+'">Clock In</button>';
-          else html += '<span style="font-size:11px;color:#27AE60;">\u2713 In</span>';
-          html += '<button class="btn btn-sm btn-secondary" onclick="editShift(this)" data-id="'+shift.id+'" style="margin-left:4px;font-size:10px;">Edit</button>';
-          html += '<button class="btn btn-sm btn-danger" onclick="removeFromShift(this)" data-id="'+shift.id+'" style="margin-left:4px;font-size:10px;">Remove</button>';
+        if (isEmpty) {
+          html += '<div style="flex:1;font-size:13px;color:#666;font-style:italic;">\u2014 Open \u2014</div>';
+          // Determine if member can sign up here
+          var myShiftsOnDate  = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.memberId===uid; });
+          var hasConflict     = myShiftsOnDate.some(function(s){ return !areUnitsLinked(uId, s.unitId) && s.unitId !== uId; });
+          var alreadyThisUnit = myShiftsOnDate.some(function(s){ return s.unitId === uId; });
+          var blocked         = hasConflict || alreadyThisUnit;
+          var adminRestricted = isAdminMember(member) && uId !== 'U13';
+          var isPastDate      = date < new Date().toISOString().slice(0,10);
+          var isPastTime      = false;
+          if (date === new Date().toISOString().slice(0,10)) {
+            isPastTime = new Date().getHours() >= 20;
+          }
+          if (!blocked && !adminRestricted && !isPastDate && !isPastTime) {
+            html += '<button class="btn btn-sm btn-success" onclick="openSignUpModal(\''+date+'\',\''+uId+'\',' +posIdx+ ',\''+posName.replace(/'/g,"\\\'")+'\')">\u270B Sign Up</button>';
+          } else if (!blocked && adminRestricted && !isPastDate) {
+            html += '<span style="font-size:10px;color:#444;padding:4px 6px;">Admin only</span>';
+          } else if (hasConflict && !isPastDate) {
+            html += '<span style="font-size:10px;color:#555;padding:2px 4px;" title="You have a conflicting shift">\uD83D\uDD12 Conflict</span>';
+          }
+        } else {
+          var nameStr  = assignedMember ? assignedMember.last+', '+assignedMember.first+(isProbationary(assignedMember)?' [PROB]':'') : 'Unknown';
+          var rankStr  = assignedMember ? (assignedMember.ranks&&assignedMember.ranks.length?assignedMember.ranks.join(' / '):(assignedMember.rank||'')) : '';
+          var rankOk   = assignedMember ? memberMeetsRank(assignedMember, posName) : true;
+          var nameColor= isMe ? '#27AE60' : (!rankOk ? '#F5A623' : '#F0F0F0');
+          html += '<div style="flex:1;">';
+          html += '<div style="font-size:14px;font-weight:700;color:'+nameColor+';">'+nameStr+(isMe?' (You)':'')+(!rankOk?' \u26A0':'')+'</div>';
+          if (rankStr) html += '<div style="font-size:11px;color:#666;">'+rankStr+'</div>';
+          if (shift) html += '<div style="font-size:11px;color:#555;">'+shiftLabel(shift)+'</div>';
+          html += '</div>';
+          if (isMe) {
+            if (!clockedIn) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+shift.id+'">&#128336; Clock In</button>';
+            else html += '<span style="font-size:11px;color:#27AE60;font-weight:700;">\u2713 In</span>';
+            if (!clockedIn) html += '<button class="btn btn-sm btn-secondary" onclick="editShift(this)" data-id="'+shift.id+'" style="margin-left:4px;font-size:10px;">Edit</button>';
+            html += '<button class="btn btn-sm btn-danger" onclick="cancelShift(this)" data-id="'+shift.id+'" style="margin-left:4px;">&#10005;</button>';
+          } else if (isOfficer) {
+            if (!clockedIn) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+shift.id+'">Clock In</button>';
+            else html += '<span style="font-size:11px;color:#27AE60;">\u2713 In</span>';
+            html += '<button class="btn btn-sm btn-secondary" onclick="editShift(this)" data-id="'+shift.id+'" style="margin-left:4px;font-size:10px;">Edit</button>';
+            html += '<button class="btn btn-sm btn-danger" onclick="removeFromShift(this)" data-id="'+shift.id+'" style="margin-left:4px;font-size:10px;">Remove</button>';
+          }
         }
-      }
+        html += '</div>';
+      });
+    }
+
+    // ── Render primary unit positions ──
+    renderUnitPositions(unitId, primarySt.shifts, primarySt.positions);
+
+    // ── Render linked partner unit positions with divider ──
+    linkedPartners.forEach(function(partnerId) {
+      var pSt = unitStatus(partnerId);
+      var pLabel = UNIT_LABELS[partnerId] || partnerId;
+      var pMin = pSt.isMin, pFull = pSt.isFull;
+      var pColor = pFull ? '#27AE60' : (pMin ? '#F5A623' : '#E74C3C');
+      html += '<div style="margin-top:10px;padding-top:8px;border-top:2px dashed #2A2A2A;">';
+      html += '<div style="font-size:11px;font-weight:700;letter-spacing:2px;color:'+pColor+';text-transform:uppercase;margin-bottom:6px;">'+pLabel+' POSITIONS</div>';
+      renderUnitPositions(partnerId, pSt.shifts, pSt.positions);
       html += '</div>';
     });
 
+    // ── Officer assign controls ──
     if (isOfficer) {
-      var eligible = (state.roster||[]).filter(function(m){ return m.active!==false; })
-        .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); });
-      html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #222;">';
-      html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">';
-      html += '<select id="assignMember_'+unitId+'" style="flex:1;min-width:130px;background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
-      html += '<option value="">\u2014 Assign Member \u2014</option>';
-      eligible.forEach(function(m) {
-        var alreadyOnDate = (state.staffingShifts||[]).some(function(s){ return s.date===date && s.memberId===m.id; });
-        if (!alreadyOnDate) html += '<option value="'+m.id+'">'+m.last+', '+m.first+(isProbationary(m)?' [PROB]':'')+' ('+(m.ranks&&m.ranks.length?m.ranks.join('/'):(m.rank||'\u2014'))+')</option>';
+      allUnitsInGroup.forEach(function(uId) {
+        var uPos = UNIT_POSITIONS[uId] || [];
+        var uShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===uId; });
+        var uLabel  = UNIT_LABELS[uId] || uId;
+        html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #222;">';
+        if (isLinked) html += '<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Assign to '+uLabel+'</div>';
+        var eligible = (state.roster||[]).filter(function(m){ return m.active!==false; })
+          .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); });
+        html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">';
+        html += '<select id="assignMember_'+uId+'" style="flex:1;min-width:130px;background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
+        html += '<option value="">\u2014 Assign Member \u2014</option>';
+        eligible.forEach(function(m) {
+          var alreadyOnDate = (state.staffingShifts||[]).some(function(s){
+            return s.date===date && s.memberId===m.id && !areUnitsLinked(uId, s.unitId) && s.unitId!==uId;
+          });
+          if (!alreadyOnDate) html += '<option value="'+m.id+'">'+m.last+', '+m.first+(isProbationary(m)?' [PROB]':'')+' ('+(m.ranks&&m.ranks.length?m.ranks.join('/'):(m.rank||'\u2014'))+')</option>';
+        });
+        html += '</select>';
+        html += '<select id="assignPos_'+uId+'" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
+        uPos.forEach(function(pos, i) {
+          var taken = uShifts.some(function(s){ return s.positionIndex===i && s.memberId; });
+          if (!taken) html += '<option value="'+i+'">'+pos+'</option>';
+        });
+        html += '<option value="999">\uD83D\uDCDA Student</option>';
+        html += '</select></div>';
+        html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">';
+        html += '<label style="font-size:11px;color:#666;">Start:</label>';
+        html += '<input type="time" id="assignStart_'+uId+'" value="07:00" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:100px;">';
+        html += '<label style="font-size:11px;color:#666;">Hours:</label>';
+        html += '<input type="number" id="assignHours_'+uId+'" value="24" min="1" max="72" step="0.5" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:70px;">';
+        html += '<button class="btn btn-sm btn-primary" onclick="officerAssign(\''+date+'\',\''+uId+'\')">Assign</button>';
+        html += '</div></div>';
       });
-      html += '</select>';
-      html += '<select id="assignPos_'+unitId+'" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
-      positions.forEach(function(pos, i) {
-        var taken = unitShifts.some(function(s){ return s.positionIndex===i && s.memberId; });
-        if (!taken) html += '<option value="'+i+'">'+pos+'</option>';
-      });
-      html += '<option value="999">📚 Student</option>';
-      html += '</select></div>';
-      html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">';
-      html += '<label style="font-size:11px;color:#666;">Start:</label>';
-      html += '<input type="time" id="assignStart_'+unitId+'" value="07:00" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:100px;">';
-      html += '<label style="font-size:11px;color:#666;">Hours:</label>';
-      html += '<input type="number" id="assignHours_'+unitId+'" value="24" min="1" max="72" step="0.5" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:70px;">';
-      html += '<button class="btn btn-sm btn-primary" onclick="officerAssign(\'' + date + '\',\'' + unitId + '\')">Assign</button>';
-      html += '</div></div>';
     }
-    html += '</div>';
+
+    html += '</div>'; // end unit card
   });
 
   container.innerHTML = html;
@@ -3693,9 +3770,19 @@ function confirmSignUp() {
   // Block sign-up for past dates
   var today = new Date().toISOString().slice(0,10);
   if (date < today) { showToast('\u26A0\uFE0F Cannot sign up for a past date.'); return; }
-  // One position per shift per member
-  var alreadyAny = (state.staffingShifts||[]).find(function(s){ return s.date===date && s.memberId===uid; });
-  if (alreadyAny) { showToast('\u26a0\ufe0f Already signed up for '+UNIT_LABELS[alreadyAny.unitId]+' \u2014 '+alreadyAny.position+'. Only one position per shift.'); return; }
+  // Overlap check: allow linked units (e.g. E131 + Tk13), block everything else
+  var existingShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.memberId===uid; });
+  for (var _oi=0; _oi<existingShifts.length; _oi++) {
+    var _es = existingShifts[_oi];
+    if (_es.unitId === unitId) {
+      showToast('\u26a0\ufe0f Already signed up for a position on '+UNIT_LABELS[unitId]+' this day.');
+      return;
+    }
+    if (!areUnitsLinked(unitId, _es.unitId)) {
+      showToast('\u26a0\ufe0f Conflict: already signed up for '+UNIT_LABELS[_es.unitId]+' \u2014 '+_es.position+'. You can only combine E131 & Truck 13 positions.');
+      return;
+    }
+  }
 
   var modal = document.getElementById('signUpModal');
   var editId = modal && modal.dataset.editId;
@@ -3770,14 +3857,14 @@ function officerAssign(date, unitId) {
   });
   if (taken) { showToast('⚠️ That position is already filled.'); return; }
 
-  // Check member isn't already on shift that day
+  // Check for conflicts — allow linked units (e131 ↔ Tk13), block everything else
   var alreadyAny = (state.staffingShifts||[]).find(function(s){
-    return s.date===date && s.memberId===memberId;
+    return s.date===date && s.memberId===memberId && s.unitId !== unitId && !areUnitsLinked(unitId, s.unitId);
   });
   if (alreadyAny) {
     var m = (state.roster||[]).find(function(r){ return r.id===memberId; });
     var name = m ? m.last+', '+m.first : 'That member';
-    showToast('⚠️ '+name+' is already assigned to '+UNIT_LABELS[alreadyAny.unitId]+' — '+alreadyAny.position+'.');
+    showToast('⚠️ '+name+' already assigned to '+UNIT_LABELS[alreadyAny.unitId]+' — '+alreadyAny.position+'. Cannot combine with '+UNIT_LABELS[unitId]+'.');
     return;
   }
 
@@ -3831,9 +3918,19 @@ function renderMonthlyCalendar() {
       var min    = UNIT_MIN_STAFF[unitId] || 1;
       return { unitId: unitId, filled: filled, min: min, total: positions.length };
     });
-    var understaffedUnits = unitStatuses.filter(function(u){ return u.filled < u.min; });
-    var hasAnyStaff = unitStatuses.some(function(u){ return u.filled > 0; });
-    if (!hasAnyStaff) return { color: '#E74C3C', label: 'No staff', understaffed: unitStatuses, all: unitStatuses };
+    // For status purposes treat linked unit groups as one (e.g. E131+Tk13)
+    var _seenGroups = {};
+    var groupedStatuses = [];
+    unitStatuses.forEach(function(u){
+      var g = LINKED_UNIT_GROUPS.find(function(lg){ return lg.indexOf(u.unitId)>=0; });
+      var gKey = g ? g.join(',') : u.unitId;
+      if (_seenGroups[gKey]) { _seenGroups[gKey].filled+=u.filled; _seenGroups[gKey].min+=u.min; _seenGroups[gKey].total+=u.total; return; }
+      var entry = Object.assign({},u); entry._gKey=gKey;
+      _seenGroups[gKey] = entry; groupedStatuses.push(entry);
+    });
+    var understaffedUnits = groupedStatuses.filter(function(u){ return u.filled < u.min; });
+    var hasAnyStaff = groupedStatuses.some(function(u){ return u.filled > 0; });
+    if (!hasAnyStaff) return { color: '#E74C3C', label: 'No staff', understaffed: understaffedUnits, all: unitStatuses };
     if (understaffedUnits.length) return { color: '#F5A623', label: understaffedUnits.length+' unit'+(understaffedUnits.length>1?'s':'')+' under min', understaffed: understaffedUnits, all: unitStatuses };
     return { color: '#27AE60', label: 'All units at min', understaffed: [], all: unitStatuses };
   }
@@ -3857,11 +3954,20 @@ function renderMonthlyCalendar() {
     var isToday = date === new Date().toISOString().slice(0,10);
     html += '<div onclick="calendarDayClick(\''+date+'\')" style="cursor:pointer;border-radius:6px;border:1px solid '+(isToday?'#C8102E':'#222')+';background:#181818;padding:4px;min-height:52px;position:relative;transition:background .15s;" onmouseover="this.style.background=\'#222\'" onmouseout="this.style.background=\'#181818\'">';
     html += '<div style="font-size:11px;font-weight:700;color:'+(isToday?'#C8102E':'#888')+';margin-bottom:3px;">'+day+'</div>';
-    // Color dots per unit
+    // Color dots per unit — group linked units (E131/Tk13) into one dot
+    var _dotDone = {};
     var dotHtml = '<div style="display:flex;flex-wrap:wrap;gap:2px;">';
     status.all.forEach(function(u) {
-      var c = u.filled >= u.total ? '#27AE60' : (u.filled >= u.min ? '#F5A623' : '#E74C3C');
-      dotHtml += '<div title="'+UNIT_LABELS[u.unitId]+': '+u.filled+'/'+u.total+'" style="width:8px;height:8px;border-radius:50%;background:'+c+';"></div>';
+      if (_dotDone[u.unitId]) return;
+      var group = LINKED_UNIT_GROUPS.find(function(g){ return g.indexOf(u.unitId) >= 0; });
+      var groupUnits = group ? status.all.filter(function(s){ return group.indexOf(s.unitId)>=0; }) : [u];
+      groupUnits.forEach(function(gu){ _dotDone[gu.unitId]=true; });
+      var totalFilled = groupUnits.reduce(function(s,gu){return s+gu.filled;},0);
+      var totalMin    = groupUnits.reduce(function(s,gu){return s+gu.min;},0);
+      var totalPos    = groupUnits.reduce(function(s,gu){return s+gu.total;},0);
+      var c = totalFilled >= totalPos ? '#27AE60' : (totalFilled >= totalMin ? '#F5A623' : '#E74C3C');
+      var lbl = groupUnits.map(function(gu){ return UNIT_LABELS[gu.unitId]+': '+gu.filled+'/'+gu.total; }).join(', ');
+      dotHtml += '<div title="'+lbl+'" style="width:8px;height:8px;border-radius:50%;background:'+c+';"></div>';
     });
     dotHtml += '</div>';
     html += dotHtml;
@@ -5381,7 +5487,7 @@ function removeLogo() {
 // ═══════════════════════════════════════════════════
 //  BOOTSTRAP / LOGIN
 // ═══════════════════════════════════════════════════
-var PORTAL_VERSION = 'v10.1-delegation-fix';
+var PORTAL_VERSION = 'v11.0';
 function boot() {
   try {
     var saved = localStorage.getItem('rbvfc');
@@ -7988,25 +8094,41 @@ function buildPublicStaffingCol(dateStr, dateObj, openSessions, title, accentCol
   if (usedUnits.length === 0) {
     unitsHtml = '<div style="color:#444;font-size:12px;text-align:center;padding:24px 14px;">No staffing scheduled.</div>';
   } else {
-    unitsHtml = usedUnits.map(function(unitId){
-      var shifts = unitMap[unitId] || [];
-      var unitLabel = (typeof UNIT_LABELS !== 'undefined' && UNIT_LABELS[unitId]) ? UNIT_LABELS[unitId] : unitId.toUpperCase();
-      var memberRows = shifts.sort(function(a,b){ return (a.positionIndex||0)-(b.positionIndex||0); }).map(function(sh){
+    // Group linked units together (e.g. E131 + Tk13)
+    var _tvDone = {};
+    var _tvGroups = [];
+    usedUnits.forEach(function(u){
+      if (_tvDone[u]) return;
+      var ptrs = getLinkedPartners(u, usedUnits);
+      _tvGroups.push([u].concat(ptrs));
+      [u].concat(ptrs).forEach(function(p){ _tvDone[p]=true; });
+    });
+    function tvMemberRows(unitId) {
+      return (unitMap[unitId]||[]).sort(function(a,b){ return (a.positionIndex||0)-(b.positionIndex||0); }).map(function(sh){
         var m = (state.roster||[]).find(function(x){ return x.id === sh.memberId; });
         var name = m ? m.last+', '+m.first : sh.memberId;
-        var isClockedIn = sh.clockedIn || openSessions[sh.memberId];
+        var ci = sh.clockedIn || openSessions[sh.memberId];
         return '<div style="display:flex;align-items:center;gap:6px;padding:3px 0;">'
-          + '<div style="width:6px;height:6px;border-radius:50%;background:'+(isClockedIn?'#27AE60':'#333')+';flex-shrink:0;'+(isClockedIn?'box-shadow:0 0 4px #27AE60;':'')+'"></div>'
+          + '<div style="width:6px;height:6px;border-radius:50%;background:'+(ci?'#27AE60':'#333')+';flex-shrink:0;'+(ci?'box-shadow:0 0 4px #27AE60;':'')+'"></div>'
           + '<div style="flex:1;min-width:0;">'
-          +   '<div style="font-size:14px;font-weight:'+(isClockedIn?'700':'500')+';color:'+(isClockedIn?'#F0F0F0':'#888')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+name+'</div>'
-          +   (sh.position ? '<div style="font-size:10px;color:#555;letter-spacing:.5px;">'+sh.position+'</div>' : '')
+          +   '<div style="font-size:14px;font-weight:'+(ci?'700':'500')+';color:'+(ci?'#F0F0F0':'#888')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+name+'</div>'
+          +   (sh.position ? '<div style="font-size:11px;color:#555;letter-spacing:.5px;">'+sh.position+'</div>' : '')
           + '</div>'
           + '</div>';
       }).join('');
-      return '<div style="margin-bottom:10px;">'
-        + '<div style="font-size:12px;font-weight:700;color:'+accentColor+';letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;border-bottom:1px solid #1E1E1E;padding-bottom:3px;">'+unitLabel+'</div>'
-        + memberRows
-        + '</div>';
+    }
+    unitsHtml = _tvGroups.map(function(group){
+      var gHtml = '';
+      group.forEach(function(unitId, gi){
+        var lbl = (typeof UNIT_LABELS !== 'undefined' && UNIT_LABELS[unitId]) ? UNIT_LABELS[unitId] : unitId.toUpperCase();
+        var lc  = gi === 0 ? accentColor : '#888';
+        if (gi > 0) gHtml += '<div style="border-top:1px dashed #1E1E1E;margin:5px 0 3px;"></div>';
+        gHtml += '<div style="margin-bottom:8px;">'
+          + '<div style="font-size:12px;font-weight:700;color:'+lc+';letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;border-bottom:1px solid #1E1E1E;padding-bottom:3px;">'+lbl+'</div>'
+          + tvMemberRows(unitId)
+          + '</div>';
+      });
+      return gHtml;
     }).join('');
   }
 
