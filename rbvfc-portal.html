@@ -657,6 +657,7 @@ var state = {
   cadPendingCalls: [],         // calls fetched from Gmail sync, pending logging
   loggedIncidentNums: [],      // incident numbers already logged — skip on future syncs
   cadScriptUrl: '',            // separate Apps Script URL just for CAD dispatch sync
+  lastCadSync: '',             // ISO timestamp of last successful CAD sync
   // Extended properties (used at runtime, safe to be undefined but declared for clarity)
   _impersonating: null,        // member ID being impersonated (officer view-as)
   _realUserId: null,           // real user ID during impersonation
@@ -2254,6 +2255,11 @@ function onAdminTabShow() {
   populateViewAsDropdown();
   var urlInput=document.getElementById('sheetUrlInput');
   if (urlInput&&state.sheetWebhookUrl) urlInput.value=state.sheetWebhookUrl;
+  // Restore connection status from saved state
+  if (state.sheetWebhookUrl) updateSheetStatusPanel(state.lastSync ? 'ok' : 'none');
+  else updateSheetStatusPanel('none');
+  if (state.cadScriptUrl) updateCadStatusPanel(state.lastCadSync ? 'ok' : 'none', state.lastCadSync||null);
+  else updateCadStatusPanel('none', null);
   // Collapse all cards on open
   var collapseIds = [
     'rankEditorCollapse',
@@ -2405,11 +2411,73 @@ function showSyncFallback() {
   }
 }
 function updateSyncBadge(status) {
-  var badge=document.getElementById('sheetStatusBadge');
-  if (!badge) return;
-  var map={ok:['Connected ✓','green'],syncing:['Syncing…','gold'],error:['Error','red'],'':['Not Configured','gray']};
-  var s=map[status]||map[''];
-  badge.textContent=s[0]; badge.className='pill '+s[1];
+  updateSheetStatusPanel(status);
+}
+
+function _statusHtml(status, lastSync, type) {
+  var configs = {
+    ok:      { bg:'#1A3A1A', border:'#27AE60', dot:'#27AE60', label:'Connected', labelColor:'#27AE60' },
+    syncing: { bg:'#2A2200', border:'#F5A623', dot:'#F5A623', label:'Syncing…', labelColor:'#F5A623' },
+    error:   { bg:'#2A0A0A', border:'#E74C3C', dot:'#E74C3C', label:'Error',     labelColor:'#E74C3C' },
+    none:    { bg:'#1A1A1A', border:'#333',    dot:'#555',    label:'Not Configured', labelColor:'#666' }
+  };
+  var c = configs[status] || configs.none;
+  var syncStr = lastSync
+    ? '<span style="color:#555;">&nbsp;·&nbsp;Last sync: '
+      + new Date(lastSync).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
+      + '</span>'
+    : '';
+  return '<div style="display:flex;align-items:center;gap:8px;background:'+c.bg+';border:1px solid '
+    + c.border+';border-radius:8px;padding:8px 12px;">'
+    + '<div style="width:8px;height:8px;border-radius:50%;background:'+c.dot
+    + ';flex-shrink:0;'+(status==='ok'?'box-shadow:0 0 6px '+c.dot+';':'')+'"></div>'
+    + '<span style="font-size:12px;font-weight:700;color:'+c.labelColor+';">'+c.label+'</span>'
+    + syncStr
+    + '</div>';
+}
+
+function updateSheetStatusPanel(status) {
+  // Update in-panel status
+  var el = document.getElementById('sheetSyncStatus');
+  if (el) el.innerHTML = _statusHtml(status, status==='ok' ? state.lastSync : null, 'sheet');
+  // Update header badge
+  var badge = document.getElementById('sheetConnBadge');
+  if (badge) {
+    if (status === 'ok') {
+      badge.style.display = 'inline-block';
+      badge.textContent = 'Connected';
+      badge.style.cssText += 'background:#1A3A1A;color:#27AE60;border:1px solid #27AE60;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:8px;';
+    } else if (status === 'syncing') {
+      badge.style.display = 'inline-block';
+      badge.textContent = 'Syncing…';
+      badge.style.cssText += 'background:#2A2200;color:#F5A623;border:1px solid #F5A623;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:8px;';
+    } else if (status === 'error') {
+      badge.style.display = 'inline-block';
+      badge.textContent = 'Error';
+      badge.style.cssText += 'background:#2A0A0A;color:#E74C3C;border:1px solid #E74C3C;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:8px;';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
+
+function updateCadStatusPanel(status, lastSync) {
+  var el = document.getElementById('adminCadSyncStatus');
+  if (el) el.innerHTML = _statusHtml(status, lastSync, 'cad');
+  var badge = document.getElementById('cadConnBadge');
+  if (badge) {
+    if (status === 'ok') {
+      badge.style.display = 'inline-block';
+      badge.textContent = 'Connected';
+      badge.style.cssText += 'background:#0D1A2A;color:#2980B9;border:1px solid #2980B9;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:8px;';
+    } else if (status === 'error') {
+      badge.style.display = 'inline-block';
+      badge.textContent = 'Error';
+      badge.style.cssText += 'background:#2A0A0A;color:#E74C3C;border:1px solid #E74C3C;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:8px;';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
 }
 function showAppsScriptModal() {
   var code=document.getElementById('appsScriptCode');
@@ -6769,15 +6837,64 @@ function saveSheetUrl() {
   var url=((document.getElementById('sheetUrlInput')||{}).value||'').trim();
   state.sheetWebhookUrl=url; save();
   showToast(url?'✅ Sheet URL saved.':'Sheet URL cleared.');
+  if (url) { updateSheetStatusPanel('syncing'); testSheetConnection(); }
+  else { updateSheetStatusPanel('none'); }
 }
 function exportToSheets() { if(!state.sheetWebhookUrl){showToast('Save a Sheet URL first.');return;} sheetSyncNow(); }
-function testSheetConnection() { if(!state.sheetWebhookUrl){showToast('Save a Sheet URL first.');return;} sheetSyncNow(); }
+function testSheetConnection() {
+  if (!state.sheetWebhookUrl) { showToast('⚠️ Save a Sheet URL first.'); return; }
+  updateSheetStatusPanel('syncing');
+  var url = state.sheetWebhookUrl;
+  fetch(url + '?action=ping', { method:'GET', mode:'no-cors' })
+    .then(function() {
+      updateSheetStatusPanel('ok');
+      state.lastSync = new Date().toISOString(); save();
+      showToast('✅ Connected to Google Sheet!');
+    })
+    .catch(function(err) {
+      // no-cors fetch to Apps Script always "succeeds" — failure means URL is wrong
+      updateSheetStatusPanel('error');
+      showToast('⚠️ Could not reach Sheet URL. Check the URL.');
+    });
+}
 function saveCadScriptUrl() {
   var url=((document.getElementById('cadScriptUrl')||{}).value||'').trim();
   state.cadScriptUrl=url; save();
   showToast(url?'✅ CAD URL saved.':'CAD URL cleared.');
+  if (url) testCadConnection();
+  else updateCadStatusPanel('none', null);
 }
-function syncCadFromAdmin() { syncCadCalls(); }
+function syncCadFromAdmin() {
+  var url = state.cadScriptUrl || ((document.getElementById('cadScriptUrl')||{}).value||'').trim();
+  if (!url) { showToast('⚠️ No CAD Script URL configured.'); return; }
+  updateCadStatusPanel('syncing', null);
+  fetch(url + '?action=getCadCalls', { mode:'no-cors' })
+    .then(function() {
+      state.lastCadSync = new Date().toISOString(); save();
+      updateCadStatusPanel('ok', state.lastCadSync);
+      showToast('✅ CAD sync complete.');
+    })
+    .catch(function() {
+      updateCadStatusPanel('error', null);
+      showToast('⚠️ CAD sync failed — check the script URL.');
+    });
+}
+
+function testCadConnection() {
+  var url = state.cadScriptUrl;
+  if (!url) return;
+  updateCadStatusPanel('syncing', null);
+  fetch(url + '?action=ping', { mode:'no-cors' })
+    .then(function() {
+      state.lastCadSync = state.lastCadSync || new Date().toISOString(); save();
+      updateCadStatusPanel('ok', state.lastCadSync);
+      showToast('✅ CAD Script connected!');
+    })
+    .catch(function() {
+      updateCadStatusPanel('error', null);
+      showToast('⚠️ Could not reach CAD Script URL.');
+    });
+}
 function openCadGmailSetup() {
   var m=document.getElementById('cadGmailModal');
   if(m) m.style.display='flex';
@@ -10173,7 +10290,7 @@ function applyBulkEdit() {
               <button class="btn btn-secondary btn-sm" onclick="exportToSheets()">📤 Export Now</button>
               <button class="btn btn-secondary btn-sm" onclick="testSheetConnection()">🔌 Test Connection</button>
             </div>
-            <div id="sheetSyncStatus" style="margin-top:8px;font-size:12px;color:#888;"></div>
+            <div id="sheetSyncStatus" style="margin-top:10px;"></div>
           </div>
         </div>
 
@@ -10200,7 +10317,7 @@ function applyBulkEdit() {
               <button class="btn btn-secondary btn-sm" onclick="syncCadFromAdmin()">🔄 Sync Now</button>
               <button class="btn btn-secondary btn-sm" onclick="openCadGmailSetup()">⚙️ Setup Guide</button>
             </div>
-            <div id="adminCadSyncStatus" style="margin-top:8px;font-size:12px;color:#888;"></div>
+            <div id="adminCadSyncStatus" style="margin-top:10px;"></div>
           </div>
         </div>
 
