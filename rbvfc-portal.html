@@ -1612,6 +1612,35 @@ function tsubClearCert() {
 }
 function removeTsubCert() { tsubClearCert(); }
 
+function showTrainingConfirmation(info) {
+  // Remove any existing confirmation
+  var existing = document.getElementById('tsubConfirmModal');
+  if (existing) existing.remove();
+  var d = new Date(info.date+'T12:00:00');
+  var dateStr = d.toLocaleDateString([],{weekday:'short',month:'long',day:'numeric',year:'numeric'});
+  var modal = document.createElement('div');
+  modal.id = 'tsubConfirmModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML =
+    '<div style="background:#1A1A1A;border:1px solid #27AE60;border-top:4px solid #27AE60;border-radius:14px;padding:28px;width:100%;max-width:380px;text-align:center;">' +
+    '<div style="font-size:40px;margin-bottom:12px;">&#10003;</div>' +
+    '<div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:700;color:#27AE60;letter-spacing:2px;margin-bottom:6px;">SUBMITTED!</div>' +
+    '<div style="font-size:13px;color:#888;margin-bottom:20px;">Your training is pending officer approval</div>' +
+    '<div style="background:#111;border:1px solid #2A2A2A;border-radius:10px;padding:14px;margin-bottom:20px;text-align:left;">' +
+    '<div style="font-size:15px;font-weight:700;color:#F0F0F0;margin-bottom:8px;">' + (info.name||'') + '</div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:12px;color:#888;margin-bottom:4px;">' +
+    '<span>Date</span><span style="color:#CCC;">' + dateStr + '</span></div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:12px;color:#888;margin-bottom:4px;">' +
+    '<span>Hours</span><span style="color:#CCC;">' + info.hours + ' hrs</span></div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:12px;color:#888;">' +
+    '<span>Estimated points</span><span style="color:#27AE60;font-weight:700;">' + info.pts + ' pt' + (info.pts!==1?'s':'') + ' (pending approval)</span></div>' +
+    '</div>' +
+    '<div style="font-size:11px;color:#555;margin-bottom:16px;">An officer or admin will review and approve this submission. You will see it in your Training History once approved.</div>' +
+    '<button class="btn btn-primary btn-full" onclick="document.getElementById(&quot;tsubConfirmModal&quot;).remove()">&#10003; Got It</button>' +
+    '</div>';
+  document.body.appendChild(modal);
+}
+
 function submitTraining() {
   var uid   = state.currentUserId;
   var date  = ((document.getElementById('tsubDate')||{}).value||'').trim();
@@ -1658,6 +1687,9 @@ function submitTraining() {
 
   updateApprovalsBadge();
   renderTrainingReview();
+
+  // Show confirmation modal
+  showTrainingConfirmation({ name: name, hours: hours, pts: pts, date: date });
   showToast('✅ Training submitted for Fire Chief approval.');
 }
 
@@ -2939,9 +2971,9 @@ function initDrillTab() {
   var uid = state.currentUserId;
   var me = (state.roster||[]).find(function(m){ return m.id===uid; });
   var isOfficer = me && (me.appRole==='officer'||me.appRole==='admin');
-  // Show submit form for officers/admins
+  // All active members can submit drill reports
   var submitCard = document.getElementById('drillSubmitCard');
-  if (submitCard) submitCard.style.display = isOfficer ? 'block' : 'none';
+  if (submitCard) submitCard.style.display = 'block';
   // Set drill date default to today
   var dd = document.getElementById('drillDate');
   if (dd && !dd.value) dd.value = new Date().toISOString().slice(0,10);
@@ -6326,7 +6358,7 @@ function openSwitchUser() {
   // Build a simple prompt-style modal
   var names = (state.roster||[]).filter(function(m){ return m.active!==false && m.id!==state.currentUserId; })
     .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
-    .map(function(m){ return m.id+'|'+m.last+', '+m.first; });
+    .map(function(m){ var rankStr = m.rank||'Member'; return m.id+'|'+m.last+', '+m.first+' ('+rankStr+')'; });
   var choice = window._switchUserModal ? null : buildSwitchModal(names);
 }
 
@@ -10277,8 +10309,47 @@ function applyBulkEdit() {
           </div>
           <div class="form-group" style="grid-column:1/-1;">
             <label>Drill Type *</label>
-            <select id="drillType">
+            <select id="drillType" onchange="drillTypeChanged()">
               <option value="">— Select Drill Type —</option>
+              <optgroup label="Engine / Suppression">
+                <option value="E-OPS|Engine Company Operations">E-OPS — Engine Company Operations</option>
+                <option value="HOSE|Hose Evolutions / Attack Lines">HOSE — Hose Evolutions / Attack Lines</option>
+                <option value="PUMP|Pump Operations / Driver">PUMP — Pump Operations / Driver</option>
+                <option value="WATER|Water Supply / Hydrant">WATER — Water Supply / Hydrant</option>
+                <option value="FOAM|Foam Operations">FOAM — Foam Operations</option>
+              </optgroup>
+              <optgroup label="Truck / Aerial">
+                <option value="T-OPS|Truck Company Operations">T-OPS — Truck Company Operations</option>
+                <option value="AERIAL|Aerial / Ladder Operations">AERIAL — Aerial / Ladder Operations</option>
+                <option value="VENT|Ventilation">VENT — Ventilation</option>
+                <option value="SEARCH|Search &amp; Rescue">SEARCH — Search &amp; Rescue</option>
+                <option value="FORCE|Forcible Entry">FORCE — Forcible Entry</option>
+                <option value="OVERHL|Overhaul / Salvage">OVERHL — Overhaul / Salvage</option>
+              </optgroup>
+              <optgroup label="EMS / Medical">
+                <option value="EMS|EMS / Medical Drill">EMS — EMS / Medical Drill</option>
+                <option value="TRIAGE|Mass Casualty / Triage">TRIAGE — Mass Casualty / Triage</option>
+                <option value="CPR|CPR / AED Recertification">CPR — CPR / AED Recertification</option>
+              </optgroup>
+              <optgroup label="Specialty">
+                <option value="HAZ|Hazmat Operations">HAZ — Hazmat Operations</option>
+                <option value="BOAT|Marine / Boat Operations">BOAT — Marine / Boat Operations</option>
+                <option value="SWIFT|Swift Water / Water Rescue">SWIFT — Swift Water / Water Rescue</option>
+                <option value="TECH|Technical Rescue">TECH — Technical Rescue</option>
+                <option value="WILDLND|Wildland / Brush Operations">WILDLND — Wildland / Brush Operations</option>
+                <option value="MAYDAY|Mayday / LUNAR / RIT">MAYDAY — Mayday / LUNAR / RIT</option>
+              </optgroup>
+              <optgroup label="Leadership / Multi-Company">
+                <option value="LEAD|Leadership / Officer Development">LEAD — Leadership / Officer Development</option>
+                <option value="MULTI|Multi-Company / Mutual Aid">MULTI — Multi-Company / Mutual Aid</option>
+                <option value="INCIDENT|Incident Command / ICS">INCIDENT — Incident Command / ICS</option>
+                <option value="LIVE|Live Fire Training">LIVE — Live Fire Training</option>
+              </optgroup>
+              <optgroup label="Other">
+                <option value="PPE|PPE / SCBA Drill">PPE — PPE / SCBA Drill</option>
+                <option value="EXTRICATE|Extrication">EXTRICATE — Extrication</option>
+                <option value="OTHER|Other (specify in notes)">OTHER — Other (specify in notes)</option>
+              </optgroup>
             </select>
           </div>
           <div class="form-group">
