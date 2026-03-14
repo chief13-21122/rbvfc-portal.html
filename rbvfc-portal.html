@@ -759,6 +759,10 @@ function closeMoreMenu() { hideMoreMenu(); }
 //  CLOCK IN / OUT
 // ═══════════════════════════════════════════════════
 function updateClockUI(in_) {
+  // Treat cross-user session as "not clocked in" for UI purposes
+  if (in_ && state.currentSession && state.currentSession.userId !== state.currentUserId) {
+    in_ = false;
+  }
   var inBtn  = document.getElementById('clockInBtn');
   var outBtn = document.getElementById('clockOutBtn');
   var timer  = document.getElementById('clockTimer');
@@ -4121,6 +4125,10 @@ function notifyUnderstaffedDay(date) {
 
 // ── CLOCK IN / CANCEL / REMOVE ────────────────────────────────
 function staffClockIn(elOrId) {
+  // Clear stale sessions from other users (kiosk safety)
+  if (state.currentSession && state.currentSession.userId !== state.currentUserId) {
+    state.currentSession = null; save();
+  }
   var shiftId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
   if (!shift) return;
@@ -7012,6 +7020,12 @@ function restoreClockState() {
     state.currentSession = null;
     save();
   }
+  // Clear sessions belonging to a different user (happens on shared/kiosk devices)
+  if (state.currentSession && state.currentSession.userId !== state.currentUserId) {
+    console.log('[RBVFC] Clearing stale session from user', state.currentSession.userId, '(current user:', state.currentUserId, ')');
+    state.currentSession = null;
+    save();
+  }
   // If no open session but member has a clockedIn staffing shift today → restore it
   if (!state.currentSession && state.currentUserId) {
     var todayStr = new Date().toISOString().slice(0,10);
@@ -7120,6 +7134,10 @@ function clockIn() {
   if (state.currentSession && !state.currentSession.userId) {
     state.currentSession = null;
     save();
+  }
+  // Clear stale sessions from other users (kiosk safety)
+  if (state.currentSession && state.currentSession.userId !== state.currentUserId) {
+    state.currentSession = null; save();
   }
   if (state.currentSession) { showToast('Already clocked in.'); return; }
   var activity = (document.getElementById('clockActivity')||{}).value || 'meeting';
@@ -7720,6 +7738,10 @@ function renderMyClassesToday() {
 }
 
 function classClockIn(classId, sessionDate) {
+  // Clear stale sessions from other users (kiosk safety)
+  if (state.currentSession && state.currentSession.userId !== state.currentUserId) {
+    state.currentSession = null; save();
+  }
   if (state.currentSession) {
     showToast('⚠️ Already clocked in. Clock out first.');
     return;
