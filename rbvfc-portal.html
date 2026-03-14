@@ -6837,6 +6837,75 @@ function exportCSV() {
   var blob=new Blob([csv],{type:'text/csv'}); var a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download='rbvfc-members-'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
 }
+function importJSONBackup(file) {
+  if (!file) return;
+  var statusEl = document.getElementById('importJsonStatus');
+  if (statusEl) statusEl.innerHTML = '<span style="color:#F5A623;">Reading file…</span>';
+
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var data = JSON.parse(e.target.result);
+
+      // Validate: must have at least a roster array
+      if (!data || typeof data !== 'object') throw new Error('File does not appear to be a valid RBVFC backup.');
+      if (!Array.isArray(data.roster)) throw new Error('No member roster found in backup. Is this the right file?');
+
+      // Count key records for the confirm prompt
+      var memberCount   = data.roster.length;
+      var sessionCount  = (data.sessions||[]).length;
+      var losapCount    = (data.losapActivities||[]).length;
+      var shiftCount    = (data.staffingShifts||[]).length;
+      var summary = memberCount + ' members, ' + losapCount + ' LOSAP records, ' + shiftCount + ' shifts';
+
+      var msg = 'Restore backup from: ' + (file.name || 'file') + '\n\n'
+        + 'This will REPLACE all current portal data with:\n  • ' + summary + '\n\n'
+        + 'Your current data will be overwritten. Are you sure?';
+
+      if (!confirm(msg)) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:#888;">Restore cancelled.</span>';
+        return;
+      }
+
+      // Preserve the current user session so they stay logged in
+      var savedUserId = state.currentUserId;
+
+      // Merge: replace all state keys from backup
+      Object.keys(state).forEach(function(k) {
+        if (k !== 'currentUserId' && k !== 'currentSession' && k !== '_classRemindedToday') {
+          if (data.hasOwnProperty(k)) state[k] = data[k];
+        }
+      });
+      // Also copy any keys in backup that aren't in current state
+      Object.keys(data).forEach(function(k) {
+        if (!state.hasOwnProperty(k)) state[k] = data[k];
+      });
+
+      // Restore the user session
+      state.currentUserId = savedUserId;
+
+      save();
+
+      if (statusEl) statusEl.innerHTML = '<span style="color:#27AE60;">✅ Backup restored! '
+        + memberCount + ' members loaded. Page will reload in 3 seconds…</span>';
+
+      showToast('✅ Backup restored successfully — ' + summary + '.');
+
+      // Reload after a moment so all tabs re-render cleanly
+      setTimeout(function() { location.reload(); }, 3000);
+
+    } catch(err) {
+      if (statusEl) statusEl.innerHTML = '<span style="color:#E74C3C;">⚠️ Error: ' + (err.message || 'Could not read file.') + '</span>';
+      showToast('⚠️ Import failed: ' + (err.message || 'Invalid file.'));
+    }
+  };
+  reader.onerror = function() {
+    if (statusEl) statusEl.innerHTML = '<span style="color:#E74C3C;">⚠️ Could not read file.</span>';
+  };
+  reader.readAsText(file);
+}
+
+
 function confirmClearAllData() {
   if(!confirm('⚠️ This will PERMANENTLY delete ALL portal data. Are you sure?')) return;
   if(!confirm('Last chance — delete everything?')) return;
@@ -9018,25 +9087,43 @@ function fillCadCall(index) {
 }
 
 function _cadCallMatchesFilter(call) {
-  // Returns true if this call should be visible given unitDisplayFilter.
-  // A call matches if:
-  //   (a) no units are specified on the call (always show), OR
-  //   (b) at least one unit in the call matches an enabled unit in displayFilter
   var df = state.unitDisplayFilter || {};
   var callUnits = _parseCadUnits(call.units || call.apparatus || '');
-  if (!callUnits.length) return true; // no unit info — always show
-  // Check if ANY call unit is currently displayed
-  return callUnits.some(function(cu) {
-    // Match by unit ID (e131) or label substring (Engine 131)
-    var matchedId = Object.keys(UNIT_LABELS).find(function(uid) {
+
+  // No unit info on the call — always show (we don't know what to filter on)
+  if (!callUnits.length) return true;
+
+  // Map each text unit token → matched unitId in UNIT_LABELS
+  function resolveUnitId(cu) {
+    return Object.keys(UNIT_LABELS).find(function(uid) {
       var lbl = UNIT_LABELS[uid] || '';
       return uid.toLowerCase() === cu.toLowerCase() ||
              lbl.toLowerCase().indexOf(cu.toLowerCase()) >= 0 ||
              cu.toLowerCase().indexOf(uid.toLowerCase()) >= 0 ||
              cu.toLowerCase().indexOf(lbl.toLowerCase()) >= 0;
-    });
-    // Default visible if unitId not in filter, or explicitly true
-    return !matchedId || df[matchedId] !== false;
+    }) || null;
+  }
+
+  var resolvedIds = callUnits.map(resolveUnitId).filter(Boolean);
+
+  // If we couldn't match any unit ID at all, show the call (unknown unit)
+  if (!resolvedIds.length) return true;
+
+  // Check each resolved unit
+  return resolvedIds.some(function(uid) {
+    // ── Mu13 special rule ───────────────────────────────────────────────────
+    // Mu13 calls only appear if a member is actively staffed on Mu13 today
+    if (uid === 'Mu13') {
+      var today = new Date().toISOString().slice(0, 10);
+      var mu13Staffed = (state.staffingShifts || []).some(function(s) {
+        return s.unitId === 'Mu13' && s.date === today && s.memberId;
+      });
+      if (!mu13Staffed) return false; // hide Mu13 calls when nobody is staffing it
+    }
+
+    // ── Unit display filter ─────────────────────────────────────────────────
+    // Show if the unit is not explicitly hidden in the filter
+    return df[uid] !== false;
   });
 }
 
@@ -10204,23 +10291,6 @@ function applyBulkEdit() {
     <!-- ══════════════ ADMIN TAB ══════════════ -->
     <div id="section-admin" class="section">
 
-      <!-- View As Member -->
-      <div class="card" data-no-collapse="1" style="border-color:#27AE60;">
-        <div class="card-header" style="margin-bottom:12px;">
-          <div class="icon" style="background:rgba(39,174,96,.15);border-color:rgba(39,174,96,.4);">👁</div>
-          <h2>View As Member</h2>
-        </div>
-        <p style="font-size:13px;color:#888;margin-bottom:14px;">Switch your view to see the portal exactly as any member sees it. Use <strong style="color:#F5A623;">Exit View</strong> in the yellow banner to return.</p>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
-          <div class="form-group" style="flex:1;min-width:180px;margin:0;">
-            <label>Select Member</label>
-            <select id="viewAsMemberSelect" style="width:100%;font-size:14px;">
-              <option value="">— Pick a member —</option>
-            </select>
-          </div>
-          <button class="btn btn-secondary" style="border-color:#27AE60;color:#27AE60;white-space:nowrap;" onclick="viewAsSelected()">👁 View As Selected</button>
-        </div>
-      </div>
 
       <!-- Member Management -->
       <div class="card" id="memberMgmtCard">
@@ -10481,9 +10551,22 @@ function applyBulkEdit() {
             <span id="rawDataIcon" style="color:#AAA;font-weight:700;font-size:14px;">▶</span>
           </div>
           <div id="rawDataCollapse" style="display:none;padding:14px;background:#111;border-top:1px solid #333;">
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-              <button class="btn btn-secondary btn-sm" onclick="exportJSON()">📄 Export JSON</button>
+            <div style="font-size:11px;color:#888;margin-bottom:10px;line-height:1.5;">
+              Export a full backup of all portal data as a JSON file. If you ever need to restore,
+              use <strong style="color:#F0F0F0;">Import JSON Backup</strong> below.
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+              <button class="btn btn-secondary btn-sm" onclick="exportJSON()">📄 Export JSON Backup</button>
               <button class="btn btn-secondary btn-sm" onclick="exportCSV()">📊 Export CSV</button>
+            </div>
+            <div style="border-top:1px solid #2A2A2A;padding-top:12px;margin-bottom:14px;">
+              <div style="font-size:12px;font-weight:700;color:#27AE60;margin-bottom:6px;">📥 Restore from Backup</div>
+              <div style="font-size:11px;color:#888;margin-bottom:8px;line-height:1.5;">
+                Select your previously exported <code style="background:#1A1A1A;padding:1px 5px;border-radius:3px;">.json</code> backup file to fully restore all data. This replaces your current data.
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="document.getElementById('importJsonInput').click()">📂 Import JSON Backup</button>
+              <input type="file" id="importJsonInput" accept=".json,application/json" style="display:none;" onchange="importJSONBackup(this.files[0])">
+              <div id="importJsonStatus" style="margin-top:8px;font-size:12px;"></div>
             </div>
             <div style="border-top:1px solid #333;padding-top:12px;">
               <div style="font-size:12px;color:#E74C3C;font-weight:700;margin-bottom:8px;">⚠️ Danger Zone</div>
