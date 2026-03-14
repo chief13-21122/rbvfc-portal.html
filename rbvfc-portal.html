@@ -3062,7 +3062,8 @@ function saveDrillReport() {
   var notes        = ((document.getElementById('drillNotes')||{}).value||'').trim();
 
   if (!drillDate)    { showToast('⚠️ Drill date is required.'); return; }
-  if (!reportBy)     { showToast('⚠️ Please select who is submitting this report.'); return; }
+  if (!reportBy) reportBy = state.currentUserId || '';
+  if (!reportBy) { showToast('⚠️ Could not determine submitting member. Please re-open the Drill tab.'); return; }
   if (!drillTypeVal) { showToast('⚠️ Please select a drill type.'); return; }
   if (!hours || hours <= 0) { showToast('⚠️ Duration in hours is required.'); return; }
 
@@ -4180,6 +4181,22 @@ function notifyUnderstaffedDay(date) {
 }
 
 // ── CLOCK IN / CANCEL / REMOVE ────────────────────────────────
+function _canClockInNow(shiftDate, shiftStartHHMM) {
+  // Rule: can only clock in on the shift date, and no more than 5 minutes before start time
+  var today = new Date().toISOString().slice(0, 10);
+  if (shiftDate && shiftDate !== today) return false; // must be today
+  if (!shiftStartHHMM) return true; // no start time — allow
+  var sh = parseInt(shiftStartHHMM.slice(0, 2));
+  var sm = parseInt(shiftStartHHMM.slice(2) || '0');
+  var now = new Date();
+  var nowMins = now.getHours() * 60 + now.getMinutes();
+  var startMins = sh * 60 + sm;
+  if (nowMins < startMins - 5) {
+    return false; // more than 5 minutes early
+  }
+  return true;
+}
+
 function staffClockIn(elOrId) {
   // Clear stale sessions from other users (kiosk safety)
   if (state.currentSession && state.currentSession.userId !== state.currentUserId) {
@@ -4188,6 +4205,19 @@ function staffClockIn(elOrId) {
   var shiftId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
   if (!shift) return;
+  // Enforce: today only, no more than 5 minutes early
+  if (!_canClockInNow(shift.date, shift.shiftStart)) {
+    var today = new Date().toISOString().slice(0, 10);
+    if (shift.date !== today) {
+      showToast('\u26a0\ufe0f You can only clock in on the day of your shift.');
+    } else {
+      var sh = parseInt((shift.shiftStart||'0700').slice(0,2));
+      var sm = parseInt((shift.shiftStart||'0700').slice(2)||'0');
+      var timeStr = (sh%12||12) + ':' + (sm<10?'0':'') + sm + ' ' + (sh>=12?'PM':'AM');
+      showToast('\u26a0\ufe0f Clock-in opens 5 minutes before shift start (' + timeStr + ').');
+    }
+    return;
+  }
   var now = new Date();
   shift.clockedIn = true;
   shift.clockedInAt = now.toISOString();
@@ -7313,6 +7343,7 @@ function clockIn() {
     state.currentSession = null; save();
   }
   if (state.currentSession) { showToast('Already clocked in.'); return; }
+  // Note: general clock-in (meetings, duties, collateral) has no time restriction
   var activity = (document.getElementById('clockActivity')||{}).value || 'meeting';
   var desc     = ((document.getElementById('clockDesc')||{}).value||'').trim();
   if ((activity === 'meeting' || activity === 'collateral') && !desc) {
@@ -7919,7 +7950,17 @@ function classClockIn(classId, sessionDate) {
     showToast('⚠️ Already clocked in. Clock out first.');
     return;
   }
+  // Enforce: today only, no more than 5 minutes early
   var cls = (state.trainingClasses||[]).find(function(c){ return c.id===classId; });
+  if (!_canClockInNow(sessionDate, cls ? cls.startTime : null)) {
+    var today = new Date().toISOString().slice(0, 10);
+    if (sessionDate !== today) {
+      showToast('⚠️ You can only clock in on the day of the class.');
+    } else {
+      showToast('⚠️ Clock-in opens 5 minutes before class start time.');
+    }
+    return;
+  }
   if (!cls) return;
   var uid = state.currentUserId;
   // Check for existing attendance record for this session
