@@ -3282,17 +3282,22 @@ function renderStaffingAlerts() {
     html += '<div style="font-size:12px;color:#888;margin-bottom:6px;">'+tsStr+'</div>';
     html += '<div style="font-size:14px;color:#F0F0F0;white-space:pre-line;line-height:1.5;">'+a.msg+'</div>';
     if (clears.length) {
-      html += '<div style="font-size:10px;color:#555;margin-top:8px;border-top:1px solid #222;padding-top:6px;">';
-      html += '✓ Cleared by: ';
+      html += '<div style="margin-top:10px;border-top:1px solid #2A2A2A;padding-top:8px;">';
+      html += '<div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#555;margin-bottom:5px;">✓ Acknowledged by</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:5px;">';
       html += clears.map(function(cl){
         var m2 = (state.roster||[]).find(function(r){ return r.id===cl.memberId; });
-        return (m2?m2.last+', '+m2.first:'Unknown')+' ('+new Date(cl.clearedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+')';
-      }).join(' · ');
-      html += '</div>';
+        var name = m2 ? m2.last+', '+m2.first : 'Unknown';
+        var dt = new Date(cl.clearedAt);
+        var timeStr = dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+        var dateStr = dt.toLocaleDateString([],{month:'short',day:'numeric'});
+        return '<span style="display:inline-flex;align-items:center;gap:4px;background:#1A2A1A;border:1px solid #27AE60;border-radius:6px;padding:3px 8px;font-size:11px;color:#27AE60;">✓ '+name+' <span style="color:#555;font-size:10px;">'+timeStr+' · '+dateStr+'</span></span>';
+      }).join('');
+      html += '</div></div>';
     }
     html += '</div>';
     if (!clearedByMe) {
-      html += '<button style="flex-shrink:0;align-self:flex-start;background:#1A1A00;border:1px solid #555;color:#888;font-size:11px;letter-spacing:1px;text-transform:uppercase;padding:5px 10px;border-radius:6px;cursor:pointer;">✓ Clear</button>';
+      html += '<button onclick="clearStaffingAlert(\''+a.id+'\')" style="flex-shrink:0;align-self:flex-start;background:#1A1A00;border:1px solid #F5A623;color:#F5A623;font-size:11px;letter-spacing:1px;text-transform:uppercase;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:700;">✓ Acknowledge</button>';
     } else {
       html += '<div style="flex-shrink:0;font-size:10px;color:#27AE60;align-self:flex-start;padding-top:2px;">✓ Cleared</div>';
     }
@@ -4147,13 +4152,32 @@ function renderMyShifts() {
     return ev.date >= today && (ev.signups||[]).some(function(s){ return s.memberId===uid; });
   }).sort(function(a,b){ return (a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||''); });
 
-  if (!myShifts.length && !myEvents.length) {
+  // Upcoming enrolled training class sessions
+  var myClasses = (state.trainingClasses||[]).filter(function(c){
+    return c.active !== false && (c.members||[]).indexOf(uid) >= 0;
+  });
+  var myClassItems = [];
+  myClasses.forEach(function(cls) {
+    var sessions = generateClassSessions(cls);
+    sessions.forEach(function(dateStr) {
+      if (dateStr >= today) myClassItems.push({ type:'class', date:dateStr, data:cls });
+    });
+  });
+  var _seenCD = {};
+  myClassItems = myClassItems.filter(function(ci){
+    var k = ci.data.id+'_'+ci.date;
+    if (_seenCD[k]) return false;
+    _seenCD[k] = true; return true;
+  }).slice(0, 14);
+
+  if (!myShifts.length && !myEvents.length && !myClassItems.length) {
     container.innerHTML = '<p style="color:#666;font-size:13px;text-align:center;padding:20px;">No upcoming shifts or events. Sign up on the board below.</p>';
     return;
   }
 
   var allItems = myShifts.map(function(s){ return {type:'shift', date:s.date, data:s}; })
     .concat(myEvents.map(function(ev){ return {type:'event', date:ev.date, data:ev}; }))
+    .concat(myClassItems)
     .sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
 
   var html = '';
@@ -4182,7 +4206,7 @@ function renderMyShifts() {
       if (!s.clockedIn) html += '<button class="btn btn-danger btn-sm" onclick="cancelShift(\'' + s.id + '\')">&#10005;</button>';
       html += '</div>';
 
-    } else {
+    } else if (item.type === 'event') {
       var ev = item.data;
       var signup = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
       var isClockedIn = signup && signup.clockedIn;
@@ -4213,6 +4237,37 @@ function renderMyShifts() {
         + sePositionSummary(ev);
       if (isToday && !isClockedIn) html += '<div style="font-size:11px;color:#C8102E;font-weight:700;margin-top:2px;">Event is today &mdash; clock in via Special Events!</div>';
       if (isClockedIn) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#128994; Clocked In' + (signup.clockedInAt ? ' at ' + new Date(signup.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '') + '</div>';
+      html += '</div></div>';
+
+    } else if (item.type === 'class') {
+      var cls = item.data;
+      var sessionDate = item.date;
+      var att = (state.classAttendance||[]).find(function(a){
+        return a.classId===cls.id && a.memberId===uid && a.sessionDate===sessionDate;
+      });
+      var clsIn   = att && att.clockedInAt && !att.clockedOutAt;
+      var clsDone = att && att.clockedOutAt;
+      var clsTime = '';
+      if (cls.startTime) {
+        var csh = parseInt(cls.startTime.slice(0,2)), csm = cls.startTime.slice(2);
+        clsTime = (csh%12||12)+':'+csm+' '+(csh>=12?'PM':'AM');
+        if (cls.endTime) {
+          var ceh = parseInt(cls.endTime.slice(0,2)), cem = cls.endTime.slice(2);
+          clsTime += ' – '+(ceh%12||12)+':'+cem+' '+(ceh>=12?'PM':'AM');
+        }
+      }
+      var clsBd = clsIn ? '#3498DB' : (clsDone ? '#27AE60' : (isToday ? '#3498DB' : '#1A2A3A'));
+      html += '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#181818;border:1px solid '+clsBd+';border-left:4px solid '+clsBd+';border-radius:10px;margin-bottom:8px;flex-wrap:wrap;">';
+      html += dateBox;
+      html += '<div style="flex:1;">';
+      html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
+      html += '<span style="font-size:10px;background:#0D1A2A;color:#3498DB;border:1px solid #3498DB;border-radius:4px;padding:1px 5px;flex-shrink:0;">CLASS</span>';
+      html += '<span style="font-weight:700;font-size:14px;color:#F0F0F0;">'+cls.name+'</span>';
+      html += '</div>';
+      html += '<div style="font-size:12px;color:#888;margin-top:2px;">'+(clsTime||'')+(cls.instructor?' · '+cls.instructor:'')+'</div>';
+      if (clsIn)        html += '<div style="font-size:11px;color:#3498DB;font-weight:700;margin-top:2px;">In session now</div>';
+      else if (clsDone) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">✓ Attended</div>';
+      else if (isToday) html += '<div style="font-size:11px;color:#3498DB;font-weight:700;margin-top:2px;">Class today — see Training tab to clock in</div>';
       html += '</div></div>';
     }
   });
@@ -4247,7 +4302,53 @@ function checkStaffingReminders() {
     if (s.memberId!==uid || s.date!==today || s.clockedIn || s.reminded) return;
     if (hour >= 6) { s.reminded = true; save(); showStaffingReminder(s); }
   });
+  if (hour >= 6) checkClassReminders(uid, today);
 }
+
+function checkClassReminders(uid, today) {
+  var enrolled = (state.trainingClasses||[]).filter(function(c){
+    return c.active !== false && (c.members||[]).indexOf(uid) >= 0;
+  });
+  if (!state._classRemindedToday) state._classRemindedToday = {};
+  enrolled.forEach(function(cls) {
+    var sessions = generateClassSessions(cls);
+    if (sessions.indexOf(today) < 0) return;
+    var att = (state.classAttendance||[]).find(function(a){
+      return a.classId===cls.id && a.memberId===uid && a.sessionDate===today && a.clockedInAt;
+    });
+    if (att) return; // already clocked in
+    var rKey = cls.id+'_'+today;
+    if (state._classRemindedToday[rKey]) return; // already reminded today
+    if (cls.startTime) {
+      var sh = parseInt(cls.startTime.slice(0,2));
+      var sm = parseInt(cls.startTime.slice(2)||'0');
+      var nowMins = new Date().getHours()*60 + new Date().getMinutes();
+      if (nowMins < sh*60+sm - 30) return; // too early
+    }
+    state._classRemindedToday[rKey] = true;
+    showClassReminder(cls);
+  });
+}
+
+function showClassReminder(cls) {
+  var timeLabel = '';
+  if (cls.startTime) {
+    var sh = parseInt(cls.startTime.slice(0,2)), sm = cls.startTime.slice(2);
+    timeLabel = (sh%12||12)+':'+sm+' '+(sh>=12?'PM':'AM');
+  }
+  _showTopBanner(
+    'classReminderTopBanner',
+    '#0A1525', '#3498DB', '&#128218;',
+    'CLASS REMINDER',
+    cls.name + (timeLabel ? ' · '+timeLabel : '') + (cls.instructor ? ' · '+cls.instructor : '') + ' — Class is today!',
+    [
+      { label:'Go to Training', fn:"showTab('training');dismissClassReminder()", bg:'#3498DB', color:'#000', border:'#3498DB' },
+      { label:'Acknowledge',    fn:'dismissClassReminder()',                      bg:'transparent', color:'#3498DB', border:'#3498DB' }
+    ]
+  );
+}
+
+function dismissClassReminder() { _hideTopBanner('classReminderTopBanner'); }
 // ─── UNIFIED TOP-BANNER HELPERS ─────────────────────────────
 function _showTopBanner(id, bgColor, accentColor, icon, title, body, buttons) {
   var el = document.getElementById(id);
@@ -4282,7 +4383,7 @@ function _adjustAppTopPad() {
   // Use requestAnimationFrame to ensure banner has rendered before measuring
   requestAnimationFrame(function() {
     var totalH = 0;
-    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner'].forEach(function(id){
+    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner','classReminderTopBanner'].forEach(function(id){
       var el = document.getElementById(id);
       if (el && el.style.display !== 'none') totalH += el.offsetHeight;
     });
@@ -9082,16 +9183,6 @@ function applyBulkEdit() {
     <!-- ══════════════ CLOCK TAB ══════════════ -->
     <div id="section-clock" class="section active">
 
-      <!-- My Shifts & Events — shown only when populated -->
-      <div class="card" id="clockMyShiftsCard" style="display:none;padding:0;overflow:hidden;">
-        <div class="card-header" style="padding:14px 16px;">
-          <div class="icon">📋</div>
-          <h2>My Shifts &amp; Events</h2>
-        </div>
-        <div id="clockMyShiftsBody">
-          <div id="clockMyShiftsContainer"></div>
-        </div>
-      </div>
 
       <!-- Stats <!-- Stats moved into clockCard -->
 
@@ -9863,13 +9954,6 @@ function applyBulkEdit() {
           </div>
           <button class="btn btn-secondary" style="border-color:#27AE60;color:#27AE60;white-space:nowrap;" onclick="viewAsSelected()">👁 View As Selected</button>
         </div>
-      </div>
-      <div class="card" data-no-collapse="1">
-        <div class="card-header">
-          <div class="icon">🟢</div><h2>Who's On Duty</h2>
-          <button class="btn btn-sm btn-secondary" style="margin-left:auto;" onclick="renderClockedInPanel()">↻ Refresh</button>
-        </div>
-        <div id="clockedInPanel"><p style="color:#666;font-size:13px;text-align:center;padding:16px;">Loading…</p></div>
       </div>
 
       <!-- Member Management -->
