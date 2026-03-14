@@ -6872,35 +6872,82 @@ function saveCadScriptUrl() {
   if (url) testCadConnection();
   else updateCadStatusPanel('none', null);
 }
+function _fetchCadCalls(url, fromAdmin) {
+  // Real CORS fetch — reads JSON response from Apps Script
+  return fetch(url + '?action=getCadCalls')
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      var calls = Array.isArray(data) ? data : (data.calls || data.results || []);
+      // Merge, avoiding duplicate incidents
+      var existing = (state.cadPendingCalls || []);
+      calls.forEach(function(c) {
+        var key = c.incidentNum || c.id || (c.address + '_' + c.date);
+        var dup = existing.some(function(e) {
+          return (e.incidentNum || e.id || (e.address+'_'+e.date)) === key;
+        });
+        if (!dup) existing.unshift(c);
+      });
+      state.cadPendingCalls = existing.slice(0, 50);
+      state.lastCadSync = new Date().toISOString();
+      save();
+      updateCadStatusPanel('ok', state.lastCadSync);
+      // Show the pending card
+      var card = document.getElementById('cadPendingCard');
+      if (card) card.style.display = '';
+      renderCadPendingCalls();
+      var n = calls.length;
+      showToast('✅ CAD sync complete — ' + n + ' new call' + (n !== 1 ? 's' : '') + ' received.');
+      return n;
+    })
+    .catch(function(err) {
+      console.warn('[RBVFC] CAD sync error:', err.message || err);
+      if (fromAdmin) updateCadStatusPanel('error', null);
+      var msg = (err.message && err.message.indexOf('Failed to fetch') >= 0)
+        ? '⚠️ CORS error — redeploy Apps Script with access: Anyone.'
+        : '⚠️ CAD sync failed: ' + (err.message || 'check URL');
+      showToast(msg);
+      throw err;
+    });
+}
+
+function syncCadFromPortal() {
+  var url = state.cadScriptUrl;
+  if (!url) {
+    showToast('⚠️ CAD script not configured — go to Admin > Data Management.');
+    return;
+  }
+  var btn = document.querySelector('[onclick="syncCadFromPortal()"]');
+  if (btn) btn.disabled = true;
+  _fetchCadCalls(url, false)
+    .then(function()  { var b=document.querySelector('[onclick="syncCadFromPortal()"]'); if(b)b.disabled=false; })
+    .catch(function() { var b=document.querySelector('[onclick="syncCadFromPortal()"]'); if(b)b.disabled=false; });
+}
+
 function syncCadFromAdmin() {
   var url = state.cadScriptUrl || ((document.getElementById('cadScriptUrl')||{}).value||'').trim();
   if (!url) { showToast('⚠️ No CAD Script URL configured.'); return; }
   updateCadStatusPanel('syncing', null);
-  fetch(url + '?action=getCadCalls', { mode:'no-cors' })
-    .then(function() {
-      state.lastCadSync = new Date().toISOString(); save();
-      updateCadStatusPanel('ok', state.lastCadSync);
-      showToast('✅ CAD sync complete.');
-    })
-    .catch(function() {
-      updateCadStatusPanel('error', null);
-      showToast('⚠️ CAD sync failed — check the script URL.');
-    });
+  _fetchCadCalls(url, true);
 }
 
 function testCadConnection() {
   var url = state.cadScriptUrl;
   if (!url) return;
   updateCadStatusPanel('syncing', null);
-  fetch(url + '?action=ping', { mode:'no-cors' })
-    .then(function() {
-      state.lastCadSync = state.lastCadSync || new Date().toISOString(); save();
+  fetch(url + '?action=ping')
+    .then(function(r) { return r.text(); })
+    .then(function(text) {
+      state.lastCadSync = state.lastCadSync || new Date().toISOString();
+      save();
       updateCadStatusPanel('ok', state.lastCadSync);
       showToast('✅ CAD Script connected!');
     })
     .catch(function() {
       updateCadStatusPanel('error', null);
-      showToast('⚠️ Could not reach CAD Script URL.');
+      showToast('⚠️ Cannot reach CAD Script. Ensure deployed with access: Anyone.');
     });
 }
 function openCadGmailSetup() {
@@ -9008,12 +9055,9 @@ function sheetSyncNow() {
 
 // 9. syncCadCalls — fetch new CAD calls from the configured Apps Script URL
 function syncCadCalls() {
-  var url = state.cadScriptUrl || ((document.getElementById('cadScriptUrl')||{}).value||'').trim();
-  if (!url) { showToast('⚠️ No CAD Script URL configured.'); return; }
-  showToast('🔄 Fetching CAD calls...');
-  fetch(url + '?action=getCadCalls', { mode: 'no-cors' })
-    .then(function() { showToast('✅ CAD sync requested. Calls will appear shortly.'); })
-    .catch(function() { showToast('⚠️ CAD sync failed — check the script URL.'); });
+  var url = state.cadScriptUrl;
+  if (!url) return;
+  _fetchCadCalls(url, false).catch(function(){});
 }
 
 // 10. staffingDatePrev — move staffing board to previous day
@@ -9661,7 +9705,7 @@ function applyBulkEdit() {
         <div class="card-header">
           <div class="icon">📟</div>
           <h2>Pending CAD Calls</h2>
-          <button class="btn btn-sm btn-primary" style="margin-left:auto;background:#1A3A5A;border-color:#2980B9;color:#7EC8E3;">🔄 Sync New Calls</button>
+          <button class="btn btn-sm btn-primary" onclick="syncCadFromPortal()" style="margin-left:auto;background:#1A3A5A;border-color:#2980B9;color:#7EC8E3;">🔄 Sync Now</button>
         </div>
         <p style="font-size:12px;color:#666;margin-bottom:10px;"><strong style="color:#555;">Drops in automatically every 30 minutes.</strong></p>
         <div id="cadPendingContainer"></div>
