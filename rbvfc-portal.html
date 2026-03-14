@@ -748,7 +748,20 @@ function showTab(id) {
   setTimeout(initCardCollapse, 50);
 }
 function showMoreMenu() {
-  var s = document.getElementById('moreSheet'); if(s) { s.style.display='flex'; setTimeout(function(){ s.style.opacity='1'; s.style.pointerEvents='auto'; var p=document.getElementById('moreSheetPanel'); if(p) p.style.transform='translateY(0)'; },10); }
+  var s = document.getElementById('moreSheet');
+  if (s) {
+    s.style.display='flex';
+    setTimeout(function(){
+      s.style.opacity='1'; s.style.pointerEvents='auto';
+      var p = document.getElementById('moreSheetPanel');
+      if (p) p.style.transform='translateY(0)';
+    }, 10);
+  }
+  // Show data management tools for admin/officer
+  var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+  var isOfficer = me && (me.appRole==='admin'||me.appRole==='officer');
+  var adminTools = document.getElementById('moreAdminTools');
+  if (adminTools) adminTools.style.display = isOfficer ? 'block' : 'none';
 }
 function hideMoreMenu() {
   var s = document.getElementById('moreSheet'); if(s) { s.style.opacity='0'; s.style.pointerEvents='none'; var p=document.getElementById('moreSheetPanel'); if(p) p.style.transform='translateY(100%)'; setTimeout(function(){ s.style.display='none'; },350); }
@@ -2326,9 +2339,10 @@ function onAdminTabShow() {
   var me2  = (state.roster||[]).find(function(x){ return x.id===uid2; });
   var isAdmin2 = me2 && me2.appRole==='admin';
 
-  // Raw Data (CSV/JSON export + Clear All) — admin only
+  // Raw Data (CSV/JSON export + Clear All) — admin and officers
   var rawCard  = document.getElementById('rawDataCard');
-  if (rawCard)  rawCard.style.display  = isAdmin2 ? '' : 'none';
+  var isOfficer2 = me2 && (me2.appRole==='admin'||me2.appRole==='officer');
+  if (rawCard)  rawCard.style.display  = isOfficer2 ? '' : 'none';
 
   // Change PIN — admin only
   var pinCard  = document.getElementById('adminPinCard');
@@ -2984,20 +2998,15 @@ function initDrillTab() {
 }
 
 function populateDrillReportBy() {
-  var sel = document.getElementById('drillReportBy');
-  if (!sel) return;
-  var current = sel.value;
-  sel.innerHTML = '<option value="">-- Select Member --</option>';
-  (state.roster||[]).filter(function(m){ return m.active!==false; })
-    .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
-    .forEach(function(m) {
-      var o = document.createElement('option');
-      o.value = m.id;
-      o.textContent = m.last+', '+m.first+(m.rank?' ('+m.rank+')':'');
-      if (m.id === state.currentUserId) o.selected = true;
-      sel.appendChild(o);
-    });
-  if (current) sel.value = current;
+  // Auto-populate with currently logged-in member
+  var uid = state.currentUserId;
+  var me = (state.roster||[]).find(function(m){ return m.id===uid; });
+  var hidden = document.getElementById('drillReportBy');
+  var display = document.getElementById('drillReportByDisplay');
+  if (hidden) hidden.value = uid || '';
+  if (display) {
+    display.textContent = me ? me.last+', '+me.first+(me.rank?' — '+me.rank:'') : '(not logged in)';
+  }
 }
 
 function populateDrillMemberList() {
@@ -9163,17 +9172,27 @@ function discardCadCall(index, event) {
 function fillCadCall(index) {
   var call = (state.cadPendingCalls || [])[index];
   if (!call) return;
-  // Navigate to Response tab and pre-fill fields
   showTab('response');
   setTimeout(function() {
-    var addr = document.getElementById('respAddress') || document.getElementById('incidentAddress');
-    var num  = document.getElementById('respIncidentNum') || document.getElementById('incidentNum');
-    var date = document.getElementById('respDate') || document.getElementById('incidentDate');
-    if (addr) addr.value = call.address || call.incident || '';
-    if (num)  num.value  = call.incidentNum || '';
-    if (date) date.value = call.date || '';
-    showToast('📟 CAD call loaded into form');
-  }, 300);
+    // Use the actual field IDs from the Log Emergency Response form
+    var fDate      = document.getElementById('erDate');
+    var fNum       = document.getElementById('erIncidentNum');
+    var fAddr      = document.getElementById('erAddress');
+    var fAlarm     = document.getElementById('erAlarmTime');
+    var fApparatus = document.getElementById('erApparatus');
+
+    if (fDate  && call.date)       fDate.value      = call.date;
+    if (fNum   && call.incidentNum) fNum.value       = call.incidentNum;
+    if (fAddr  && (call.address||call.incident)) fAddr.value = call.address || call.incident;
+    if (fAlarm && call.alarmTime)  fAlarm.value     = call.alarmTime;
+    if (fApparatus && (call.units||call.apparatus)) fApparatus.value = call.units || call.apparatus;
+
+    // Scroll to the form
+    var form = document.getElementById('erDate');
+    if (form) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    showToast('\uD83D\uDCDF CAD call loaded — verify and submit');
+  }, 350);
 }
 
 function _cadCallMatchesFilter(call) {
@@ -9993,7 +10012,7 @@ function applyBulkEdit() {
 
           <div class="form-group"><label>Apparatus</label><input type="text" id="erApparatus" placeholder="e.g. E131, TK13"></div>
           <div class="form-group"><label>Alarm Time</label><input type="time" id="erAlarmTime"></div>
-          <div class="form-group"><label>Clear Time</label><input type="time" id="erClearTime"></div>
+
         </div>
         <!-- Member checkboxes -->
         <div class="form-group" style="margin-top:8px;">
@@ -10302,10 +10321,9 @@ function applyBulkEdit() {
             <input type="date" id="drillDate">
           </div>
           <div class="form-group">
-            <label>Reported By *</label>
-            <select id="drillReportBy">
-              <option value="">— Select —</option>
-            </select>
+            <label>Reported By</label>
+            <div id="drillReportByDisplay" style="background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px 12px;font-size:13px;color:#F0F0F0;min-height:40px;display:flex;align-items:center;"></div>
+            <input type="hidden" id="drillReportBy">
           </div>
           <div class="form-group" style="grid-column:1/-1;">
             <label>Drill Type *</label>
@@ -10810,6 +10828,12 @@ function applyBulkEdit() {
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
+      <div id="moreAdminTools" style="display:none;border-top:1px solid #2A2A2A;margin-top:12px;padding-top:12px;">
+        <div style="font-size:10px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Data Management</div>
+        <button class="btn btn-secondary btn-full" onclick="exportJSON();closeMoreMenu()">📄 Export JSON Backup</button>
+        <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="exportCSV();closeMoreMenu()">📊 Export CSV</button>
+        <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="document.getElementById('importJsonInput').click();closeMoreMenu()">📂 Import JSON Backup</button>
+      </div>
     </div>
   </div>
 
