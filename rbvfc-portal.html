@@ -2264,6 +2264,7 @@ function onAdminTabShow() {
   else updateSheetStatusPanel('none');
   if (state.cadScriptUrl) updateCadStatusPanel(state.lastCadSync ? 'ok' : 'none', state.lastCadSync||null);
   else updateCadStatusPanel('none', null);
+  renderCadPendingCalls();
   // Collapse all cards on open
   var collapseIds = [
     'rankEditorCollapse',
@@ -3471,6 +3472,8 @@ function toggleUnitDisplay(lbl, unitId) {
   if (lbl && lbl.style) lbl.style.borderColor = checked ? '#C8102E' : '#333';
   save();
   renderStaffingBoard();
+  // Re-filter pending CAD calls when unit display changes
+  renderCadPendingCalls();
 }
 
 function staffPrevDay() {
@@ -3688,7 +3691,9 @@ function renderStaffingBoard() {
         html += '<option value="">\u2014 Assign Member \u2014</option>';
         eligible.forEach(function(m) {
           var alreadyOnDate = (state.staffingShifts||[]).some(function(s){
-            return s.date===date && s.memberId===m.id && !areUnitsLinked(uId, s.unitId) && s.unitId!==uId;
+            if (s.date !== date || s.memberId !== m.id) return false;
+            // Exclude if: already on this same unit OR on a non-linked unit
+            return s.unitId === uId || !areUnitsLinked(uId, s.unitId);
           });
           if (!alreadyOnDate) html += '<option value="'+m.id+'">'+m.last+', '+m.first+(isProbationary(m)?' [PROB]':'')+' ('+(m.ranks&&m.ranks.length?m.ranks.join('/'):(m.rank||'\u2014'))+')</option>';
         });
@@ -3935,12 +3940,13 @@ function officerAssign(date, unitId) {
 
   // Check for conflicts — allow linked units (e131 ↔ Tk13), block everything else
   var alreadyAny = (state.staffingShifts||[]).find(function(s){
-    return s.date===date && s.memberId===memberId && s.unitId !== unitId && !areUnitsLinked(unitId, s.unitId);
+    return s.date===date && s.memberId===memberId && (s.unitId === unitId || !areUnitsLinked(unitId, s.unitId));
   });
   if (alreadyAny) {
     var m = (state.roster||[]).find(function(r){ return r.id===memberId; });
     var name = m ? m.last+', '+m.first : 'That member';
-    showToast('⚠️ '+name+' already assigned to '+UNIT_LABELS[alreadyAny.unitId]+' — '+alreadyAny.position+'. Cannot combine with '+UNIT_LABELS[unitId]+'.');
+    var conflict = alreadyAny.unitId === unitId ? 'already assigned to this unit' : 'already on '+UNIT_LABELS[alreadyAny.unitId]+' (conflicts)';
+    showToast('⚠️ '+name+' is '+conflict+'.');
     return;
   }
 
@@ -9011,28 +9017,105 @@ function fillCadCall(index) {
   }, 300);
 }
 
+function _cadCallMatchesFilter(call) {
+  // Returns true if this call should be visible given unitDisplayFilter.
+  // A call matches if:
+  //   (a) no units are specified on the call (always show), OR
+  //   (b) at least one unit in the call matches an enabled unit in displayFilter
+  var df = state.unitDisplayFilter || {};
+  var callUnits = _parseCadUnits(call.units || call.apparatus || '');
+  if (!callUnits.length) return true; // no unit info — always show
+  // Check if ANY call unit is currently displayed
+  return callUnits.some(function(cu) {
+    // Match by unit ID (e131) or label substring (Engine 131)
+    var matchedId = Object.keys(UNIT_LABELS).find(function(uid) {
+      var lbl = UNIT_LABELS[uid] || '';
+      return uid.toLowerCase() === cu.toLowerCase() ||
+             lbl.toLowerCase().indexOf(cu.toLowerCase()) >= 0 ||
+             cu.toLowerCase().indexOf(uid.toLowerCase()) >= 0 ||
+             cu.toLowerCase().indexOf(lbl.toLowerCase()) >= 0;
+    });
+    // Default visible if unitId not in filter, or explicitly true
+    return !matchedId || df[matchedId] !== false;
+  });
+}
+
+function _parseCadUnits(unitsStr) {
+  if (!unitsStr) return [];
+  // Split by common delimiters: comma, semicolon, space, slash
+  return unitsStr.split(/[,;\/\s]+/).map(function(u){ return u.trim(); }).filter(Boolean);
+}
+
 function renderCadPendingCalls() {
-  var container = document.getElementById('cadPendingList') ||
-                  document.querySelector('#cadPendingCard .cadPendingList');
+  // Fix container lookup — HTML uses cadPendingContainer
+  var container = document.getElementById('cadPendingContainer') ||
+                  document.getElementById('cadPendingList') ||
+                  document.querySelector('#cadPendingCard [id]');
   if (!container) {
-    // Find the card body and inject
     var card = document.getElementById('cadPendingCard');
     if (!card) return;
-    container = card.querySelector('[id$="List"]') || card.querySelector('div:last-child');
+    container = card.querySelector('div:last-child');
     if (!container) return;
   }
-  var calls = (state.cadPendingCalls||[]);
-  if (!calls.length) {
+
+  var allCalls = (state.cadPendingCalls || []);
+
+  // Apply unit display filter
+  var df = state.unitDisplayFilter || {};
+  var anyFiltered = Object.keys(df).some(function(k){ return df[k] === false; });
+  var calls = anyFiltered
+    ? allCalls.filter(_cadCallMatchesFilter)
+    : allCalls;
+
+  var hiddenCount = allCalls.length - calls.length;
+
+  if (!allCalls.length) {
     container.innerHTML = '<p style="color:#555;font-size:12px;text-align:center;padding:10px;">No pending CAD calls. Sync to check for new calls.</p>';
     return;
   }
-  container.innerHTML = calls.map(function(call, i) {
-    return '<div style="background:#111;border:1px solid #2A2A2A;border-radius:8px;padding:10px;margin-bottom:8px;cursor:pointer;" onclick="fillCadCall('+i+')" title="Click to auto-fill log form">'
-      + '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">📟 ' + (call.address||call.incident||'CAD Call') + '</div>'
-      + '<div style="font-size:11px;color:#888;margin-top:3px;">' + (call.date||'') + (call.incidentNum?' · #'+call.incidentNum:'') + '</div>'
-      + '<div style="font-size:10px;color:#555;margin-top:2px;">Click to auto-fill log form</div>'
+  if (!calls.length) {
+    container.innerHTML = '<p style="color:#555;font-size:12px;text-align:center;padding:10px;">No calls match your unit filter.<br><span style="font-size:11px;color:#444;">' + allCalls.length + ' call(s) hidden by unit display filter.</span></p>';
+    return;
+  }
+
+  var html = '';
+  if (hiddenCount > 0) {
+    html += '<div style="font-size:11px;color:#555;text-align:right;margin-bottom:6px;font-style:italic;">' + hiddenCount + ' call(s) hidden by unit filter</div>';
+  }
+
+  // Map back to original index so fillCadCall still works correctly
+  calls.forEach(function(call) {
+    var i = allCalls.indexOf(call);
+    var unitTags = '';
+    var callUnits = _parseCadUnits(call.units || call.apparatus || '');
+    if (callUnits.length) {
+      unitTags = '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;">'
+        + callUnits.map(function(u) {
+            // Colour-code by unit type
+            var matchedId = Object.keys(UNIT_LABELS).find(function(uid) {
+              return uid.toLowerCase() === u.toLowerCase() ||
+                     (UNIT_LABELS[uid]||'').toLowerCase().indexOf(u.toLowerCase()) >= 0;
+            });
+            var isEms = matchedId && (matchedId === 'a139' || matchedId === 'Mu13');
+            var bg = isEms ? '#0D1A2A' : '#1A0A0A';
+            var col = isEms ? '#3498DB' : '#C8102E';
+            return '<span style="font-size:10px;background:' + bg + ';color:' + col + ';border:1px solid ' + col + ';border-radius:4px;padding:1px 6px;">' + u + '</span>';
+          }).join('')
+        + '</div>';
+    }
+    var typeLabel = call.type ? '<span style="font-size:10px;color:#888;"> · ' + call.type + '</span>' : '';
+    var timeLabel = call.alarmTime ? '<span style="font-size:10px;color:#888;"> · ' + call.alarmTime + '</span>' : '';
+    html += '<div style="background:#111;border:1px solid #2A2A2A;border-left:3px solid #2980B9;border-radius:8px;padding:10px;margin-bottom:8px;cursor:pointer;" onclick="fillCadCall(' + i + ')" title="Click to auto-fill response form">'
+      + '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">📟 ' + (call.address || call.incident || 'CAD Call') + '</div>'
+      + '<div style="font-size:11px;color:#888;margin-top:3px;">'
+      +   (call.date || '') + (call.incidentNum ? ' · #' + call.incidentNum : '') + typeLabel + timeLabel
+      + '</div>'
+      + unitTags
+      + '<div style="font-size:10px;color:#444;margin-top:5px;">Tap to pre-fill response form</div>'
       + '</div>';
-  }).join('');
+  });
+
+  container.innerHTML = html;
 }
 
 // 6. renderUnitConfigCard — guarded stub (admin unit config is optional feature)
