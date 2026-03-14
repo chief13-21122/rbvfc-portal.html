@@ -9900,7 +9900,7 @@ function applyBulkEdit() {
                     <div id="certPreviewSize" style="font-size:11px;color:#888;"></div>
                   </div>
                 </div>
-                <button style="background:none;border:none;color:#E74C3C;cursor:pointer;font-size:18px;">✕</button>
+                <button onclick="tsubClearCert()" style="background:none;border:none;color:#E74C3C;cursor:pointer;font-size:18px;">✕</button>
               </div>
             </div>
           </div>
@@ -9967,7 +9967,7 @@ function applyBulkEdit() {
         <div class="form-group" style="margin-top:8px;">
           <label>Responding Members</label>
           <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-            <button class="btn btn-sm btn-secondary">Clear All</button>
+            <button class="btn btn-sm btn-secondary" onclick="drillClearAll()">Clear All</button>
             <input type="text" id="erMemberSearch" placeholder="Search members…" oninput="erFilterMembers(this.value)" style="flex:1;min-width:120px;max-width:200px;font-size:12px;padding:4px 8px;">
           </div>
           <div id="erMemberList" style="max-height:220px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#181818;"></div>
@@ -10224,11 +10224,11 @@ function applyBulkEdit() {
         <!-- Certificate upload -->
         <div class="form-group" style="margin-top:4px;">
           <label>Certificate (optional)</label>
-          <div id="tsubCertZone" class="cert-upload-zone" ondragover="tsubDragOver(event)" ondragleave="tsubDragLeave(event)" ondrop="tsubDrop(event)">
+          <div id="tsubCertZone" class="cert-upload-zone" onclick="document.getElementById('tsubCertInput').click()" ondragover="tsubDragOver(event)" ondragleave="tsubDragLeave(event)" ondrop="tsubDrop(event)">
             <div style="font-size:28px;">📎</div>
             <div style="font-size:13px;color:#888;">Click or drag to upload certificate</div>
             <div style="font-size:11px;color:#666;">PDF, JPG, or PNG — max 10MB</div>
-            <input type="file" id="tsubCertInput" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" data-onchange="handleTsubCert(this.files[0])">
+            <input type="file" id="tsubCertInput" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="handleTsubCert(this.files[0])">
           </div>
           <div id="tsubCertPreview" style="display:none;margin-top:8px;background:#181818;border:1px solid #333;border-radius:8px;padding:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
             <div style="display:flex;align-items:center;gap:8px;">
@@ -10245,7 +10245,7 @@ function applyBulkEdit() {
         <div class="alert" style="background:#1A2A1A;border-color:#27AE60;margin-top:12px;font-size:12px;">
           ℹ️ Points are calculated at <strong>1 pt per 2 hours</strong> of approved training, max 60 pts/year.
         </div>
-        <button class="btn btn-primary btn-full">📤 Submit for Approval</button>
+        <button class="btn btn-primary btn-full" onclick="submitTraining()">📤 Submit for Approval</button>
       </div>
 
       <!-- Training History / Review -->
@@ -10298,12 +10298,12 @@ function applyBulkEdit() {
         <div class="form-group">
           <label>Participating Members *</label>
           <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-            <button class="btn btn-sm btn-secondary">Select All</button>
+            <button class="btn btn-sm btn-secondary" onclick="drillSelectAll()">Select All</button>
             <button class="btn btn-sm btn-secondary">Clear All</button>
           </div>
           <div id="drillMemberList" style="max-height:220px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#181818;"></div>
         </div>
-        <button class="btn btn-primary btn-full">📝 Submit Drill Report</button>
+        <button class="btn btn-primary btn-full" onclick="saveDrillReport()">📝 Submit Drill Report</button>
       </div>
 
       <!-- Drill History -->
