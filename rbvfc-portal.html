@@ -1756,7 +1756,7 @@ function renderTrainingReview() {
       '</div>'+
       '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">'+
         '<span style="font-size:12px;font-weight:700;color:'+statusColor+';text-transform:uppercase;letter-spacing:1px;">'+s.status+'</span>'+
-        (s.cert?'<a href="'+s.cert+'" target="_blank" class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;">&#128196; View Cert</a>':'')+
+        (s.cert?'<button class="btn btn-sm btn-secondary" onclick="viewCert(\''+s.id+'\')" style="font-size:11px;padding:3px 8px;">&#128196; View Cert</button>':'')+
         (s.cert && isOfficer ? '<button class="btn btn-sm btn-secondary" data-drive-id="'+s.id+'" onclick="sendCertToDriveBtn(\''+s.id+'\')" style="font-size:11px;padding:3px 8px;background:#1A0D23;border-color:#8E44AD;color:'+(s._driveFileId?'#9B59B6':'#888')+';">'+((s._driveFileId?'\u2713 In Drive':'&#128194; Send to Drive'))+'</button>' : '')+
       '</div></div>';
     if (isChief && s.status==='pending') {
@@ -1772,7 +1772,15 @@ function renderTrainingReview() {
 
 function saveDriveFolderId() {
   var v = ((document.getElementById('driveFolderIdInput')||{}).value||'').trim();
+  // Strip full URL if pasted — keep only the folder ID portion
+  var folderIdMatch = v.match(/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderIdMatch) v = folderIdMatch[1];
+  // Also strip any trailing slashes or query params
+  v = v.split('?')[0].split('/')[0].trim();
   state.driveFolderId = v; save();
+  // Update the input to show the clean ID
+  var inp = document.getElementById('driveFolderIdInput');
+  if (inp) inp.value = v;
   showToast(v ? '\u2705 Drive Folder ID saved.' : 'Drive Folder ID cleared.');
   if (v) testDriveConnection();
   else updateDriveStatusPanel('none');
@@ -1877,6 +1885,34 @@ function uploadCertToDrive(submissionId, onComplete) {
     } else { if(onComplete) onComplete(false, d.error || 'Upload failed.'); }
   })
   .catch(function(err){ if(onComplete) onComplete(false, err.message||'Network error.'); });
+}
+
+function viewCert(submissionId) {
+  var s = (state.trainingSubmissions||[]).find(function(x){ return x.id===submissionId; });
+  if (!s || !s.cert) { showToast('⚠️ No certificate attached.'); return; }
+  try {
+    // Convert data URI to Blob URL — Chrome blocks data URI navigation
+    var mime = s.certMime || 'application/pdf';
+    var b64  = s.cert.indexOf(',') >= 0 ? s.cert.split(',')[1] : s.cert;
+    var bytes = atob(b64);
+    var buf   = new Uint8Array(bytes.length);
+    for (var i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
+    var blob  = new Blob([buf], { type: mime });
+    var url   = URL.createObjectURL(blob);
+    var win   = window.open(url, '_blank');
+    if (!win) {
+      // Popup blocked — offer download instead
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = s.certName || ('certificate.' + (mime.split('/')[1] || 'pdf'));
+      a.click();
+      showToast('Certificate downloading…');
+    }
+    // Revoke after a short delay
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+  } catch(e) {
+    showToast('⚠️ Could not open certificate: ' + e.message);
+  }
 }
 
 function sendCertToDriveBtn(submissionId) {
@@ -5187,9 +5223,90 @@ function clockOutSpecialEvent(elOrId) {
 }
 
 // Officer: create/delete special events
+function sendEventAlert(evId) {
+  var ev = (state.specialEvents||[]).find(function(e){ return e.id===evId; });
+  if (!ev) return;
+  var signups = (ev.signups||[]).map(function(s){ return s.memberId; }).filter(Boolean);
+  if (!signups.length) { showToast('⚠️ No signed-up members for this event.'); return; }
+  var members = signups.map(function(mid){
+    var m = (state.roster||[]).find(function(r){ return r.id===mid; });
+    return m ? m.last+', '+m.first : mid;
+  });
+  var d = new Date((ev.startDate||ev.date)+'T12:00:00');
+  var dateStr = d.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});
+  var defaultMsg = ev.title + ' — ' + dateStr + (ev.location ? ' @ '+ev.location : '') + '. Please confirm your availability.';
+  var msg = prompt('Send alert to ' + signups.length + ' signed-up member(s): ' + members.join(', ') + ' -- Message:', defaultMsg);
+  if (!msg) return;
+  var alertId = 'alert_' + Date.now();
+  if (!Array.isArray(state.staffingAlerts)) state.staffingAlerts = [];
+  state.staffingAlerts.unshift({
+    id:            alertId,
+    msg:           msg,
+    sentBy:        state.currentUserId,
+    sentAt:        new Date().toISOString(),
+    group:         'event_' + evId,
+    groupLabel:    ev.title,
+    targetMembers: signups,
+    clears:        []
+  });
+  save();
+  renderMemberAlertBanner();
+  showToast('✅ Alert sent to ' + signups.length + ' member(s) for ' + ev.title + '.');
+}
+
+function cancelEditSpecialEvent() {
+  var editId = document.getElementById('seEditId');
+  if (editId) editId.value = '';
+  ['seTitle','seStartDate','seEndDate','seStartTime','seEndTime','seLocation','seDesc','seTotalNeeded'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+  var posContainer = document.getElementById('sePositionsContainer');
+  if (posContainer) posContainer.innerHTML = sePositionRow();
+  var submitBtn = document.getElementById('seSubmitBtn');
+  if (submitBtn) submitBtn.textContent = '✓ Create Event';
+  var cancelBtn = document.getElementById('seCancelEditBtn');
+  if (cancelBtn) cancelBtn.style.display = 'none';
+}
+
+function openEditSpecialEvent(evId) {
+  var ev = (state.specialEvents||[]).find(function(e){ return e.id===evId; });
+  if (!ev) return;
+  var f = function(id, val){ var el=document.getElementById(id); if(el) el.value=val||''; };
+  f('seTitle', ev.title||'');
+  f('seStartDate', ev.startDate||ev.date||'');
+  f('seEndDate', ev.endDate||'');
+  f('seStartTime', ev.startTime||ev.time||'');
+  f('seEndTime', ev.endTime||'');
+  f('seLocation', ev.location||'');
+  f('seDesc', ev.description||ev.desc||'');
+  f('seTotalNeeded', ev.totalNeeded||'');
+  var editId = document.getElementById('seEditId');
+  if (editId) editId.value = evId;
+  // Rebuild positions
+  var posContainer = document.getElementById('sePositionsContainer');
+  if (posContainer) {
+    if (ev.positions && ev.positions.length) {
+      posContainer.innerHTML = ev.positions.map(function(p, i) {
+        var name  = typeof p === 'string' ? p : (p.name||'');
+        var slots = typeof p === 'string' ? 1 : (p.slots||1);
+        return sePositionRow(name, slots, i);
+      }).join('');
+    } else {
+      posContainer.innerHTML = sePositionRow();
+    }
+  }
+  var submitBtn = document.getElementById('seSubmitBtn');
+  if (submitBtn) submitBtn.textContent = '✓ Save Changes';
+  var cancelBtn = document.getElementById('seCancelEditBtn');
+  if (cancelBtn) cancelBtn.style.display = 'inline-flex';
+  // Scroll to form
+  var form = document.getElementById('seCreateForm');
+  if (form) form.scrollIntoView({ behavior:'smooth', block:'start' });
+  showToast('Editing: ' + (ev.title||'event') + ' — update fields and save.');
+}
+
 function renderSpecialEventAdmin() {
   var formEl = document.getElementById('seCreateForm');
-  if (!formEl) {
+  // Form is now always in HTML — just ensure positions row is initialized
+  if (formEl) {
     var formDiv = document.createElement('div');
     formDiv.id = 'seCreateForm';
     formDiv.style.cssText = 'background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;';
@@ -5229,27 +5346,12 @@ function renderSpecialEventAdmin() {
         '<div id="sePositionsContainer">'+sePositionRow()+'</div>'+
       '</div>'+
       '<button class="btn btn-primary" onclick="saveSpecialEvent()" style="width:100%;">&#10003; Create Event</button>';
-    // Insert form into manager container, then create the event list div
-    var mgContainer = document.getElementById('specialEventsManagerContainer');
-    if (mgContainer) {
-      mgContainer.insertBefore(formDiv, mgContainer.firstChild);
-      // Create the event list div if not present
-      if (!document.getElementById('specialEventAdminList')) {
-        var listDiv = document.createElement('div');
-        listDiv.id = 'specialEventAdminList';
-        mgContainer.appendChild(listDiv);
-      }
-    }
+    // Init positions row if empty
+    var posC = document.getElementById('sePositionsContainer');
+    if (posC && !posC.children.length) posC.innerHTML = sePositionRow();
   }
-  var container = document.getElementById('specialEventAdminList');
-  if (!container) {
-    // Fallback: create it in the manager container
-    var mgC = document.getElementById('specialEventsManagerContainer');
-    if (!mgC) return;
-    container = document.createElement('div');
-    container.id = 'specialEventAdminList';
-    mgC.appendChild(container);
-  }
+  var container = document.getElementById('specialEventsManagerContainer');
+  if (!container) return;
   var today = new Date().toISOString().slice(0,10);
   var upcoming = (state.specialEvents||[]).filter(function(ev){ return ev.date >= today; })
     .sort(function(a,b){ return (a.date+a.time).localeCompare(b.date+b.time); });
@@ -5292,7 +5394,11 @@ function renderSpecialEventAdmin() {
         })()
         +'<div style="background:#111;border-radius:6px;padding:4px 8px;">'+signupRows+'</div>'
       +'</div>'
-      +'<button onclick="deleteSpecialEvent(this)" data-ev="'+ev.id+'" style="background:none;border:none;color:#C8102E;cursor:pointer;font-size:18px;padding:0 0 0 8px;flex-shrink:0;" title="Delete event">🗑</button>'
+      +'<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px;">'
+      +'<button onclick="openEditSpecialEvent(\''+ev.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Edit event">&#9998; Edit</button>'
+      +'<button onclick="sendEventAlert(\''+ev.id+'\')" style="background:#1A1A00;border:1px solid #F5A623;color:#F5A623;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Send alert to signed-up members">&#128226; Alert</button>'
+      +'<button onclick="deleteSpecialEvent(this)" data-ev="'+ev.id+'" style="background:none;border:1px solid #333;color:#C8102E;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Delete event">&#128465; Delete</button>'
+      +'</div>'
       +'</div></div>';
   }).join('');
 }
@@ -5346,6 +5452,7 @@ function canManageSpecialEvents() {
 
 function saveSpecialEvent() {
   if (!canManageSpecialEvents()) { showToast('⚠️ Only officers, admins, or the Community Relations Chair can create events.'); return; }
+  var editId   = ((document.getElementById('seEditId')||{}).value||'').trim();
   var title    = ((document.getElementById('seTitle')||{}).value||'').trim();
   var startDate= ((document.getElementById('seStartDate')||{}).value||'').trim();
   var endDate  = ((document.getElementById('seEndDate')||{}).value||'').trim() || startDate;
@@ -5372,6 +5479,26 @@ function saveSpecialEvent() {
   if (!totalNeeded && positions.length) {
     totalNeeded = positions.reduce(function(sum, p){ return sum + (p.slots||1); }, 0);
   }
+  var editId = ((document.getElementById('seEditId')||{}).value||'').trim();
+
+  // Edit mode: update existing event
+  if (editId) {
+    var existing = (state.specialEvents||[]).find(function(e){ return e.id===editId; });
+    if (existing) {
+      existing.title=title; existing.date=startDate; existing.startDate=startDate;
+      existing.endDate=endDate; existing.startTime=startTime; existing.endTime=endTime;
+      existing.time=startTime; existing.location=location; existing.desc=description||desc;
+      existing.description=description||desc; existing.totalNeeded=totalNeeded;
+      existing.positions=positions; existing.updatedAt=new Date().toISOString();
+      existing.updatedBy=state.currentUserId;
+      save();
+      cancelEditSpecialEvent();
+      renderBothSpecialEventViews();
+      showToast('✅ Event updated: '+title);
+      return;
+    }
+  }
+
   var ev = {
     id: 'ev_'+Date.now(),
     title: title,
@@ -7240,7 +7367,8 @@ function _autoLogCadCall(call) {
     }) || null;
   }).filter(Boolean);
 
-  if (!resolvedUnitIds.length && !callUnits.length) return; // no unit info — skip auto-log
+  // Skip auto-log if no unit info at all, or no units could be resolved
+  if (!callUnits.length || !resolvedUnitIds.length) return;
 
   // Find members staffed on those units today
   var staffedMembers = [];
@@ -7560,6 +7688,14 @@ function restoreClockState() {
 function initCadScriptUrl() {
   var el=document.getElementById('cadScriptUrl');
   if(el && state.cadScriptUrl) el.value=state.cadScriptUrl;
+  // Clean up stored driveFolderId if it's a full URL
+  if (state.driveFolderId) {
+    var m = state.driveFolderId.match(/folders\/([a-zA-Z0-9_-]+)/);
+    if (m) { state.driveFolderId = m[1]; save(); }
+    else { state.driveFolderId = state.driveFolderId.split('?')[0].split('/').pop().trim(); save(); }
+  }
+  var drEl = document.getElementById('driveFolderIdInput');
+  if (drEl && state.driveFolderId) drEl.value = state.driveFolderId;
 }
 function fixCollapseIcons() {}
 
@@ -10460,10 +10596,51 @@ function applyBulkEdit() {
         <!-- Special Events Manager -->
         <div class="card" id="specialEventsManagerCard" style="display:none;">
           <div class="card-header" onclick="toggleStaffCard('specialEventsManagerBody','specialEventsManagerChevron')" style="cursor:pointer;user-select:none;">
-            <div class="icon">🎪</div><h2>Special Events</h2>
-            <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">▼</span>
+            <div class="icon">&#127920;</div><h2>Special Events</h2>
+            <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
           </div>
           <div id="specialEventsManagerBody">
+            <!-- Create New Event form — always in HTML for reliability -->
+            <div id="seCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+              <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">&#127920; Create New Event</div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>
+              <input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>
+                <input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>
+                <input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time</label>
+                <input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time</label>
+                <input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              </div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location</label>
+              <input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>
+              <textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Total Members Needed <span style="color:#555;">(for staffing bar)</span></label>
+                <input id="seTotalNeeded" type="number" min="0" max="999" placeholder="e.g. 10" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div style="display:flex;flex-direction:column;justify-content:flex-end;">
+                <div style="font-size:10px;color:#555;line-height:1.5;padding-bottom:8px;">Staffing progress bar shows when set. Position slot counts also count toward this total.</div></div>
+              </div>
+              <div style="margin-bottom:12px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                  <label style="font-size:11px;color:#888;">Positions / Roles Needed</label>
+                  <button onclick="addEventPosition()" style="background:#1A3A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">+ Add Position</button>
+                </div>
+                <div style="font-size:10px;color:#555;margin-bottom:6px;">Each position can have a slot count.</div>
+                <div id="sePositionsContainer"></div>
+              </div>
+              <input type="hidden" id="seEditId" value="">
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-primary" id="seSubmitBtn" onclick="saveSpecialEvent()" style="flex:1;">&#10003; Create Event</button>
+                <button class="btn btn-secondary" id="seCancelEditBtn" onclick="cancelEditSpecialEvent()" style="display:none;">Cancel</button>
+              </div>
+            </div>
             <div id="specialEventsManagerContainer"></div>
           </div>
         </div>
