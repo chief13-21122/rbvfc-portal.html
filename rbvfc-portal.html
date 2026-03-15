@@ -1354,7 +1354,7 @@ function renderEmergencyResponses() {
     var tr = document.createElement('tr');
     tr.innerHTML =
       '<td style="padding:8px;color:#CCC;white-space:nowrap;">'+r.date+'</td>'+
-      '<td style="padding:8px;color:#CCC;">'+r.address+incNum+'</td>'+
+      '<td style="padding:8px;color:#CCC;">'+_formatCadAddress(r.address)+incNum+'</td>'+
       '<td style="padding:8px;color:#CCC;">'+(r.boxArea||'—')+editedBadge+'</td>'+
       '<td style="padding:8px;font-size:11px;color:#AAA;">'+(r.units||[]).map(function(u){ return '<span class="pill gray" style="font-size:10px;padding:2px 5px;">'+u+'</span>'; }).join(' ')+'</td>'+
       '<td style="padding:8px;font-size:11px;color:#888;max-width:200px;">'+memberNames+'</td>'+
@@ -7028,6 +7028,90 @@ function saveCadScriptUrl() {
   if (url) testCadConnection();
   else updateCadStatusPanel('none', null);
 }
+function _formatCadAddress(raw) {
+  // Ensure street address comes first, then apartment/business name
+  if (!raw) return '';
+  // Common pattern: "Apt 301 / 123 Main St" or "Store Name / 456 Oak Ave"
+  // Or "123 Main St, Apt 4B" — already correct
+  // Detect if address starts with a number (street) or name (business/apt)
+  var trimmed = raw.trim();
+  // If first token is a number, it's already street-first
+  if (/^\d/.test(trimmed)) return trimmed;
+  // If contains a "/" separator — rearrange: "BizName / 123 St" -> "123 St — BizName"
+  if (trimmed.indexOf(' / ') >= 0) {
+    var parts = trimmed.split(' / ');
+    var streetPart = parts.find(function(p){ return /^\d/.test(p.trim()); });
+    var namePart   = parts.filter(function(p){ return p !== streetPart; }).join(' / ');
+    if (streetPart) return streetPart.trim() + (namePart ? ' — ' + namePart.trim() : '');
+  }
+  return trimmed;
+}
+
+function _autoLogCadCall(call) {
+  // Auto-create an emergency response record from a synced CAD call
+  // Members who are staffed on the call's units today are auto-logged
+  var today = call.date || new Date().toISOString().slice(0, 10);
+  var callUnits = _parseCadUnits(call.units || call.apparatus || '');
+
+  // Resolve unit IDs
+  var resolvedUnitIds = callUnits.map(function(cu) {
+    return Object.keys(UNIT_LABELS).find(function(uid) {
+      var lbl = UNIT_LABELS[uid] || '';
+      return uid.toLowerCase() === cu.toLowerCase() ||
+             lbl.toLowerCase().indexOf(cu.toLowerCase()) >= 0 ||
+             cu.toLowerCase().indexOf(uid.toLowerCase()) >= 0;
+    }) || null;
+  }).filter(Boolean);
+
+  if (!resolvedUnitIds.length && !callUnits.length) return; // no unit info — skip auto-log
+
+  // Find members staffed on those units today
+  var staffedMembers = [];
+  resolvedUnitIds.forEach(function(unitId) {
+    (state.staffingShifts || []).forEach(function(s) {
+      if (s.date === today && s.unitId === unitId && s.memberId &&
+          staffedMembers.indexOf(s.memberId) < 0) {
+        staffedMembers.push(s.memberId);
+      }
+    });
+  });
+
+  if (!staffedMembers.length) return; // nobody staffed — leave in queue
+
+  // Avoid duplicate auto-log for same incident
+  var incKey = call.incidentNum || call.id || (call.address + '_' + today);
+  var alreadyLogged = (state.emergencyResponses || []).some(function(r) {
+    return r._cadKey === incKey || r.incidentNum === call.incidentNum;
+  });
+  if (alreadyLogged) return;
+
+  // Parse address: street first, then any apt/biz after comma
+  var rawAddr = call.address || call.incident || '';
+  var addrParts = rawAddr.split(/,\s*/);
+  var streetFirst = addrParts[0] || rawAddr;
+  var addrRest = addrParts.slice(1).join(', ');
+  var formattedAddr = addrRest ? streetFirst + ', ' + addrRest : streetFirst;
+
+  if (!Array.isArray(state.emergencyResponses)) state.emergencyResponses = [];
+  state.emergencyResponses.unshift({
+    id:           'er_cad_' + Date.now(),
+    date:         today,
+    address:      formattedAddr,
+    incidentNum:  call.incidentNum || '',
+    boxArea:      call.boxArea || call.box || '',
+    type:         call.type || '',
+    units:        resolvedUnitIds.length ? resolvedUnitIds : callUnits,
+    apparatus:    call.units || call.apparatus || '',
+    members:      staffedMembers,
+    autoStaffed:  staffedMembers,
+    alarmTime:    call.alarmTime || '',
+    notes:        'Auto-logged from CAD sync.',
+    _cadKey:      incKey,
+    enteredBy:    state.currentUserId || 'system',
+    created:      new Date().toISOString()
+  });
+}
+
 function _fetchCadCalls(url, fromAdmin) {
   // Real CORS fetch — reads JSON response from Apps Script
   return fetch(url + '?action=getCadCalls')
@@ -7048,6 +7132,8 @@ function _fetchCadCalls(url, fromAdmin) {
       });
       state.cadPendingCalls = existing.slice(0, 50);
       state.lastCadSync = new Date().toISOString();
+      // Auto-log new calls for staffed members
+      calls.forEach(function(c) { try { _autoLogCadCall(c); } catch(e){} });
       save();
       updateCadStatusPanel('ok', state.lastCadSync);
       // Show the pending card
@@ -9224,9 +9310,11 @@ function fillCadCall(index) {
 
     if (fDate  && call.date)       fDate.value      = call.date;
     if (fNum   && call.incidentNum) fNum.value       = call.incidentNum;
-    if (fAddr  && (call.address||call.incident)) fAddr.value = call.address || call.incident;
+    if (fAddr  && (call.address||call.incident)) fAddr.value = _formatCadAddress(call.address || call.incident);
     if (fAlarm && call.alarmTime)  fAlarm.value     = call.alarmTime;
     if (fApparatus && (call.units||call.apparatus)) fApparatus.value = call.units || call.apparatus;
+    var fBox = document.getElementById('erBoxArea');
+    if (fBox && (call.boxArea||call.box)) fBox.value = call.boxArea || call.box || '';
 
     // Scroll to the form
     var form = document.getElementById('erDate');
@@ -9345,9 +9433,10 @@ function renderCadPendingCalls() {
     html += '<div style="background:#111;border:1px solid #2A2A2A;border-left:3px solid #2980B9;border-radius:8px;padding:10px;margin-bottom:8px;">'
       + '<div style="display:flex;align-items:flex-start;gap:8px;">'
       +   '<div style="flex:1;min-width:0;cursor:pointer;" onclick="fillCadCall(' + i + ')" title="Tap to pre-fill response form">'
-      +     '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">&#128223; ' + (call.address || call.incident || 'CAD Call') + '</div>'
+      +     '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">&#128223; ' + _formatCadAddress(call.address || call.incident || 'CAD Call') + '</div>'
       +     '<div style="font-size:11px;color:#888;margin-top:3px;">'
       +       (call.date || '') + (call.incidentNum ? ' &middot; #' + call.incidentNum : '') + typeLabel + timeLabel
+      +       ((call.boxArea||call.box) ? ' &middot; <span style="color:#7EC8E3;">Box ' + (call.boxArea||call.box) + '</span>' : '')
       +     '</div>'
       +     unitTags
       +     '<div style="font-size:10px;color:#444;margin-top:5px;">Tap to pre-fill form</div>'
