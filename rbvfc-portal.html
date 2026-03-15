@@ -643,6 +643,7 @@ var state = {
   roster: [],
   currentSession: null,
   sheetWebhookUrl: '',
+  driveFolderId: '',
   adminPin: '1234',
   currentUserId: null,
   lastYearReset: null,
@@ -1755,7 +1756,8 @@ function renderTrainingReview() {
       '</div>'+
       '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">'+
         '<span style="font-size:12px;font-weight:700;color:'+statusColor+';text-transform:uppercase;letter-spacing:1px;">'+s.status+'</span>'+
-        (s.cert?'<a href="'+s.cert+'" target="_blank" class="btn btn-sm btn-secondary" style="font-size:11px;">📄 Certificate</a>':'')+
+        (s.cert?'<a href="'+s.cert+'" target="_blank" class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;">&#128196; View Cert</a>':'')+
+        (s.cert && isOfficer ? '<button class="btn btn-sm btn-secondary" data-drive-id="'+s.id+'" onclick="sendCertToDriveBtn(\''+s.id+'\')" style="font-size:11px;padding:3px 8px;background:#1A0D23;border-color:#8E44AD;color:'+(s._driveFileId?'#9B59B6':'#888')+';">'+((s._driveFileId?'\u2713 In Drive':'&#128194; Send to Drive'))+'</button>' : '')+
       '</div></div>';
     if (isChief && s.status==='pending') {
       html += '<div style="display:flex;gap:8px;margin-top:12px;">'+
@@ -1766,6 +1768,145 @@ function renderTrainingReview() {
     html += '</div>';
   });
   container.innerHTML = html;
+}
+
+function saveDriveFolderId() {
+  var v = ((document.getElementById('driveFolderIdInput')||{}).value||'').trim();
+  state.driveFolderId = v; save();
+  showToast(v ? '\u2705 Drive Folder ID saved.' : 'Drive Folder ID cleared.');
+  if (v) testDriveConnection();
+  else updateDriveStatusPanel('none');
+}
+
+function updateDriveStatusPanel(status) {
+  var el = document.getElementById('driveConnStatus');
+  var badge = document.getElementById('driveFolderConnBadge');
+  var C = {
+    ok:   {bg:'#1A0D23',border:'#9B59B6',dot:'#9B59B6',label:'Connected',lc:'#9B59B6'},
+    error:{bg:'#2A0A0A',border:'#E74C3C',dot:'#E74C3C',label:'Error',lc:'#E74C3C'},
+    none: {bg:'#1A1A1A',border:'#333',dot:'#555',label:'Not Configured',lc:'#666'}
+  };
+  var c = C[status] || C.none;
+  if (el) {
+    var lastStr = (status==='ok' && state._driveLastUpload)
+      ? ' <span style="color:#555;font-size:10px;">&nbsp;\u00b7&nbsp; Last upload: ' + new Date(state._driveLastUpload).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) + '</span>'
+      : '';
+    el.innerHTML = '<div style="display:flex;align-items:center;gap:8px;background:'+c.bg+';border:1px solid '+c.border+';border-radius:8px;padding:8px 12px;">'
+      + '<div style="width:8px;height:8px;border-radius:50%;background:'+c.dot+';flex-shrink:0;'+(status==='ok'?'box-shadow:0 0 6px '+c.dot+';':'')+'"></div>'
+      + '<span style="font-size:12px;font-weight:700;color:'+c.lc+';">'+c.label+'</span>'
+      + lastStr + '</div>';
+  }
+  if (badge) {
+    if (status === 'ok') {
+      badge.style.display = 'inline-block';
+      badge.textContent = 'Connected';
+      badge.setAttribute('style', 'display:inline-block;background:#1A0D23;color:#9B59B6;border:1px solid #9B59B6;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:6px;');
+    } else if (status === 'error') {
+      badge.style.display = 'inline-block';
+      badge.textContent = 'Error';
+      badge.setAttribute('style', 'display:inline-block;background:#2A0A0A;color:#E74C3C;border:1px solid #E74C3C;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:6px;');
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
+
+function testDriveConnection() {
+  var url = state.sheetWebhookUrl;
+  if (!url) { showToast('\u26a0\ufe0f Save your Apps Script URL first.'); return; }
+  if (!state.driveFolderId) { showToast('\u26a0\ufe0f Enter a Drive Folder ID first.'); return; }
+  updateDriveStatusPanel('none');
+  fetch(url + '?action=pingDrive&folderId=' + encodeURIComponent(state.driveFolderId))
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        state._driveConnected = true; save();
+        updateDriveStatusPanel('ok');
+        showToast('\u2705 Drive folder connected: ' + (d.folderName || state.driveFolderId));
+      } else {
+        updateDriveStatusPanel('error');
+        showToast('\u26a0\ufe0f Drive: ' + (d.error || 'unknown error'));
+      }
+    })
+    .catch(function() { updateDriveStatusPanel('error'); showToast('\u26a0\ufe0f Could not reach Apps Script.'); });
+}
+
+function uploadCertToDrive(submissionId, onComplete) {
+  var s = (state.trainingSubmissions||[]).find(function(x){ return x.id===submissionId; });
+  if (!s || !s.cert) { if(onComplete) onComplete(false, 'No certificate attached.'); return; }
+  var url = state.sheetWebhookUrl;
+  if (!url) { if(onComplete) onComplete(false, 'Apps Script URL not configured.'); return; }
+  if (!state.driveFolderId) { if(onComplete) onComplete(false, 'Drive Folder ID not configured.'); return; }
+  var member = (state.roster||[]).find(function(m){ return m.id===s.memberId; });
+  var lastName  = member ? member.last  : 'Unknown';
+  var firstName = member ? member.first : '';
+  var safeName  = (s.name||'Training').replace(/[^a-zA-Z0-9 ]/g,'').replace(/\s+/g,'_');
+  var ext       = s.certName ? '.' + s.certName.split('.').pop() : '.pdf';
+  var fileName  = lastName + firstName.charAt(0) + '_' + safeName + '_' + (s.date||'').replace(/-/g,'') + ext;
+  var b64       = s.cert.indexOf(',') >= 0 ? s.cert.split(',')[1] : s.cert;
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action:'uploadCert', folderId:state.driveFolderId,
+      fileName:fileName, mimeType:s.certMime||'application/pdf', base64Data:b64,
+      memberName:lastName+', '+firstName, courseName:s.name, date:s.date })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if (d.ok) {
+      s._driveFileId = d.fileId; s._driveLink = d.fileUrl;
+      s._driveUploaded = new Date().toISOString();
+      state._driveLastUpload = s._driveUploaded;
+      save(); renderTrainingReview(); updateDriveStatusPanel('ok');
+      if (onComplete) onComplete(true, d.fileUrl);
+    } else { if(onComplete) onComplete(false, d.error || 'Upload failed.'); }
+  })
+  .catch(function(err){ if(onComplete) onComplete(false, err.message||'Network error.'); });
+}
+
+function sendCertToDriveBtn(submissionId) {
+  var btn = document.querySelector('[data-drive-id="'+submissionId+'"]');
+  if (btn) { btn.textContent = '\u23f3 Uploading\u2026'; btn.disabled = true; }
+  uploadCertToDrive(submissionId, function(ok, info) {
+    var b = document.querySelector('[data-drive-id="'+submissionId+'"]');
+    if (ok) {
+      showToast('\u2705 Certificate uploaded to Drive!');
+      if (b) { b.textContent = '\u2713 In Drive'; b.style.color='#9B59B6'; b.disabled=true; }
+    } else {
+      showToast('\u26a0\ufe0f Drive upload failed: ' + info);
+      if (b) { b.textContent = '&#128194; Send to Drive'; b.disabled = false; }
+    }
+  });
+}
+
+function copyDriveScriptPatch() {
+  var patch = [
+    '// Add inside doPost(e), before the final "return doGet(e)" line:',
+    '',
+    '// Upload cert to Google Drive',
+    'if (data.action === "uploadCert") {',
+    '  try {',
+    '    var folder = DriveApp.getFolderById(data.folderId);',
+    '    var bytes  = Utilities.base64Decode(data.base64Data);',
+    '    var blob   = Utilities.newBlob(bytes, data.mimeType || "application/pdf", data.fileName);',
+    '    var file   = folder.createFile(blob);',
+    '    file.setDescription("Member: " + data.memberName + " | Course: " + data.courseName + " | Date: " + data.date);',
+    '    return jsonOut({ ok: true, fileId: file.getId(), fileUrl: file.getUrl() });',
+    '  } catch(drErr) { return jsonOut({ ok: false, error: drErr.toString() }); }',
+    '}',
+    '// Test Drive folder connection (GET)',
+    '// Add inside doGet(e), before the final return:',
+    'if (action === "pingDrive") {',
+    '  try {',
+    '    var fid = e.parameter.folderId;',
+    '    var f   = DriveApp.getFolderById(fid);',
+    '    return ContentService.createTextOutput(JSON.stringify({ok:true,folderName:f.getName()})).setMimeType(ContentService.MimeType.JSON);',
+    '  } catch(pe) { return ContentService.createTextOutput(JSON.stringify({ok:false,error:pe.toString()})).setMimeType(ContentService.MimeType.JSON); }',
+    '}'
+  ].join('\n');
+  navigator.clipboard.writeText(patch)
+    .then(function(){ showToast('\u2705 Apps Script patch copied!'); })
+    .catch(function(){ showToast('Copy failed.'); });
 }
 
 function approveTraining(elOrId) {
@@ -1794,6 +1935,11 @@ function approveTraining(elOrId) {
   if (document.getElementById('section-approvals') && document.getElementById('section-approvals').classList.contains('active')) initApprovalsTab();
   updateApprovalsBadge();
   showToast('✅ Training approved — +'+s.pts+' pts added.');
+  if (s.cert && state.driveFolderId && state.sheetWebhookUrl) {
+    uploadCertToDrive(s.id, function(ok, info) {
+      if (ok) showToast('✅ Certificate uploaded to Google Drive!');
+    });
+  }
 }
 
 // ═══════════════════════════════════════════════════
@@ -2313,11 +2459,11 @@ function onAdminTabShow() {
   // Collapse all cards on open
   var collapseIds = [
     'rankEditorCollapse',
-    'exportSheetCollapse','cadDispatchCollapse','rawDataCollapse'
+    'driveUploadCollapse','exportSheetCollapse','cadDispatchCollapse','rawDataCollapse'
   ];
   var iconIds = [
     'rankEditorToggleIcon',
-    'exportSheetIcon','cadDispatchIcon','rawDataIcon'
+    'driveUploadIcon','exportSheetIcon','cadDispatchIcon','rawDataIcon'
   ];
   collapseIds.forEach(function(id, i) {
     var el = document.getElementById(id);
@@ -5068,11 +5214,27 @@ function renderSpecialEventAdmin() {
         '<div id="sePositionsContainer">'+sePositionRow()+'</div>'+
       '</div>'+
       '<button class="btn btn-primary" onclick="saveSpecialEvent()" style="width:100%;">&#10003; Create Event</button>';
-    var adminList = document.getElementById('specialEventAdminList');
-    if (adminList && adminList.parentNode) adminList.parentNode.insertBefore(formDiv, adminList);
+    // Insert form into manager container, then create the event list div
+    var mgContainer = document.getElementById('specialEventsManagerContainer');
+    if (mgContainer) {
+      mgContainer.insertBefore(formDiv, mgContainer.firstChild);
+      // Create the event list div if not present
+      if (!document.getElementById('specialEventAdminList')) {
+        var listDiv = document.createElement('div');
+        listDiv.id = 'specialEventAdminList';
+        mgContainer.appendChild(listDiv);
+      }
+    }
   }
   var container = document.getElementById('specialEventAdminList');
-  if (!container) return;
+  if (!container) {
+    // Fallback: create it in the manager container
+    var mgC = document.getElementById('specialEventsManagerContainer');
+    if (!mgC) return;
+    container = document.createElement('div');
+    container.id = 'specialEventAdminList';
+    mgC.appendChild(container);
+  }
   var today = new Date().toISOString().slice(0,10);
   var upcoming = (state.specialEvents||[]).filter(function(ev){ return ev.date >= today; })
     .sort(function(a,b){ return (a.date+a.time).localeCompare(b.date+b.time); });
@@ -10772,6 +10934,36 @@ function applyBulkEdit() {
       <!-- Data Management -->
       <div class="card" data-no-collapse="1" id="dataMgmtCard">
         <div class="card-header"><div class="icon">🗄</div><h2>Data Management</h2></div>
+
+        <!-- Google Drive Cert Upload subsection -->
+        <div style="border:1px solid #8E44AD;border-radius:10px;overflow:hidden;margin-bottom:12px;">
+          <div style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:10px;padding:12px 14px;background:#1A0D23;" onclick="toggleAdminSubCard('driveUploadCollapse','driveUploadIcon')">
+            <div style="font-size:16px;">&#128194;</div>
+            <div style="flex:1;">
+              <div style="font-weight:700;font-size:13px;color:#9B59B6;">Google Drive &#8212; Certificate Storage</div>
+              <div style="font-size:11px;color:#555;margin-top:1px;">Auto-upload training certs to Drive on approval</div>
+            </div>
+            <span id="driveFolderConnBadge" style="display:none;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:6px;"></span>
+            <span id="driveUploadIcon" style="color:#9B59B6;font-weight:700;font-size:14px;">&#9658;</span>
+          </div>
+          <div id="driveUploadCollapse" style="display:none;padding:14px;background:#111;border-top:1px solid #8E44AD;">
+            <div style="font-size:11px;color:#888;margin-bottom:10px;line-height:1.5;">
+              Training certificates are automatically uploaded to Google Drive when a submission is approved.<br>
+              Files are named: <code style="background:#1A1A1A;padding:1px 4px;border-radius:3px;color:#CCC;">LastFirst_CourseName_Date.pdf</code>
+            </div>
+            <div class="form-group">
+              <label>Google Drive Folder ID</label>
+              <input type="text" id="driveFolderIdInput" placeholder="Paste your Drive folder ID here" style="font-size:12px;">
+              <div style="font-size:10px;color:#555;margin-top:4px;">From the Drive URL: drive.google.com/drive/folders/<strong style="color:#9B59B6;">FOLDER_ID_HERE</strong></div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-primary btn-sm" style="background:#6C3483;border-color:#8E44AD;" onclick="saveDriveFolderId()">&#128190; Save Folder ID</button>
+              <button class="btn btn-secondary btn-sm" onclick="testDriveConnection()">&#128279; Test</button>
+              <button class="btn btn-secondary btn-sm" onclick="copyDriveScriptPatch()" style="font-size:11px;">&#128203; Copy Apps Script Patch</button>
+            </div>
+            <div id="driveConnStatus" style="margin-top:10px;"></div>
+          </div>
+        </div>
 
         <!-- Export to Google Sheets subsection -->
         <div style="border:1px solid #27AE60;border-radius:10px;overflow:hidden;margin-bottom:12px;">
