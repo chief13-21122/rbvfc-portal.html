@@ -1817,18 +1817,33 @@ function testDriveConnection() {
   if (!state.driveFolderId) { showToast('\u26a0\ufe0f Enter a Drive Folder ID first.'); return; }
   updateDriveStatusPanel('none');
   fetch(url + '?action=pingDrive&folderId=' + encodeURIComponent(state.driveFolderId))
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.ok) {
-        state._driveConnected = true; save();
-        updateDriveStatusPanel('ok');
-        showToast('\u2705 Drive folder connected: ' + (d.folderName || state.driveFolderId));
-      } else {
-        updateDriveStatusPanel('error');
-        showToast('\u26a0\ufe0f Drive: ' + (d.error || 'unknown error'));
+    .then(function(r) { return r.text(); })
+    .then(function(text) {
+      // Try JSON first (new Apps Script with pingDrive handler)
+      try {
+        var d = JSON.parse(text);
+        if (d.ok) {
+          state._driveConnected = true; save();
+          updateDriveStatusPanel('ok');
+          showToast('\u2705 Drive folder connected: ' + (d.folderName || state.driveFolderId));
+        } else {
+          updateDriveStatusPanel('error');
+          showToast('\u26a0\ufe0f Drive error: ' + (d.error || 'check folder ID'));
+        }
+      } catch (parseErr) {
+        // Plain text response — Apps Script reachable but pingDrive handler not yet added
+        // The folder ID can't be verified without the handler, but script is reachable
+        if (text && text.indexOf('Connected') >= 0) {
+          state._driveConnected = true; save();
+          updateDriveStatusPanel('ok');
+          showToast('\u2705 Apps Script reachable. Add the pingDrive handler to verify folder access. See \u201cCopy Apps Script Patch\u201d.');
+        } else {
+          updateDriveStatusPanel('error');
+          showToast('\u26a0\ufe0f Unexpected response. Check Apps Script URL.');
+        }
       }
     })
-    .catch(function() { updateDriveStatusPanel('error'); showToast('\u26a0\ufe0f Could not reach Apps Script.'); });
+    .catch(function() { updateDriveStatusPanel('error'); showToast('\u26a0\ufe0f Could not reach Apps Script. Ensure deployed with access: Anyone.'); });
 }
 
 function uploadCertToDrive(submissionId, onComplete) {
