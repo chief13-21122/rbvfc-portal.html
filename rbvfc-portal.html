@@ -3867,7 +3867,17 @@ function renderStaffingBoard() {
           html += '<div style="flex:1;font-size:13px;color:#666;font-style:italic;">\u2014 Open \u2014</div>';
           // Determine if member can sign up here
           var myShiftsOnDate  = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.memberId===uid; });
-          var hasConflict     = myShiftsOnDate.some(function(s){ return !areUnitsLinked(uId, s.unitId) && s.unitId !== uId; });
+          // EMS units (a139, Mu13) are compatible with fire units — no conflict cross-type
+          var EMS_IDS = ['a139', 'Mu13'];
+          var uIdIsEMS = EMS_IDS.indexOf(uId) >= 0;
+          var hasConflict = myShiftsOnDate.some(function(s) {
+            if (s.unitId === uId) return false;               // same unit handled by alreadyThisUnit
+            if (areUnitsLinked(uId, s.unitId)) return false;  // linked units allowed
+            var shiftIsEMS = EMS_IDS.indexOf(s.unitId) >= 0;
+            // No conflict between fire and EMS — members can do both
+            if (uIdIsEMS !== shiftIsEMS) return false;
+            return true;  // same category, not linked → conflict
+          });
           var alreadyThisUnit = myShiftsOnDate.some(function(s){ return s.unitId === uId; });
           var blocked         = hasConflict || alreadyThisUnit;
           var adminRestricted = isAdminMember(member) && uId !== 'U13';
@@ -3940,8 +3950,12 @@ function renderStaffingBoard() {
         eligible.forEach(function(m) {
           var alreadyOnDate = (state.staffingShifts||[]).some(function(s){
             if (s.date !== date || s.memberId !== m.id) return false;
-            // Exclude if: already on this same unit OR on a non-linked unit
-            return s.unitId === uId || !areUnitsLinked(uId, s.unitId);
+            if (s.unitId === uId) return true;               // same unit = exclude
+            if (areUnitsLinked(uId, s.unitId)) return false; // linked = allow
+            // EMS and fire are cross-compatible — allow
+            var _EMS = ['a139','Mu13'];
+            if ((_EMS.indexOf(uId)>=0) !== (_EMS.indexOf(s.unitId)>=0)) return false;
+            return true; // same category, not linked = conflict
           });
           if (!alreadyOnDate) html += '<option value="'+m.id+'">'+m.last+', '+m.first+(isProbationary(m)?' [PROB]':'')+' ('+(m.ranks&&m.ranks.length?m.ranks.join('/'):(m.rank||'\u2014'))+')</option>';
         });
@@ -4099,7 +4113,9 @@ function confirmSignUp() {
   // Block sign-up for past dates
   var today = new Date().toISOString().slice(0,10);
   if (date < today) { showToast('\u26A0\uFE0F Cannot sign up for a past date.'); return; }
-  // Overlap check: allow linked units (e.g. E131 + Tk13), block everything else
+  // Overlap check: allow linked units (e.g. E131+Tk13) and cross-type fire+EMS combos
+  var _EMS_IDS = ['a139', 'Mu13'];
+  var newIsEMS = _EMS_IDS.indexOf(unitId) >= 0;
   var existingShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.memberId===uid; });
   for (var _oi=0; _oi<existingShifts.length; _oi++) {
     var _es = existingShifts[_oi];
@@ -4107,8 +4123,12 @@ function confirmSignUp() {
       showToast('\u26a0\ufe0f Already signed up for a position on '+UNIT_LABELS[unitId]+' this day.');
       return;
     }
+    // Fire ↔ EMS is always allowed (different operations, same member)
+    var existingIsEMS = _EMS_IDS.indexOf(_es.unitId) >= 0;
+    if (newIsEMS !== existingIsEMS) continue;
+    // Within the same category: only allow linked pairs (e.g. E131+Tk13)
     if (!areUnitsLinked(unitId, _es.unitId)) {
-      showToast('\u26a0\ufe0f Conflict: already signed up for '+UNIT_LABELS[_es.unitId]+' \u2014 '+_es.position+'. You can only combine E131 & Truck 13 positions.');
+      showToast('\u26a0\ufe0f Conflict: already signed up for '+UNIT_LABELS[_es.unitId]+' \u2014 '+_es.position+'.');
       return;
     }
   }
@@ -4188,6 +4208,11 @@ function officerAssign(date, unitId) {
 
   // Check for conflicts — allow linked units (e131 ↔ Tk13), block everything else
   var alreadyAny = (state.staffingShifts||[]).find(function(s){
+    // EMS compatible with fire — no cross-type conflict
+    var EMS_UNIT_IDS = ['a139', 'Mu13'];
+    var newIsEMS = EMS_UNIT_IDS.indexOf(unitId) >= 0;
+    var shiftIsEMS = EMS_UNIT_IDS.indexOf(s.unitId) >= 0;
+    if (newIsEMS !== shiftIsEMS) return false; // different categories — OK
     return s.date===date && s.memberId===memberId && (s.unitId === unitId || !areUnitsLinked(unitId, s.unitId));
   });
   if (alreadyAny) {
