@@ -738,7 +738,7 @@ function showTab(id) {
   if (id === 'staffing') initStaffingTab();
   if (id === 'training') initTrainingTab();
   if (id === 'losap') renderLOSAP();
-  if (id === 'company') { populateCompanyYearSelect(); renderCompanyLOSAP(); }
+  if (id === 'company') { populateCompanyYearSelect(); renderCompanyLOSAP(); renderCompanyStats(); }
   if (id === 'hours') renderHoursLog();
   if (id === 'training') renderTrainingReview();
   if (id === 'emergency') initEmergencyTab();
@@ -7163,6 +7163,67 @@ function changeAdminPin() {
 // ═══════════════════════════════════════════════════
 //  COMPANY LOSAP
 // ═══════════════════════════════════════════════════
+function renderCompanyStats() {
+  var yr = parseInt((document.getElementById('companyYear')||{}).value) || new Date().getFullYear();
+  var container = document.getElementById('companyStatsContainer');
+  if (!container) return;
+
+  var yearStart = yr + '-01-01', yearEnd = yr + '-12-31';
+  var activeMembers = (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); });
+  var totalMembers  = activeMembers.length;
+
+  // Points per member
+  var memberPts = {};
+  activeMembers.forEach(function(m){ memberPts[m.id] = 0; });
+  (state.losapActivities||[]).forEach(function(a){
+    if (a.date >= yearStart && a.date <= yearEnd && memberPts[a.memberId] !== undefined)
+      memberPts[a.memberId] += (a.pts||0);
+  });
+
+  // Responses
+  var totalResponses = (state.emergencyResponses||[]).filter(function(r){ return r.date>=yearStart&&r.date<=yearEnd; }).length;
+
+  // Count responses per member
+  (state.emergencyResponses||[]).forEach(function(r){
+    if (r.date>=yearStart && r.date<=yearEnd)
+      (r.members||[]).forEach(function(mid){ if(memberPts[mid]!==undefined) memberPts[mid] += 1; });
+  });
+
+  var qualified    = Object.values(memberPts).filter(function(p){ return p >= 50; }).length;
+  var onTrack      = Object.values(memberPts).filter(function(p){ return p >= 25 && p < 50; }).length;
+  var qualPct      = totalMembers ? Math.round((qualified/totalMembers)*100) : 0;
+
+  // Training hours this year
+  var trainingActs = (state.losapActivities||[]).filter(function(a){
+    return a.date>=yearStart && a.date<=yearEnd && a.category==='training';
+  });
+  var totalTrainingHrs = trainingActs.reduce(function(s,a){ return s+(a.hours||0); }, 0);
+
+  // Drills
+  var drills = (state.drills||[]).filter(function(d){ return d.date>=yearStart && d.date<=yearEnd && d.status==='approved'; }).length;
+
+  // Total duty hours (sessions)
+  var dutyHrs = (state.sessions||[]).filter(function(s){
+    var d = (s.start||'').slice(0,10);
+    return d>=yearStart && d<=yearEnd;
+  }).reduce(function(sum,s){ return sum+(s.duration||0)/3600; }, 0);
+
+  function statBox(icon, label, value, color, subLabel) {
+    return '<div style="background:#181818;border:1px solid #2A2A2A;border-radius:10px;padding:14px;">' +
+      '<div style="font-size:20px;margin-bottom:6px;">' + icon + '</div>' +
+      '<div style="font-family:Barlow Condensed,sans-serif;font-size:26px;font-weight:700;color:' + color + ';letter-spacing:1px;">' + value + '</div>' +
+      '<div style="font-size:11px;color:#888;margin-top:2px;">' + label + '</div>' +
+      (subLabel ? '<div style="font-size:10px;color:#555;margin-top:3px;">' + subLabel + '</div>' : '') +
+    '</div>';
+  }
+
+  container.innerHTML =
+    statBox('&#127941;', 'Qualified Members', qualified + ' / ' + totalMembers, '#27AE60', qualPct + '% of company &nbsp;&middot;&nbsp; ' + onTrack + ' on track') +
+    statBox('&#128680;', 'Emergency Responses', totalResponses, '#E74C3C', yr + ' service year') +
+    statBox('&#128218;', 'Training Hours', totalTrainingHrs.toFixed(0) + ' hrs', '#3498DB', trainingActs.length + ' training activities') +
+    statBox('&#128336;', 'Duty Hours Logged', dutyHrs.toFixed(0) + ' hrs', '#F5A623', drills + ' drill' + (drills!==1?'s':'') + ' conducted');
+}
+
 function renderCompanyLOSAP() {
   var yr = parseInt((document.getElementById('companyYear')||{}).value) || new Date().getFullYear();
   populateCompanyYearSelect();
@@ -7228,6 +7289,8 @@ function renderCompanyLOSAP() {
     };
   });
 
+  // Update stats summary alongside leaderboard
+  try { renderCompanyStats(); } catch(e){}
   var sorted = Object.values(totals).sort(function(a,b){ return b.pts-a.pts; });
   if(!sorted.length) {
     container.innerHTML='<p style="color:#666;font-size:13px;text-align:center;padding:24px;">No data for '+yr+'.</p>';
@@ -10934,12 +10997,22 @@ function applyBulkEdit() {
     <!-- ══════════════ COMPANY TAB ══════════════ -->
     <div id="section-company" class="section">
 
+      <!-- Company Stats Summary -->
+      <div class="card" id="companyStatsCard">
+        <div class="card-header">
+          <div class="icon">&#128202;</div>
+          <h2>Company Overview</h2>
+          <div style="margin-left:auto;" id="companyStatsYear"></div>
+        </div>
+        <div id="companyStatsContainer" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:4px 0 8px;"></div>
+      </div>
+
       <div class="card">
         <div class="card-header">
-          <div class="icon">🏅</div>
+          <div class="icon">&#127941;</div>
           <h2>Company LOSAP Leaderboard</h2>
           <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-            <select id="companyYear" data-onchange="renderCompanyLOSAP()" style="background:#111;border:1px solid #333;color:#F0F0F0;border-radius:6px;padding:4px 8px;font-size:12px;"></select>
+            <select id="companyYear" onchange="renderCompanyLOSAP()" style="background:#111;border:1px solid #333;color:#F0F0F0;border-radius:6px;padding:4px 8px;font-size:12px;"></select>
           </div>
         </div>
         <div id="companyLosapContainer">
