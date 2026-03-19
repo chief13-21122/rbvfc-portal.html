@@ -2335,7 +2335,6 @@ function saveUserFromAdmin() {
   save();
   clearUserForm();
   renderAdminRoster();
-  renderClockedInPanel();
 }
 
 function clearUserForm() {
@@ -2497,7 +2496,6 @@ function onAdminTabShow() {
   initCadScriptUrl();
   renderUmRanksGrid([]);
   renderAdminRoster();
-  renderClockedInPanel();
   populateViewAsDropdown();
   var urlInput=document.getElementById('sheetUrlInput');
   if (urlInput&&state.sheetWebhookUrl) urlInput.value=state.sheetWebhookUrl;
@@ -4656,18 +4654,6 @@ function renderMyShifts() {
     }
   });
   container.innerHTML = html;
-  // Mirror to Clock tab — show card only if there is content
-  var mirrorEl = document.getElementById('clockMyShiftsContainer');
-  var mirrorCard = document.getElementById('clockMyShiftsCard');
-  if (mirrorEl) {
-    if (html && html.trim()) {
-      mirrorEl.innerHTML = html;
-      if (mirrorCard) mirrorCard.style.display = '';
-    } else {
-      mirrorEl.innerHTML = '';
-      if (mirrorCard) mirrorCard.style.display = 'none';
-    }
-  }
 }
 
 
@@ -5549,7 +5535,7 @@ function saveSpecialEvent() {
   showToast('✅ Event "'+title+'" created.');
 }
 
-function sePositionRow(name, slots) {
+function sePositionRow(name, slots, idx) {
   name  = name  || '';
   slots = slots || 1;
   return '<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">'+
@@ -6922,7 +6908,6 @@ function clearUmForm() {
   var addRankSel=document.getElementById('umAddRankSelect'); if(addRankSel) addRankSel.value='';
 }
 
-function cancelUmEdit() { clearUmForm(); }
 
 function editMember(id) {
   // Redirect to the full admin edit function
@@ -7777,7 +7762,6 @@ function clockIn() {
     return;
   }
   var now      = new Date();
-  try { console.log('[RBVFC] clockIn called, userId='+state.currentUserId); } catch(e){}
   state.currentSession = {
     id:       'sess_' + Date.now(),
     userId:   state.currentUserId,
@@ -8774,12 +8758,6 @@ function buildPublicRespondersCol(discipline, yr, todayStr) {
   // EMS units and keywords
   var EMS_UNITS = ['a139','Mu13'];
   var EMS_KEYWORDS = ['ems','medical','cardiac','trauma','rescue','overdose','chest pain','stroke','injury','sick'];
-
-  function isEms(er) {
-    if ((er.units||[]).some(function(u){ return EMS_UNITS.indexOf(u) >= 0; })) return true;
-    var t = (er.type||er.incidentType||'').toLowerCase();
-    return EMS_KEYWORDS.some(function(k){ return t.indexOf(k) >= 0; });
-  }
 
   // Build per-member response count for this discipline
   var counts = {};
@@ -10126,7 +10104,7 @@ function applyBulkEdit() {
       <!-- Year-end archive banner (January only) -->
       <div id="yearEndBanner" style="display:none;" class="alert" style="background:#2A1500;border-color:#F5A623;margin-bottom:14px;">
         📦 <strong>Year-End Archive:</strong> Archive last year's data before entering new year activities.
-        <button class="btn btn-sm" style="margin-left:8px;background:#F5A623;color:#111;border-color:#F5A623;">Archive Now</button>
+        <button class="btn btn-sm" style="margin-left:8px;background:#F5A623;color:#111;border-color:#F5A623;" onclick="showYearEndArchivePanel()">Archive Now</button>
       </div>
 
       <!-- Year-end archive panel -->
@@ -10431,7 +10409,7 @@ function applyBulkEdit() {
           <textarea id="entryNotes" rows="2" placeholder="Optional notes…" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
         </div>
 
-        <button class="btn btn-primary btn-full">💾 Save Activity</button>
+        <button class="btn btn-primary btn-full" onclick="saveActivity()">💾 Save Activity</button>
       </div><!-- end logActivityCard -->
 
       <!-- Hours Log -->
@@ -10495,7 +10473,7 @@ function applyBulkEdit() {
           <label>Notes</label>
           <textarea id="erNotes" rows="2" placeholder="Additional notes…" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
         </div>
-        <button class="btn btn-primary btn-full">🚒 Log Response</button>
+        <button class="btn btn-primary btn-full" onclick="saveEmergencyResponse()">🚒 Log Response</button>
       </div>
 
       <!-- Response History -->
@@ -10962,7 +10940,7 @@ function applyBulkEdit() {
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
           <p style="font-size:13px;color:#888;margin:0;">Add members, assign roles, and set LOSAP positions. Members can be deactivated but never deleted.</p>
           <button class="btn btn-sm btn-secondary" style="white-space:nowrap;" onclick="document.getElementById('adminCsvInput').click()">📋 Import CSV</button>
-          <input type="file" id="adminCsvInput" accept=".csv,.txt" style="display:none;" data-onchange="handleCsvUpload(this.files[0])">
+          <input type="file" id="adminCsvInput" accept=".csv,.txt" style="display:none;" onchange="handleCsvUpload(this.files[0])">
         </div>
 
         <div id="umForm" style="background:#181818;border:1px solid #2A2A2A;border-radius:10px;padding:16px;margin-bottom:20px;">
@@ -11547,7 +11525,7 @@ function applyBulkEdit() {
           <div style="font-size:22px;">📋</div>
           <div style="font-size:12px;color:#666;margin-top:4px;">Click to upload member list CSV</div>
           <div style="font-size:10px;color:#444;margin-top:3px;">Columns: Last, First, Badge#, Rank, Role, Email, PIN</div>
-          <input type="file" id="setupCsvInput" accept=".csv,.txt" style="display:none;" data-onchange="handleCsvUpload(this.files[0])">
+          <input type="file" id="setupCsvInput" accept=".csv,.txt" style="display:none;" onchange="handleCsvUpload(this.files[0])">
         </div>
       </div>
 
