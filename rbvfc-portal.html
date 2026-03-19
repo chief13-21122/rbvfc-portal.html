@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>RBVFC LOSAP Member Portal</title>
+<title>Member LOSAP Portal - Co.13</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -593,7 +593,7 @@ function renderPushStatus() {
 }
 
 function showPushNotificationBanner(payload) {
-  var title = (payload.notification && payload.notification.title) || 'RBVFC Alert';
+  var title = (payload.notification && payload.notification.title) || 'Co.13 Alert';
   var body  = (payload.notification && payload.notification.body)  || (payload.data && payload.data.msg) || '';
   var el = document.getElementById('fcmForegroundBanner');
   if (!el) {
@@ -2104,7 +2104,7 @@ function sendYearEndEmails(yr, archive) {
     var s = archive[m.id] || {};
     memberEmails.push({
       to: m.email,
-      subject: 'RBVFC LOSAP '+yr+' Annual Report — '+m.first+' '+m.last,
+      subject: 'Co.13 LOSAP '+yr+' Annual Report — '+m.first+' '+m.last,
       body: buildMemberYearEmailBody(m, s, yr)
     });
   });
@@ -2119,7 +2119,7 @@ function sendYearEndEmails(yr, archive) {
   reportRecipients.forEach(function(m) {
     memberEmails.push({
       to: m.email,
-      subject: 'RBVFC '+yr+' Company LOSAP End-of-Year Report',
+      subject: 'Co.13 '+yr+' LOSAP End-of-Year Report',
       body: companyReportBody
     });
   });
@@ -2136,7 +2136,7 @@ function buildMemberYearEmailBody(m, s, yr) {
   var qualified = s.pts >= 50;
   var nl = '\n';
   var body = 'Dear '+m.first+' '+m.last+','+nl+nl
-    + 'Here is your RBVFC LOSAP summary for the '+yr+' service year:'+nl+nl
+    + 'Here is your Co.13 LOSAP summary for the '+yr+' service year:'+nl+nl
     + '  Total Points:        '+s.pts+' / 50 required'+nl
     + '  Qualification:       '+(qualified?'QUALIFIED':'NOT QUALIFIED')+nl
     + '  Emergency Responses: '+(s.responses||0)+nl
@@ -2164,7 +2164,7 @@ function buildCompanyYearReportBody(yr, archive) {
     var h=parseFloat(r.hours||0).toFixed(1); while(h.length<6) h=' '+h;
     return '  '+nm+' Pts:'+p+'  Resp:'+rs+'  Hrs:'+h+'  '+(r.qualified?'QUALIFIED':'--');
   }).join(nl);
-  return 'RBVFC LOSAP Company Report -- '+yr+' Service Year'+nl
+  return 'Co.13 LOSAP Company Report -- '+yr+' Service Year'+nl
     +'Generated: '+new Date().toLocaleDateString()+nl+nl
     +'SUMMARY'+nl
     +'  Total Active Members: '+rows.length+nl
@@ -2199,7 +2199,7 @@ function buildMonthlyEmailBody(m, monthName, yr, monthPts, ytdPts, monthResp, mo
     if (g.count > 0) breakdown += '    '+(cats[cat]||cat)+': '+g.count+'x = '+g.pts+' pt'+(g.pts!==1?'s':'')+nl;
   });
   return 'Dear '+m.first+' '+m.last+','+nl+nl
-    +'Here is your RBVFC LOSAP report for '+monthName+' '+yr+':'+nl+nl
+    +'Here is your Co.13 LOSAP report for '+monthName+' '+yr+':'+nl+nl
     +'——— THIS MONTH ———'+nl
     +'  Points Earned:    '+monthPts+nl
     +'  Responses:        '+monthResp+nl
@@ -2209,7 +2209,7 @@ function buildMonthlyEmailBody(m, monthName, yr, monthPts, ytdPts, monthResp, mo
     +'  Total Points:     '+ytdPts+' / 50 required'+nl
     +'  Status:           '+status+nl+nl
     +'Thank you for your continued service to the Riviera Beach community.'+nl+nl
-    +'— RBVFC LOSAP Member Portal'+nl
+    +'— Member LOSAP Portal - Co.13'+nl
     +'Riviera Beach Volunteer Fire Company No. 13';
 }
 
@@ -2254,7 +2254,7 @@ function previewMonthlyEmail() {
   closeBtn.onclick = function(){ document.getElementById('monthlyPreviewModal').remove(); };
   inner.innerHTML = hdr
     +'<div style="font-size:11px;color:#F5A623;margin-bottom:4px;">To: '+(m.email||'(no email on file)')+'</div>'
-    +'<div style="font-size:11px;color:#888;margin-bottom:12px;">Subject: RBVFC LOSAP Monthly Update — '+mn+' '+pmYr+'</div>'
+    +'<div style="font-size:11px;color:#888;margin-bottom:12px;">Subject: Co.13 LOSAP Monthly Update — '+mn+' '+pmYr+'</div>'
     +'<pre id="monthlyPreviewBody" style="font-size:12px;color:#CCC;white-space:pre-wrap;line-height:1.6;background:#111;padding:12px;border-radius:8px;"></pre>'
     +'<div style="margin-top:16px;font-size:11px;color:#555;text-align:center;">Sent on the 1st of each month to all active members with email addresses.</div>';
   inner.querySelector('#monthlyPreviewBody').textContent = body;
@@ -2314,7 +2314,7 @@ function sendMonthlyEmails() {
     var monthPts  = monthActs.reduce(function(a,x){ return a+(x.pts||0); },0) + monthResp;
     emails.push({
       to: m.email,
-      subject: 'RBVFC LOSAP Monthly Update - '+monthName+' '+prevMonthYr,
+      subject: 'Co.13 LOSAP Monthly Update - '+monthName+' '+prevMonthYr,
       body: buildMonthlyEmailBody(m, monthName, prevMonthYr, monthPts, ytdPts, monthResp, monthHours, monthActs)
     });
   });
@@ -2833,11 +2833,11 @@ function copyAppsScript() {
 }
 function getAppsScriptCode() {
   var lines = [
-    "// ── RBVFC LOSAP Member Portal — Google Apps Script ──",
+    "// ── Member LOSAP Portal - Co.13 — Google Apps Script ──",
     "// SETUP:",
     "// 1. Replace YOUR_SHEET_ID_HERE with your Google Sheet ID",
     "//    (the long string between /d/ and /edit in your Sheet URL)",
-    "// 2. Go to Services (+) → add Google Calendar API (v3)",
+    "// 2. CalendarApp is built-in — no Services setup needed",
     "// 3. Deploy → New deployment → Web app",
     "//    Execute as: Me  |  Who has access: Anyone",
     "// 4. When authorizing, approve all permissions including Calendar & Gmail",
@@ -3000,7 +3000,7 @@ function getAppsScriptCode() {
     "  s.clearContents();",
     "  s.appendRow(['Last Sync', meta && meta.syncTime ? new Date(meta.syncTime).toLocaleString() : new Date().toLocaleString()]);",
     "  s.appendRow(['Station', meta && meta.station ? meta.station : 'Riviera Beach VFC - Company 13']);",
-    "  s.appendRow(['Source', 'RBVFC LOSAP Member Portal']);",
+    "  s.appendRow(['Source', 'Member LOSAP Portal - Co.13']);",
     "}",
     "",
     "function fmt(sheet, cols, color) {",
@@ -3024,10 +3024,10 @@ function getAppsScriptCode() {
     "  var testId = createCalendarInvite(",
     "    Session.getActiveUser().getEmail(),",
     "    'Test Member',",
-    "    { title:'RBVFC TEST — Duty Shift', date: new Date().toISOString().slice(0,10),",
+    "    { title:'Co.13 TEST — Duty Shift', date: new Date().toISOString().slice(0,10),",
     "      startHH:'07', startMM:'00', hours:24,",
     "      location:'Riviera Beach VFC, Station 13',",
-    "      description:'This is a test calendar invite from the RBVFC portal.' }",
+    "      description:'This is a test calendar invite from the Co.13 portal.' }",
     "  );",
     "  Logger.log('testManual complete — Sheet updated. Calendar event ID: ' + testId);",
     "}"
@@ -3155,7 +3155,7 @@ function exportAllSheets() {
     return r.map(function(c){ return q+String(c).replace(/"/g,q+q)+q; }).join(',');
   }).join('\n');
 
-  var filename = 'RBVFC-Report-' + yr + '.csv';
+  var filename = 'Co13-Report-' + yr + '.csv';
   download(filename, 'text/csv', csv);
   showToast('\u2705 Exported: ' + filename);
 }
@@ -4155,7 +4155,7 @@ function shiftToCalDetails(shift) {
   var startMM = shift.start ? shift.start.slice(2,4) : (shift.shiftStart ? shift.shiftStart.slice(2,4) : '00');
   var hrs = parseFloat(shift.hours || shift.shiftHours || 24);
   return {
-    title: 'RBVFC Duty Shift — '+UNIT_LABELS[shift.unitId]+' ('+shift.position+')',
+    title: 'Co.13 Duty Shift — '+UNIT_LABELS[shift.unitId]+' ('+shift.position+')',
     date: shift.date,
     startHH: startHH,
     startMM: startMM,
@@ -4181,7 +4181,7 @@ function eventToCalDetails(ev) {
     hours = Math.max(4, (d2-d1)/3600000 + (endTime ? parseInt(endTime.split(':')[0]||'17') - parseInt(startHH) : 8));
   }
   return {
-    title: 'RBVFC Special Event — '+ev.title,
+    title: 'Co.13 Special Event — '+ev.title,
     date: ev.startDate || ev.date,
     startHH: startHH,
     startMM: startMM,
@@ -4488,7 +4488,7 @@ function notifyUnderstaffedDay(date) {
   var dateStr  = monNames[d.getMonth()]+' '+d.getDate()+', '+d.getFullYear();
   var msgEl = document.getElementById('staffingAlertMsg');
   if (msgEl) {
-    msgEl.value = '📢 STAFFING NEEDED — '+dateStr+'\n\nThe following units are below minimum staffing:\n\n'+open.map(function(s){ return '• '+s; }).join('\n')+'\n\nPlease sign up in the RBVFC Portal or contact the staffing officer.';
+    msgEl.value = '📢 STAFFING NEEDED — '+dateStr+'\n\nThe following units are below minimum staffing:\n\n'+open.map(function(s){ return '• '+s; }).join('\n')+'\n\nPlease sign up in the Member Portal or contact the staffing officer.';
     var alertCard = document.getElementById('staffingAlertCard');
     if (alertCard) alertCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     showToast('Alert pre-filled. Review and send below.');
@@ -7527,11 +7527,16 @@ function _fetchCadCalls(url, fromAdmin) {
   return fetch(url + '?action=getCadCalls')
     .then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
+      return r.text();
     })
-    .then(function(data) {
-      // Accept {calls:[...]}, direct array, or {results:[...]}
-      // If data has 'ok:false' it's an error response from Apps Script
+    .then(function(text) {
+      var data;
+      try { data = JSON.parse(text); }
+      catch(e) {
+        if (text && text.indexOf('Connected') >= 0)
+          throw new Error('Apps Script missing getCadCalls handler. See Admin → CAD Dispatch Sync → Setup Guide.');
+        throw new Error('Bad response: ' + text.substring(0,80));
+      }
       if (data && data.ok === false) throw new Error(data.error || 'Script error');
       var calls = Array.isArray(data) ? data : (data.calls || data.results || []);
       // Merge, avoiding duplicate incidents
@@ -7562,7 +7567,7 @@ function _fetchCadCalls(url, fromAdmin) {
       if (fromAdmin) updateCadStatusPanel('error', null);
       var msg = (err.message && err.message.indexOf('Failed to fetch') >= 0)
         ? '⚠️ CORS error — redeploy Apps Script with access: Anyone.'
-        : '⚠️ CAD sync failed: ' + (err.message || 'check URL');
+        : '⚠️ ' + (err.message || 'CAD sync failed — add getCadCalls handler to Apps Script');
       showToast(msg);
       throw err;
     });
@@ -10194,7 +10199,7 @@ function applyBulkEdit() {
   <div class="app-header" id="appHeader">
     <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAAF8WlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPHg6eG1wbWV0YSB4bWxuczp4PSdhZG9iZTpuczptZXRhLyc+CiAgICAgICAgPHJkZjpSREYgeG1sbnM6cmRmPSdodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjJz4KCiAgICAgICAgPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9JycKICAgICAgICB4bWxuczpkYz0naHR0cDovL3B1cmwub3JnL2RjL2VsZW1lbnRzLzEuMS8nPgogICAgICAgIDxkYzp0aXRsZT4KICAgICAgICA8cmRmOkFsdD4KICAgICAgICA8cmRmOmxpIHhtbDpsYW5nPSd4LWRlZmF1bHQnPkxvZ28gSWNvbiBCbGFjayBhbmQgV2hpdGUgQ29sb3I8L3JkZjpsaT4KICAgICAgICA8L3JkZjpBbHQ+CiAgICAgICAgPC9kYzp0aXRsZT4KICAgICAgICA8L3JkZjpEZXNjcmlwdGlvbj4KCiAgICAgICAgPC9yZGY6UkRGPgogICAgICAgIDwveDp4bXBtZXRhPgqBFQRkAAAAA3NCSVQICAjb4U/gAAAVJ0lEQVRoge2ZeZRU1Z3HP/e+16+ql+rq6o3eaKCBZhNBMIAoIAqKCyoaFU2iZtEkxpgYTZwkM5mYZGZixqiJiRqNJi6J0aiJGzFuqCiLCCKLLNK0Dd30Xvv63rtzfxQgIrKJycz5nXPPud977rv3fu69v/s750EfffTRRx999NFHH/+WRE9X4P8J0MRZM2fOdLZMm6nMqKxCbMHrSaORqAxUVFRQUVFBUVGRvp2e2tBay5VXXolpmvh8Pnw+H7quY4wBwHEcHMfBcRxs28YYg2VZWJaFaZpYloWmaei6jqZpKKWQUiKlREqJEAIhBFJKhBDsNJCSkiS09WiMQSmFUgqlFEoplFIopVBKIaVESolSCqUUSil+6vVSSqGUQimlUEq5qMBBKYVSSqWUSimlUkqllFIppVJKqZRSKaVSSqWUSimlUkqllFIppVRKqZRSKaVSSqWUSqWUSinVFklASmkA4AAAAAAASUVORK5CYII=" alt="RBVFC" style="height:32px;width:auto;object-fit:contain;" onerror="this.style.display='none'">
     <div style="flex:1;">
-      <div class="app-title">RBVFC LOSAP MEMBER PORTAL</div>
+      <div class="app-title">MEMBER LOSAP PORTAL - Co.13</div>
       <div class="app-subtitle" id="appSubtitle">Riviera Beach Volunteer Fire Company</div>
     </div>
     <button class="btn-logout" id="switchUserBtn" style="display:none;background:#1A2A1A;border-color:#27AE60;color:#27AE60;margin-right:6px;font-size:11px;" onclick="openSwitchUser()">👁 View As</button>
