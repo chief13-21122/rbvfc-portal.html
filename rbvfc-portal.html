@@ -644,6 +644,7 @@ var state = {
   currentSession: null,
   sheetWebhookUrl: '',
   driveFolderId: '',
+  independentDates: {},    // { 'e131_Tk13': ['2026-03-19', ...] } — dates when linked units staff independently
   adminPin: '1234',
   currentUserId: null,
   lastYearReset: null,
@@ -3542,9 +3543,41 @@ function getLinkedGroup(unitId) {
   }
   return -1;
 }
-function areUnitsLinked(unitA, unitB) {
+function areUnitsLinked(unitA, unitB, date) {
   var g = getLinkedGroup(unitA);
-  return g >= 0 && LINKED_UNIT_GROUPS[g].indexOf(unitB) >= 0;
+  if (g < 0) return false;
+  if (LINKED_UNIT_GROUPS[g].indexOf(unitB) < 0) return false;
+  // Check if this group is staffing independently on the given date
+  if (date && isIndependentDate(LINKED_UNIT_GROUPS[g], date)) return false;
+  return true;
+}
+
+function isIndependentDate(group, date) {
+  // group is an array like ['e131','Tk13']
+  var key = group.slice().sort().join('_');
+  var dates = (state.independentDates && state.independentDates[key]) || [];
+  return dates.indexOf(date) >= 0;
+}
+
+function toggleIndependentStaffing(unitA, unitB, date) {
+  var g = getLinkedGroup(unitA);
+  if (g < 0) return;
+  var key = LINKED_UNIT_GROUPS[g].slice().sort().join('_');
+  if (!state.independentDates) state.independentDates = {};
+  if (!state.independentDates[key]) state.independentDates[key] = [];
+  var idx = state.independentDates[key].indexOf(date);
+  if (idx >= 0) {
+    state.independentDates[key].splice(idx, 1); // remove — back to combined
+  } else {
+    state.independentDates[key].push(date);      // add — independent
+  }
+  save();
+  renderStaffingBoard();
+  var isNowIndep = state.independentDates[key].indexOf(date) >= 0;
+  showToast(isNowIndep
+    ? '\u2714 ' + (UNIT_LABELS[unitA]||unitA) + ' & ' + (UNIT_LABELS[unitB]||unitB) + ' staffing independently today.'
+    : '\u2714 ' + (UNIT_LABELS[unitA]||unitA) + ' & ' + (UNIT_LABELS[unitB]||unitB) + ' back to combined crew.'
+  );
 }
 function getLinkedPartners(unitId, inList) {
   var g = getLinkedGroup(unitId);
@@ -3902,9 +3935,14 @@ function renderStaffingBoard() {
   enabledUnits.forEach(function(unitId) {
     if (_rendered[unitId]) return;
 
-    var linkedPartners = getLinkedPartners(unitId, enabledUnits);
+    // Check if this group is staffing independently today
+    var _rawPartners = getLinkedPartners(unitId, enabledUnits);
+    var linkedPartners = _rawPartners.filter(function(p){ return areUnitsLinked(unitId, p, date); });
+    // Partners that are independent get rendered separately (don't mark as rendered yet)
+    var indepPartners = _rawPartners.filter(function(p){ return !areUnitsLinked(unitId, p, date); });
     var allUnitsInGroup = [unitId].concat(linkedPartners);
     allUnitsInGroup.forEach(function(u){ _rendered[u] = true; });
+    // Independent partners will be rendered on their own when the loop reaches them
 
     // ── Build per-unit status helper ──
     function unitStatus(uId) {
@@ -3934,7 +3972,19 @@ function renderStaffingBoard() {
       var combinedLabel = allUnitsInGroup.map(function(u){ return UNIT_LABELS[u]||u; }).join(' / ');
       html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
       html += '<span style="font-size:18px;font-weight:700;letter-spacing:1.5px;color:#F0F0F0;">'+combinedLabel+'</span>';
-      html += '<span style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;background:rgba(200,16,46,.15);border:1px solid rgba(200,16,46,.4);color:#C8102E;border-radius:4px;padding:2px 7px;">COMBINED CREW</span>';
+      // Check if this group has any independent staffing on this date
+      var _grp = LINKED_UNIT_GROUPS[getLinkedGroup(unitId)];
+      var _isIndep = isIndependentDate(_grp, date);
+      if (_isIndep) {
+        // Show independent badge — units staffing separately
+        html += '<span style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;background:rgba(245,166,35,.12);border:1px solid rgba(245,166,35,.5);color:#F5A623;border-radius:4px;padding:2px 7px;">INDEPENDENT</span>';
+      } else {
+        html += '<span style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;background:rgba(200,16,46,.15);border:1px solid rgba(200,16,46,.4);color:#C8102E;border-radius:4px;padding:2px 7px;">COMBINED CREW</span>';
+      }
+      if (isOfficer) {
+        var _tA = allUnitsInGroup[0], _tB = allUnitsInGroup[1];
+        html += '<button onclick="toggleIndependentStaffing(\''+_tA+'\',\''+_tB+'\',\''+date+'\')" style="margin-left:6px;background:'+ (_isIndep?'#1A2A00':'#1A0A0A') +';border:1px solid '+ (_isIndep?'#27AE60':'#F5A623') +';color:'+ (_isIndep?'#27AE60':'#F5A623') +';border-radius:5px;padding:2px 8px;cursor:pointer;font-size:10px;font-weight:700;white-space:nowrap;">'+ (_isIndep?'\u21c4 Combined':'\u2194 Independent') +'</button>';
+      }
       html += '</div>';
     } else {
       html += '<span style="font-size:18px;font-weight:700;letter-spacing:1.5px;color:#F0F0F0;">'+UNIT_LABELS[unitId]+'</span>';
@@ -3965,7 +4015,7 @@ function renderStaffingBoard() {
           var uIdIsEMS = EMS_IDS.indexOf(uId) >= 0;
           var hasConflict = myShiftsOnDate.some(function(s) {
             if (s.unitId === uId) return false;               // same unit handled by alreadyThisUnit
-            if (areUnitsLinked(uId, s.unitId)) return false;  // linked units allowed
+            if (areUnitsLinked(uId, s.unitId, date)) return false;  // linked units allowed (unless independent day)
             var shiftIsEMS = EMS_IDS.indexOf(s.unitId) >= 0;
             // No conflict between fire and EMS — members can do both
             if (uIdIsEMS !== shiftIsEMS) return false;
@@ -4044,7 +4094,7 @@ function renderStaffingBoard() {
           var alreadyOnDate = (state.staffingShifts||[]).some(function(s){
             if (s.date !== date || s.memberId !== m.id) return false;
             if (s.unitId === uId) return true;               // same unit = exclude
-            if (areUnitsLinked(uId, s.unitId)) return false; // linked = allow
+            if (areUnitsLinked(uId, s.unitId, date)) return false; // linked = allow (unless independent day)
             // EMS and fire are cross-compatible — allow
             var _EMS = ['a139','Mu13'];
             if ((_EMS.indexOf(uId)>=0) !== (_EMS.indexOf(s.unitId)>=0)) return false;
@@ -4219,8 +4269,8 @@ function confirmSignUp() {
     // Fire ↔ EMS is always allowed (different operations, same member)
     var existingIsEMS = _EMS_IDS.indexOf(_es.unitId) >= 0;
     if (newIsEMS !== existingIsEMS) continue;
-    // Within the same category: only allow linked pairs (e.g. E131+Tk13)
-    if (!areUnitsLinked(unitId, _es.unitId)) {
+    // Within the same category: only allow linked pairs (e.g. E131+Tk13) — but not on independent days
+    if (!areUnitsLinked(unitId, _es.unitId, date)) {
       showToast('\u26a0\ufe0f Conflict: already signed up for '+UNIT_LABELS[_es.unitId]+' \u2014 '+_es.position+'.');
       return;
     }
@@ -4306,7 +4356,7 @@ function officerAssign(date, unitId) {
     var newIsEMS = EMS_UNIT_IDS.indexOf(unitId) >= 0;
     var shiftIsEMS = EMS_UNIT_IDS.indexOf(s.unitId) >= 0;
     if (newIsEMS !== shiftIsEMS) return false; // different categories — OK
-    return s.date===date && s.memberId===memberId && (s.unitId === unitId || !areUnitsLinked(unitId, s.unitId));
+    return s.date===date && s.memberId===memberId && (s.unitId === unitId || !areUnitsLinked(unitId, s.unitId, date));
   });
   if (alreadyAny) {
     var m = (state.roster||[]).find(function(r){ return r.id===memberId; });
