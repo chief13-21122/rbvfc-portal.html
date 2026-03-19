@@ -4547,75 +4547,141 @@ function notifyUnderstaffedDay(date) {
 
 // ── CLOCK IN / CANCEL / REMOVE ────────────────────────────────
 function _canClockInNow(shiftDate, shiftStartHHMM) {
-  // Rule: can only clock in on the shift date, and no more than 5 minutes before start time
+  // Only restriction: must be the shift date. Time restriction removed — handled by clock-in modal.
   var today = new Date().toISOString().slice(0, 10);
-  if (shiftDate && shiftDate !== today) return false; // must be today
-  if (!shiftStartHHMM) return true; // no start time — allow
-  var sh = parseInt(shiftStartHHMM.slice(0, 2));
-  var sm = parseInt(shiftStartHHMM.slice(2) || '0');
-  var now = new Date();
-  var nowMins = now.getHours() * 60 + now.getMinutes();
-  var startMins = sh * 60 + sm;
-  if (nowMins < startMins - 5) {
-    return false; // more than 5 minutes early
-  }
+  if (shiftDate && shiftDate !== today) return false;
   return true;
 }
 
 function staffClockIn(elOrId) {
-  // Clear stale sessions from other users (kiosk safety)
   if (state.currentSession && state.currentSession.userId !== state.currentUserId) {
     state.currentSession = null; save();
   }
   var shiftId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
   if (!shift) return;
-  // Enforce: today only, no more than 5 minutes early
-  if (!_canClockInNow(shift.date, shift.shiftStart)) {
-    var today = new Date().toISOString().slice(0, 10);
-    if (shift.date !== today) {
-      showToast('\u26a0\ufe0f You can only clock in on the day of your shift.');
-    } else {
-      var sh = parseInt((shift.shiftStart||'0700').slice(0,2));
-      var sm = parseInt((shift.shiftStart||'0700').slice(2)||'0');
-      var timeStr = (sh%12||12) + ':' + (sm<10?'0':'') + sm + ' ' + (sh>=12?'PM':'AM');
-      showToast('\u26a0\ufe0f Clock-in opens 5 minutes before shift start (' + timeStr + ').');
-    }
+  if (!_canClockInNow(shift.date, null)) {
+    showToast('\u26a0\ufe0f You can only clock in on the day of your shift.');
     return;
   }
-  var now = new Date();
-  shift.clockedIn = true;
-  shift.clockedInAt = now.toISOString();
-  shift.status = 'active';
+  openClockInModal(shift);
+}
 
-  // Mirror into currentSession so Clock tab shows clocked-in state
+function openClockInModal(shift) {
+  var old = document.getElementById('clockInConfirmModal'); if (old) old.remove();
+  var now = new Date();
+  var nowHH = now.getHours(), nowMM = now.getMinutes();
+  var nowStr = (nowHH%12||12)+':'+(nowMM<10?'0':'')+nowMM+' '+(nowHH>=12?'PM':'AM');
+  var shStartStr = '';
+  if (shift.shiftStart) {
+    var sh=parseInt(shift.shiftStart.slice(0,2)), sm=parseInt(shift.shiftStart.slice(2)||'0');
+    shStartStr = (sh%12||12)+':'+(sm<10?'0':'')+sm+' '+(sh>=12?'PM':'AM');
+  }
+  var modal = document.createElement('div');
+  modal.id = 'clockInConfirmModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:3000;display:flex;align-items:flex-end;justify-content:center;';
+  modal.innerHTML =
+    '<div style="background:#1A1A1A;border:1px solid #27AE60;border-top:4px solid #27AE60;border-radius:20px 20px 0 0;padding:24px;width:100%;max-width:420px;box-sizing:border-box;">' +
+    '<div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 20px;"></div>' +
+    '<div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:700;letter-spacing:1px;color:#27AE60;margin-bottom:4px;">&#128336; Clock In</div>' +
+    '<div style="font-size:14px;color:#CCC;margin-bottom:20px;">' + (UNIT_LABELS[shift.unitId]||shift.unitId) + (shift.position ? ' &mdash; ' + shift.position : '') + '</div>' +
+    '<div style="background:#111;border:1px solid #2A2A2A;border-radius:10px;padding:14px;margin-bottom:16px;">' +
+      '<div style="font-size:11px;color:#666;margin-bottom:6px;">Recorded start time</div>' +
+      '<div style="font-size:26px;font-weight:700;font-family:monospace;color:#27AE60;" id="ciNowDisplay">' + nowStr + '</div>' +
+      (shStartStr ? '<div style="font-size:11px;color:#555;margin-top:4px;">Scheduled: ' + shStartStr + '</div>' : '') +
+    '</div>' +
+    '<div style="margin-bottom:20px;">' +
+      '<div style="font-size:12px;font-weight:700;color:#F0F0F0;margin-bottom:6px;">Already on duty? <span style="color:#555;font-weight:400;">(optional)</span></div>' +
+      '<div style="font-size:11px;color:#666;margin-bottom:10px;">Select how long you\u2019ve already been on shift. Start time adjusts back — cannot be set to a future time.</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px;">' +
+        '<button onclick="ciSelectBack(0)" class="ci-back-btn ci-sel" data-hrs="0" style="background:#1A3A1A;border:2px solid #27AE60;color:#27AE60;border-radius:8px;padding:9px 4px;cursor:pointer;font-size:13px;font-weight:700;">Now</button>' +
+        '<button onclick="ciSelectBack(0.5)" class="ci-back-btn" data-hrs="0.5" style="background:#1A1A1A;border:1px solid #333;color:#888;border-radius:8px;padding:9px 4px;cursor:pointer;font-size:13px;">30 min</button>' +
+        '<button onclick="ciSelectBack(1)" class="ci-back-btn" data-hrs="1" style="background:#1A1A1A;border:1px solid #333;color:#888;border-radius:8px;padding:9px 4px;cursor:pointer;font-size:13px;">1 hr</button>' +
+        '<button onclick="ciSelectBack(2)" class="ci-back-btn" data-hrs="2" style="background:#1A1A1A;border:1px solid #333;color:#888;border-radius:8px;padding:9px 4px;cursor:pointer;font-size:13px;">2 hrs</button>' +
+        '<button onclick="ciSelectBack(3)" class="ci-back-btn" data-hrs="3" style="background:#1A1A1A;border:1px solid #333;color:#888;border-radius:8px;padding:9px 4px;cursor:pointer;font-size:13px;">3 hrs</button>' +
+        '<button onclick="ciSelectBack(4)" class="ci-back-btn" data-hrs="4" style="background:#1A1A1A;border:1px solid #333;color:#888;border-radius:8px;padding:9px 4px;cursor:pointer;font-size:13px;">4 hrs</button>' +
+        '<button onclick="ciSelectBack(6)" class="ci-back-btn" data-hrs="6" style="background:#1A1A1A;border:1px solid #333;color:#888;border-radius:8px;padding:9px 4px;cursor:pointer;font-size:13px;">6 hrs</button>' +
+        '<button onclick="ciSelectBack(8)" class="ci-back-btn" data-hrs="8" style="background:#1A1A1A;border:1px solid #333;color:#888;border-radius:8px;padding:9px 4px;cursor:pointer;font-size:13px;">8 hrs</button>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span style="font-size:12px;color:#666;">Custom:</span>' +
+        '<input type="number" id="ciCustomHrs" min="0" max="24" step="0.5" placeholder="e.g. 1.5" oninput="ciCustomInput(this.value)" style="width:80px;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:6px 8px;color:#F0F0F0;font-size:13px;">' +
+        '<span style="font-size:11px;color:#555;">hours already on duty</span>' +
+      '</div>' +
+    '</div>' +
+    '<input type="hidden" id="ciShiftId" value="' + shift.id + '">' +
+    '<input type="hidden" id="ciBackHours" value="0">' +
+    '<div style="display:flex;gap:10px;">' +
+      '<button onclick="document.getElementById(\'clockInConfirmModal\').remove()" style="flex:1;background:none;border:1px solid #333;color:#888;border-radius:10px;padding:14px;cursor:pointer;font-size:15px;">Cancel</button>' +
+      '<button onclick="confirmStaffClockIn()" style="flex:2;background:#27AE60;border:none;color:#FFF;border-radius:10px;padding:14px;cursor:pointer;font-size:15px;font-weight:700;">&#128336; Clock In</button>' +
+    '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+}
+
+function ciSelectBack(hrs) {
+  document.getElementById('ciBackHours').value = hrs;
+  document.querySelectorAll('.ci-back-btn').forEach(function(b) {
+    var sel = parseFloat(b.getAttribute('data-hrs')) === hrs;
+    b.style.background = sel ? '#1A3A1A' : '#1A1A1A';
+    b.style.border = sel ? '2px solid #27AE60' : '1px solid #333';
+    b.style.color = sel ? '#27AE60' : '#888';
+  });
+  var c = document.getElementById('ciCustomHrs'); if (c) c.value = hrs || '';
+  _ciUpdateDisplay(hrs);
+}
+
+function ciCustomInput(val) {
+  var hrs = Math.max(0, Math.min(24, parseFloat(val) || 0));
+  document.getElementById('ciBackHours').value = hrs;
+  document.querySelectorAll('.ci-back-btn').forEach(function(b){
+    b.style.background='#1A1A1A'; b.style.border='1px solid #333'; b.style.color='#888';
+  });
+  _ciUpdateDisplay(hrs);
+}
+
+function _ciUpdateDisplay(backHrs) {
+  var d = document.getElementById('ciNowDisplay'); if (!d) return;
+  var t = new Date(Date.now() - backHrs * 3600000);
+  var h = t.getHours(), m = t.getMinutes();
+  d.textContent = (h%12||12)+':'+(m<10?'0':'')+m+' '+(h>=12?'PM':'AM');
+  d.style.color = backHrs > 0 ? '#F5A623' : '#27AE60';
+}
+
+function confirmStaffClockIn() {
+  var shiftId   = (document.getElementById('ciShiftId')||{}).value||'';
+  var backHours = parseFloat((document.getElementById('ciBackHours')||{}).value||0)||0;
+  var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
+  if (!shift) return;
+  var now = new Date();
+  var startMs = now.getTime() - backHours * 3600000;
+  var startTime = new Date(startMs);
+  // Clamp: don't go before the shift's scheduled start
+  if (shift.shiftStart) {
+    var today = now.toISOString().slice(0,10);
+    var sh = parseInt(shift.shiftStart.slice(0,2)), sm = parseInt(shift.shiftStart.slice(2)||'0');
+    var sched = new Date(today+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00');
+    if (startTime < sched) startTime = sched;
+  }
+  shift.clockedIn=true; shift.clockedInAt=startTime.toISOString(); shift.status='active';
   if (!state.currentSession) {
-    var desc = (UNIT_LABELS[shift.unitId]||shift.unitId) + (shift.position ? ' · ' + shift.position : '');
-    state.currentSession = {
-      id:        'sess_' + Date.now(),
-      userId:    state.currentUserId,
-      start:     now.toISOString(),
-      activity:  'duty',
-      desc:      desc,
-      shiftId:   shift.id,   // link back so clockOut can sync
-      end:       null,
-      duration:  null
-    };
-    // Start clock tab timer
-    if (typeof _clockTimerInterval !== 'undefined') {
+    var desc = (UNIT_LABELS[shift.unitId]||shift.unitId)+(shift.position?' \u00b7 '+shift.position:'');
+    state.currentSession = { id:'sess_'+Date.now(), userId:state.currentUserId, start:startTime.toISOString(),
+      activity:'duty', desc:desc, shiftId:shift.id, end:null, duration:null };
+    if (typeof _clockTimerInterval!=='undefined') {
       if (_clockTimerInterval) clearInterval(_clockTimerInterval);
       _clockTimerInterval = setInterval(tickClockTimer, 1000);
     }
-    try { updateClockUI(true); } catch(e){}
-    try { updateClockStats(); } catch(e){}
-    try { updateStats(); } catch(e){}
+    try{updateClockUI(true);}catch(e){} try{updateClockStats();}catch(e){} try{updateStats();}catch(e){}
   }
-
   save();
-  renderStaffingBoard();
-  renderMyShifts();
-  showToast('✅ Clocked in for '+UNIT_LABELS[shift.unitId]+'!');
+  var mo = document.getElementById('clockInConfirmModal'); if (mo) mo.remove();
+  renderStaffingBoard(); renderMyShifts();
+  var bMsg = backHours>0 ? ' (started '+backHours+(backHours===1?' hr':' hrs')+' ago)' : '';
+  showToast('\u2705 Clocked in for '+UNIT_LABELS[shift.unitId]+bMsg+'!');
 }
+
+
 function editShift(elOrId) {
   var shiftId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
@@ -8535,7 +8601,7 @@ function classClockIn(classId, sessionDate) {
     if (sessionDate !== today) {
       showToast('⚠️ You can only clock in on the day of the class.');
     } else {
-      showToast('⚠️ Clock-in opens 5 minutes before class start time.');
+      showToast('⚠️ Class has not started yet — clock in when the class begins.');
     }
     return;
   }
