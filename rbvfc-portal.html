@@ -1195,8 +1195,8 @@ function initEmergencyTab() {
   var canLog = isOfficer || isDriverRank(member);
   // Pending CAD: hidden from Administrative/Auxiliary members
   var cadCard = document.getElementById('cadPendingCard');
-  if (cadCard) cadCard.style.display = isAdmin ? 'none' : 'block';
-  if (!isAdmin) renderCadPendingCalls();
+  if (cadCard) cadCard.style.display = (isOfficer || canLog) ? 'block' : 'none';
+  renderCadPendingCalls();
   // Pre-check active units in the responding units grid
   var activeU = getActiveUnits();
   Object.keys(UNIT_LABELS).forEach(function(u) {
@@ -2176,6 +2176,108 @@ function buildCompanyYearReportBody(yr, archive) {
     +memberLines+nl+nl
     +'Randallstown Volunteer Fire Company No. 13'+nl+'LOSAP Management Portal';
 }
+function buildMonthlyEmailBody(m, monthName, yr, monthPts, ytdPts, monthResp, monthHours, monthActs) {
+  var nl = '\n';
+  var status = ytdPts >= 50
+    ? '\u2705 On track to qualify this year!'
+    : Math.max(0, 50 - ytdPts) + ' points still needed to qualify';
+  var cats = {meeting:'Meetings',training:'Training',drill:'Drills',duty:'Duty',
+    response:'Emergency Responses',collateral:'Collateral Duty',other:'Other'};
+  var grouped = {};
+  (monthActs||[]).forEach(function(a){
+    var cat = a.category||'other';
+    if (!grouped[cat]) grouped[cat] = {pts:0,count:0};
+    grouped[cat].pts += (a.pts||0); grouped[cat].count++;
+  });
+  if (monthResp > 0) {
+    if (!grouped.response) grouped.response = {pts:0,count:0};
+    grouped.response.count += monthResp; grouped.response.pts += monthResp;
+  }
+  var breakdown = '';
+  Object.keys(grouped).forEach(function(cat){
+    var g = grouped[cat];
+    if (g.count > 0) breakdown += '    '+(cats[cat]||cat)+': '+g.count+'x = '+g.pts+' pt'+(g.pts!==1?'s':'')+nl;
+  });
+  return 'Dear '+m.first+' '+m.last+','+nl+nl
+    +'Here is your RBVFC LOSAP report for '+monthName+' '+yr+':'+nl+nl
+    +'——— THIS MONTH ———'+nl
+    +'  Points Earned:    '+monthPts+nl
+    +'  Responses:        '+monthResp+nl
+    +'  Duty Hours:       '+parseFloat(monthHours).toFixed(1)+nl
+    +(breakdown ? (nl+'  Activity Breakdown:'+nl+breakdown) : '')
+    +nl+'——— YEAR TO DATE ('+yr+') ———'+nl
+    +'  Total Points:     '+ytdPts+' / 50 required'+nl
+    +'  Status:           '+status+nl+nl
+    +'Thank you for your continued service to the Riviera Beach community.'+nl+nl
+    +'— RBVFC LOSAP Member Portal'+nl
+    +'Riviera Beach Volunteer Fire Company No. 13';
+}
+
+function updateMonthlyEmailStatus() {
+  var el = document.getElementById('monthlyEmailStatus');
+  if (!el) return;
+  var roster = (state.roster||[]).filter(function(m){ return m.email && m.active!==false; });
+  if (state.lastMonthlyEmailMonth) {
+    el.innerHTML = '<span style="color:#27AE60;font-weight:700;">✅ Last sent: '+state.lastMonthlyEmailMonth+'</span>'
+      +' &nbsp;&middot;&nbsp; <span style="color:#888;">'+roster.length+' member(s) have email addresses</span>';
+  } else {
+    el.innerHTML = '<span style="color:#888;">Not yet sent this month &middot; '+roster.length+' member(s) with email addresses</span>';
+  }
+}
+
+function previewMonthlyEmail() {
+  var now = new Date();
+  var pm = now.getMonth()===0 ? 11 : now.getMonth()-1;
+  var pmYr = now.getMonth()===0 ? now.getFullYear()-1 : now.getFullYear();
+  var mn = ['January','February','March','April','May','June','July','August','September','October','November','December'][pm];
+  var ms = pmYr+'-'+String(pm+1).padStart(2,'0');
+  var uid = state.currentUserId;
+  var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+  if (!m) { showToast('Log in to preview.'); return; }
+  var acts = (state.losapActivities||[]).filter(function(a){ return a.memberId===uid&&a.date&&a.date.startsWith(ms); });
+  var hrs = (state.sessions||[]).filter(function(s){ return s.userId===uid&&s.start&&s.start.startsWith(ms); }).reduce(function(a,ss){ return a+(ss.duration||0)/3600; },0);
+  var resp = (state.emergencyResponses||[]).filter(function(r){ return r.members&&r.members.indexOf(uid)>-1&&r.date&&r.date.startsWith(ms); }).length;
+  var pts = acts.reduce(function(a,x){ return a+(x.pts||0); },0)+resp;
+  var ytd = (state.losapActivities||[]).filter(function(a){ return a.memberId===uid&&a.date&&a.date.startsWith(String(now.getFullYear())); }).reduce(function(a,x){ return a+(x.pts||0); },0);
+  var body = buildMonthlyEmailBody(m, mn, pmYr, pts, ytd, resp, hrs, acts);
+  var old = document.getElementById('monthlyPreviewModal'); if(old) old.remove();
+  var modal = document.createElement('div');
+  modal.id = 'monthlyPreviewModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var inner = document.createElement('div');
+  inner.style.cssText = 'background:#1A1A1A;border:1px solid #333;border-radius:14px;padding:24px;width:100%;max-width:500px;max-height:85vh;overflow-y:auto;';
+  var hdr = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">'
+    +'<div style="font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:700;color:#F0F0F0;">Email Preview</div></div>';
+  var closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '&#215;';
+  closeBtn.style.cssText = 'background:none;border:none;color:#666;cursor:pointer;font-size:24px;float:right;';
+  closeBtn.onclick = function(){ document.getElementById('monthlyPreviewModal').remove(); };
+  inner.innerHTML = hdr
+    +'<div style="font-size:11px;color:#F5A623;margin-bottom:4px;">To: '+(m.email||'(no email on file)')+'</div>'
+    +'<div style="font-size:11px;color:#888;margin-bottom:12px;">Subject: RBVFC LOSAP Monthly Update — '+mn+' '+pmYr+'</div>'
+    +'<pre id="monthlyPreviewBody" style="font-size:12px;color:#CCC;white-space:pre-wrap;line-height:1.6;background:#111;padding:12px;border-radius:8px;"></pre>'
+    +'<div style="margin-top:16px;font-size:11px;color:#555;text-align:center;">Sent on the 1st of each month to all active members with email addresses.</div>';
+  inner.querySelector('#monthlyPreviewBody').textContent = body;
+  var headerDiv = inner.querySelector('div');
+  headerDiv.insertBefore(closeBtn, headerDiv.firstChild);
+  modal.appendChild(inner);
+  document.body.appendChild(modal);
+}
+
+function confirmSendMonthlyEmails() {
+  var roster = (state.roster||[]).filter(function(m){ return m.email&&m.active!==false; });
+  if (!roster.length) { showToast('⚠️ No members have email addresses on file.'); return; }
+  if (!state.sheetWebhookUrl) { showToast('⚠️ Configure Apps Script URL first.'); return; }
+  var lastSent = state.lastMonthlyEmailMonth;
+  var now = new Date();
+  var thisMonth = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  var msg = 'Send monthly LOSAP reports to '+roster.length+' member(s)?';
+  if (lastSent===thisMonth) msg += '\n\nAlready sent this month ('+lastSent+'). Send again?';
+  if (!confirm(msg)) return;
+  state.lastMonthlyEmailMonth = null;
+  sendMonthlyEmails();
+}
+
 function checkMonthlyEmail() {
   var url = state.sheetWebhookUrl;
   if (!url) return;
@@ -2210,32 +2312,22 @@ function sendMonthlyEmails() {
     var monthHours= (state.sessions||[]).filter(function(s){ return s.memberId===m.id && s.date && s.date.startsWith(monthStr); }).reduce(function(a,s){ return a+(parseFloat(s.hours)||0); },0);
     var monthResp = (state.emergencyResponses||[]).filter(function(r){ return r.members&&r.members.indexOf(m.id)>-1&&r.date&&r.date.startsWith(monthStr); }).length;
     var monthPts  = monthActs.reduce(function(a,x){ return a+(x.pts||0); },0) + monthResp;
-    var nl='\n';
     emails.push({
       to: m.email,
       subject: 'RBVFC LOSAP Monthly Update - '+monthName+' '+prevMonthYr,
-      body: 'Dear '+m.first+' '+m.last+','+nl+nl
-        +'Here is your RBVFC LOSAP update for '+monthName+' '+prevMonthYr+':'+nl+nl
-        +'  Points This Month:     '+monthPts+nl
-        +'  Points Year-to-Date:   '+ytdPts+' / 50 required'+nl
-        +'  Responses This Month:  '+monthResp+nl
-        +'  Duty Hours This Month: '+parseFloat(monthHours).toFixed(1)+nl
-        +'  Status:                '+(ytdPts>=50?'On track to qualify':Math.max(0,50-ytdPts)+' pts still needed')+nl+nl
-        +'Thank you for your continued service.'+nl+nl
-        +'Randallstown Volunteer Fire Company No. 13'
+      body: buildMonthlyEmailBody(m, monthName, prevMonthYr, monthPts, ytdPts, monthResp, monthHours, monthActs)
     });
   });
 
+  var _n = emails.length;
   fetch(url, {
     method: 'POST',
-    mode: 'no-cors',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ action: 'sendEmails', emails: emails })
-  }).catch(function(err){ console.warn('Monthly email failed:', err); });
-
-  state.lastMonthlyEmailMonth = monthKey;
-  save();
-  console.log('Monthly emails queued: '+emails.length);
+  })
+  .then(function(){ state.lastMonthlyEmailMonth = monthKey; save(); updateMonthlyEmailStatus(); showToast('✅ Monthly reports sent to '+_n+' member(s)!'); })
+  .catch(function(err){ showToast('⚠️ Email send failed: '+(err.message||'check Apps Script URL')); });
+  if (!state.lastMonthlyEmailMonth) { state.lastMonthlyEmailMonth = monthKey; save(); }
 }
 
 function archiveAndResetYear() {
@@ -2528,6 +2620,9 @@ function onAdminTabShow() {
   renderRankEditor();
   // Render unit config checkboxes (no-op if not present)
   if (typeof renderUnitConfigCard === 'function') renderUnitConfigCard();
+
+  // Update monthly email status panel
+  updateMonthlyEmailStatus();
 
   // Role-based card visibility within Admin tab
   var uid2 = state.currentUserId;
@@ -7435,6 +7530,9 @@ function _fetchCadCalls(url, fromAdmin) {
       return r.json();
     })
     .then(function(data) {
+      // Accept {calls:[...]}, direct array, or {results:[...]}
+      // If data has 'ok:false' it's an error response from Apps Script
+      if (data && data.ok === false) throw new Error(data.error || 'Script error');
       var calls = Array.isArray(data) ? data : (data.calls || data.results || []);
       // Merge, avoiding duplicate incidents
       var existing = (state.cadPendingCalls || []);
@@ -8349,6 +8447,23 @@ function renderMyClassesToday() {
   }).join('');
 }
 
+function classToCalDetails(cls, sessionDate) {
+  var sh = cls.startTime ? parseInt(cls.startTime.slice(0,2)) : 8;
+  var sm = cls.startTime ? parseInt(cls.startTime.slice(2)||'0') : 0;
+  var eh = cls.endTime ? parseInt(cls.endTime.slice(0,2)) : sh + 2;
+  var em = cls.endTime ? parseInt(cls.endTime.slice(2)||'0') : 0;
+  var hours = Math.max(1, (eh + em/60) - (sh + sm/60));
+  return {
+    title: 'RBVFC Training — ' + cls.name,
+    date: sessionDate,
+    startHH: (sh < 10 ? '0' : '') + sh,
+    startMM: (sm < 10 ? '0' : '') + sm,
+    hours: hours,
+    location: cls.location || 'Riviera Beach VFC, Station 13',
+    description: (cls.description || '') + (cls.instructor ? '\nInstructor: ' + cls.instructor : '')
+  };
+}
+
 function classClockIn(classId, sessionDate) {
   // Clear stale sessions from other users (kiosk safety)
   if (state.currentSession && state.currentSession.userId !== state.currentUserId) {
@@ -8413,7 +8528,9 @@ function classClockIn(classId, sessionDate) {
   try { updateClockStats(); } catch(e){}
   try { renderMyClassesToday(); } catch(e){}
   try { updateStats(); } catch(e){}
-  showToast('📚 Clocked in to '+cls.name);
+  // Send calendar invite for this class session
+  sendCalendarInvite(uid, classToCalDetails(cls, sessionDate));
+  showToast('📚 Clocked in to '+cls.name+'! Calendar invite sent!');
 }
 
 function classClockOut() {
@@ -11247,6 +11364,25 @@ function applyBulkEdit() {
         </div>
 
       </div><!-- end dataMgmtCard -->
+
+      <!-- Monthly Email Reports -->
+      <div class="card" id="monthlyEmailCard">
+        <div class="card-header">
+          <div class="icon">&#128140;</div><h2>Monthly LOSAP Reports</h2>
+        </div>
+        <div style="font-size:13px;color:#888;margin-bottom:14px;line-height:1.5;">
+          On the <strong style="color:#F0F0F0;">1st of each month</strong>, every active member with an email address automatically receives their personal LOSAP summary for the previous month.
+        </div>
+        <div id="monthlyEmailStatus" style="font-size:12px;color:#888;margin-bottom:14px;padding:10px;background:#181818;border:1px solid #2A2A2A;border-radius:8px;">Loading&hellip;</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+          <button class="btn btn-secondary btn-sm" onclick="previewMonthlyEmail()">&#128065; Preview My Report</button>
+          <button class="btn btn-primary btn-sm" onclick="confirmSendMonthlyEmails()">&#128140; Send Reports Now</button>
+        </div>
+        <div style="font-size:11px;color:#555;line-height:1.6;border-top:1px solid #2A2A2A;padding-top:10px;">
+          <strong style="color:#888;">Requirements:</strong> Apps Script URL must be configured and members must have email addresses on file.<br>
+          <strong style="color:#888;">Auto-send:</strong> Fires on the 1st of each month when any admin opens the portal.
+        </div>
+      </div>
 
 
       <!-- Notifications -->
