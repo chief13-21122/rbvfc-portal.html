@@ -4092,38 +4092,32 @@ function renderStaffingBoard() {
         if (isLinked) html += '<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Assign to '+uLabel+'</div>';
         var eligible = (state.roster||[]).filter(function(m){ return m.active!==false; })
           .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); });
-        html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">';
-        html += '<select id="assignMember_'+uId+'" style="flex:1;min-width:130px;background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
-        html += '<option value="">\u2014 Assign Member \u2014</option>';
-        eligible.forEach(function(m) {
-          var alreadyOnDate = (state.staffingShifts||[]).some(function(s){
-            if (s.date !== date || s.memberId !== m.id) return false;
-            if (s.unitId === uId) return true;               // same unit = exclude
-            if (areUnitsLinked(uId, s.unitId, date)) return false; // linked = allow (unless independent day)
-            // EMS and fire are cross-compatible — allow
-            var _EMS = ['a139','Mu13'];
-            if ((_EMS.indexOf(uId)>=0) !== (_EMS.indexOf(s.unitId)>=0)) return false;
-            return true; // same category, not linked = conflict
-          });
-          if (!alreadyOnDate) html += '<option value="'+m.id+'">'+m.last+', '+m.first+(isProbationary(m)?' [PROB]':'')+' ('+(m.ranks&&m.ranks.length?m.ranks.join('/'):(m.rank||'\u2014'))+')</option>';
+        // Build a lookup of members already on ANY shift this date (one shift only)
+        var assignedToday = {};
+        (state.staffingShifts||[]).forEach(function(s){
+          if (s.date === date && s.memberId) assignedToday[s.memberId] = s.unitId;
         });
-        html += '</select>';
-        html += '<select id="assignPos_'+uId+'" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
+        html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">';
+        // ── Position dropdown (LEFT) ──
+        html += '<select id="assignPos_'+uId+'" onchange="updateAssignMemberDropdown(\''+uId+'\',\''+date+'\')" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
+        html += '<option value="">\u2014 Position \u2014</option>';
         uPos.forEach(function(pos, i) {
           var taken = uShifts.some(function(s){ return s.positionIndex===i && s.memberId; });
-          // Always include in dropdown — value is the ORIGINAL index so officerAssign maps correctly
-          // Show filled positions as disabled so officer can see full picture
           html += '<option value="'+i+'"'+(taken?' disabled style="color:#444;"':'')+'>'+pos+(taken?' (filled)':'')+'</option>';
         });
         html += '<option value="999">\uD83D\uDCDA Student</option>';
-        html += '</select></div>';
+        html += '</select>';
+        // ── Member dropdown (RIGHT) — filtered by position on change ──
+        html += '<select id="assignMember_'+uId+'" style="flex:1;min-width:130px;background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
+        html += '<option value="">\u2014 Select Position First \u2014</option>';
+        html += '</select>';
+        html += '</div>';
         html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">';
         html += '<label style="font-size:11px;color:#666;">Start:</label>';
         html += '<input type="time" id="assignStart_'+uId+'" value="07:00" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:100px;">';
         html += '<label style="font-size:11px;color:#666;">Hours:</label>';
         html += '<input type="number" id="assignHours_'+uId+'" value="24" min="1" max="72" step="0.5" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:70px;">';
         html += '<button class="btn btn-sm btn-primary" onclick="officerAssign(\''+date+'\',\''+uId+'\')">Assign</button>';
-        html += '<button onclick="signUpAllForUnit(\"'+date+'\",\"'+uId+'\")" style="margin-left:6px;background:#1A1A3A;border:1px solid #3498DB;color:#3498DB;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:10px;font-weight:700;">&#128101; Sign Up All</button>';
         html += '</div></div>';
       });
     }
@@ -4264,43 +4258,14 @@ function confirmSignUp() {
   // Block sign-up for past dates
   var today = new Date().toISOString().slice(0,10);
   if (date < today) { showToast('\u26A0\uFE0F Cannot sign up for a past date.'); return; }
-  // Overlap check: allow linked units (e.g. E131+Tk13) and cross-type fire+EMS combos
-  var _EMS_IDS = ['a139', 'Mu13'];
-  var newIsEMS = _EMS_IDS.indexOf(unitId) >= 0;
-  var existingShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.memberId===uid; });
-  for (var _oi=0; _oi<existingShifts.length; _oi++) {
-    var _es = existingShifts[_oi];
-    if (_es.unitId === unitId) {
-      showToast('\u26a0\ufe0f Already signed up for a position on '+UNIT_LABELS[unitId]+' this day.');
-      return;
+  // Time-overlap check — can't be on two shifts at the same time
+  var _overlapSh = _memberHasOverlappingShift(uid, date, start, hours);
+  if (_overlapSh) {
+    if (_overlapSh.unitId === unitId) {
+      showToast('\u26a0\ufe0f Already signed up for a position on '+UNIT_LABELS[unitId]+'.');
+    } else {
+      showToast('\u26a0\ufe0f Conflict: already on '+(UNIT_LABELS[_overlapSh.unitId]||_overlapSh.unitId)+' at that time.');
     }
-    // Fire ↔ EMS is always allowed (different operations, same member)
-    var existingIsEMS = _EMS_IDS.indexOf(_es.unitId) >= 0;
-    if (newIsEMS !== existingIsEMS) continue;
-    // Within the same category: only allow linked pairs (e.g. E131+Tk13) — but not on independent days
-    if (!areUnitsLinked(unitId, _es.unitId, date)) {
-      showToast('\u26a0\ufe0f Conflict: already signed up for '+UNIT_LABELS[_es.unitId]+' \u2014 '+_es.position+'.');
-      return;
-    }
-  }
-
-  var modal = document.getElementById('signUpModal');
-  var editId = modal && modal.dataset.editId;
-  if (editId) {
-    // Edit mode: update existing shift
-    var existing = (state.staffingShifts||[]).find(function(s){ return s.id===editId; });
-    if (existing) {
-      existing.start = start; existing.hours = hours;
-      // Delete old invite and send updated one
-      if (existing.calEventId) deleteCalendarInvite(existing.calEventId);
-      sendCalendarInvite(existing.memberId, shiftToCalDetails(existing));
-    }
-    if (modal) modal.dataset.editId = '';
-    save();
-    closeSignUpModal();
-    renderStaffingBoard();
-    renderMyShifts();
-    showToast('\u2705 Shift updated. Updated calendar invite sent!');
     return;
   }
   if (!Array.isArray(state.staffingShifts)) state.staffingShifts = [];
@@ -4326,6 +4291,76 @@ function confirmSignUp() {
 }
 
 // ── OFFICER ASSIGN ───────────────────────────────────────────
+function _shiftsOverlap(s1Start, s1Hours, s2Start, s2Hours) {
+  // Convert HHMM string to minutes since midnight
+  function toMins(hhmm) {
+    var h = parseInt((hhmm||'0700').slice(0,2));
+    var m = parseInt((hhmm||'0700').slice(2,4)||'0');
+    return h*60 + m;
+  }
+  var a0 = toMins(s1Start);
+  var a1 = a0 + (parseFloat(s1Hours)||24)*60;
+  var b0 = toMins(s2Start);
+  var b1 = b0 + (parseFloat(s2Hours)||24)*60;
+  // Handle shifts crossing midnight — wrap a1/b1 if needed
+  // Overlap if the intervals intersect
+  return a0 < b1 && b0 < a1;
+}
+
+function _memberHasOverlappingShift(memberId, date, newStart, newHours) {
+  // Returns the conflicting shift (or null) for a proposed shift
+  return (state.staffingShifts||[]).find(function(s) {
+    if (s.date !== date || s.memberId !== memberId) return false;
+    return _shiftsOverlap(s.shiftStart||'0700', s.shiftHours||24, newStart||'0700', newHours||24);
+  }) || null;
+}
+
+function updateAssignMemberDropdown(unitId, date) {
+  var posSel  = document.getElementById('assignPos_'    + unitId);
+  var memSel  = document.getElementById('assignMember_' + unitId);
+  if (!posSel || !memSel) return;
+
+  var posVal = posSel.value;
+  var positions = UNIT_POSITIONS[unitId] || [];
+  var posName = posVal === '999' ? 'Student'
+              : (posVal !== '' ? (positions[parseInt(posVal)] || '') : '');
+
+  memSel.innerHTML = '';
+  if (!posVal) {
+    memSel.innerHTML = '<option value="">\u2014 Select Position First \u2014</option>';
+    return;
+  }
+
+  // Get the proposed shift time from the board inputs
+  var startEl = document.getElementById('assignStart_' + unitId);
+  var hoursEl = document.getElementById('assignHours_' + unitId);
+  var propStart = startEl ? (startEl.value||'07:00').replace(':','') : '0700';
+  var propHours = hoursEl ? parseFloat(hoursEl.value||24) : 24;
+
+  var opts = '<option value="">\u2014 Assign Member \u2014</option>';
+  var count = 0;
+  (state.roster||[])
+    .filter(function(m){ return m.active !== false; })
+    .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
+    .forEach(function(m) {
+      // Exclude: overlapping shift exists for this member on this date
+      if (_memberHasOverlappingShift(m.id, date, propStart, propHours)) return;
+      // Exclude: doesn't meet rank requirement for this position
+      if (posName !== 'Student' && !memberMeetsRank(m, posName)) return;
+      // Exclude: ineligible ride report (can only be Student)
+      if (m.rideReport === 'ineligible' && posName !== 'Student') return;
+      var rankStr = (m.ranks && m.ranks.length) ? m.ranks.join('/') : (m.rank || '\u2014');
+      opts += '<option value="' + m.id + '">' + m.last + ', ' + m.first
+           + (isProbationary(m) ? ' [PROB]' : '') + ' (' + rankStr + ')</option>';
+      count++;
+    });
+
+  if (!count) {
+    opts += '<option value="" disabled>No eligible members</option>';
+  }
+  memSel.innerHTML = opts;
+}
+
 function officerAssign(date, unitId) {
   var memberSel = document.getElementById('assignMember_' + unitId);
   var posSel    = document.getElementById('assignPos_'    + unitId);
@@ -4357,23 +4392,14 @@ function officerAssign(date, unitId) {
   });
   if (taken) { showToast('\u26a0\ufe0f ' + posName + ' is already filled. Choose a different position.'); return; }
 
-  // Check for conflicts — allow linked units (e131 ↔ Tk13), block everything else
-  var alreadyAny = (state.staffingShifts||[]).find(function(s){
-    // EMS compatible with fire — no cross-type conflict
-    var EMS_UNIT_IDS = ['a139', 'Mu13'];
-    var newIsEMS = EMS_UNIT_IDS.indexOf(unitId) >= 0;
-    var shiftIsEMS = EMS_UNIT_IDS.indexOf(s.unitId) >= 0;
-    if (newIsEMS !== shiftIsEMS) return false; // different categories — OK
-    return s.date===date && s.memberId===memberId && (s.unitId === unitId || !areUnitsLinked(unitId, s.unitId, date));
-  });
-  if (alreadyAny) {
-    var m = (state.roster||[]).find(function(r){ return r.id===memberId; });
-    var name = m ? m.last+', '+m.first : 'That member';
-    var conflict = alreadyAny.unitId === unitId ? 'already assigned to this unit' : 'already on '+UNIT_LABELS[alreadyAny.unitId]+' (conflicts)';
-    showToast('⚠️ '+name+' is '+conflict+'.');
+  // Check for time-overlap conflict before assigning
+  var overlapShift = _memberHasOverlappingShift(memberId, date, start, hours);
+  if (overlapShift) {
+    var mConflict = (state.roster||[]).find(function(r){ return r.id===memberId; });
+    var mName = mConflict ? mConflict.last+', '+mConflict.first : 'That member';
+    showToast('\u26a0\ufe0f '+mName+' already has an overlapping shift on '+(UNIT_LABELS[overlapShift.unitId]||overlapShift.unitId)+'.');
     return;
   }
-
   if (!Array.isArray(state.staffingShifts)) state.staffingShifts = [];
   var assignedShift = {
     id:            'sh_'+Date.now(),
@@ -4571,6 +4597,16 @@ function staffClockIn(elOrId) {
   if (!shift) return;
   if (!_canClockInNow(shift.date, null)) {
     showToast('\u26a0\ufe0f You can only clock in on the day of your shift.');
+    return;
+  }
+  // Can't clock into a shift while already clocked into an overlapping one
+  var nowShift = (state.staffingShifts||[]).find(function(s){
+    return s.id !== shift.id && s.memberId === state.currentUserId
+        && s.clockedIn && !s.clockedOutAt
+        && _shiftsOverlap(s.shiftStart||'0700', s.shiftHours||24, shift.shiftStart||'0700', shift.shiftHours||24);
+  });
+  if (nowShift) {
+    showToast('\u26a0\ufe0f Already clocked in to '+(UNIT_LABELS[nowShift.unitId]||nowShift.unitId)+'. Clock out first.');
     return;
   }
   openClockInModal(shift);
