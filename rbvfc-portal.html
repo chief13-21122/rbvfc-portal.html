@@ -858,15 +858,35 @@ function updateStats() {
 // ═══════════════════════════════════════════════════
 //  LOSAP CALCULATION
 // ═══════════════════════════════════════════════════
+// AACVFA LOSAP Point System — Version 4.1
+// Source: https://www.aacvfa.org/content/losap/LOSAP%20Information%20Manual%20(Version%204.1).pdf
 var CAT_CONFIG = {
-  emergency: { pts: 1, maxPts: null, label: 'Emergency Response' },
-  meeting:      { pts: 1, maxPts: 10, label: 'Company Meeting' },
-  boardmeeting: { pts: 1, maxPts: 10, label: 'Board Meeting' },
-  training:  { ptsPerHrs: 2, maxPts: 20, label: 'Formal Training' },
-  drill:     { ptsPerHrs: 2, maxPts: 20, label: 'Drill/In-House' },
-  duties:    { ptsPerHrs: 3, maxPts: 25, label: 'Collateral Duties' },
-  position:  { pts: 25, maxPts: 25,  label: 'LOSAP Position' }
+  // Emergency Responses: 0.5 pt each, NO maximum (§3f)
+  emergency:   { pts: 0.5, maxPts: null, label: 'Emergency Response' },
+  // Meetings: 1 pt per meeting, max 20 pts/yr (§3e)
+  meeting:     { pts: 1,   maxPts: 20,   label: 'Company Meeting' },
+  boardmeeting:{ pts: 1,   maxPts: 20,   label: 'Board Meeting' },
+  // Formal Training: tiered by course hours, max 25 pts/yr (§3a)
+  // Points calculated by calcTrainingPts(hours) — NOT ptsPerHrs
+  training:    { tiered: true, maxPts: 25, label: 'Formal Training' },
+  // Drills: 1 pt per drill (min 2 hrs), max 10 pts/yr (§3b)
+  drill:       { pts: 1,   maxPts: 10,   label: 'Drill/In-House Training' },
+  // Sleep-in/Standby/Collateral Duty: 1 pt per 4-hr block, max 20 pts/yr (§3c)
+  duties:      { ptsPerHrs: 4, maxPts: 20, label: 'Standby/Sleep-In/Collateral Duty' },
+  // Elected/Appointed Positions: 25/15/10 by role, max 25 pts/yr (§3d)
+  position:    { pts: 25,  maxPts: 25,   label: 'Elected/Appointed Officer' },
+  committee_chair:  { pts: 15, maxPts: 25, label: 'Committee Chairperson' },
+  committee_member: { pts: 10, maxPts: 25, label: 'Committee Member' }
 };
+
+// Training course points — tiered by total hours (§3a)
+function calcTrainingPts(hours) {
+  var h = parseFloat(hours) || 0;
+  if (h >= 45) return 15;
+  if (h >= 20) return 10;
+  if (h >= 6)  return 5;
+  return 0;  // less than 6 hours = no credit
+}
 
 function calcMemberLOSAP(uid, year) {
   var yr = String(year || new Date().getFullYear());
@@ -878,11 +898,21 @@ function calcMemberLOSAP(uid, year) {
   });
   // Position points - multiple positions now supported
   var member = (state.roster||[]).find(function(m){ return m.id===uid; });
+  // Elected/Appointed position: credit for highest position only (AACVFA §3d)
+  // Officer=25, Committee Chair=15, Committee Member=10, max 25
   var positionPts = 0;
-  if (member && member.losapPositions && member.losapPositions.length > 0) {
-    positionPts = Math.min(25, member.losapPositions.length * 25);
-  } else if (member && member.losapPosition) {
-    positionPts = 25;
+  if (member) {
+    var positions = member.losapPositions && member.losapPositions.length ? member.losapPositions : (member.losapPosition ? [member.losapPosition] : []);
+    // Define officer ranks that earn full 25 pts
+    var OFFICER_TITLES = ['Chief','Assistant Chief','Deputy Chief','Captain','Lieutenant','EMS Coordinator','President','Vice President','Secretary','Treasurer','Board of Director','Board of Trustee','County Association position','State Association position','National Association position','Fire Chief'];
+    var hasOfficer = positions.some(function(p){ return OFFICER_TITLES.some(function(t){ return p.toLowerCase().indexOf(t.toLowerCase())>=0 || t.toLowerCase().indexOf(p.toLowerCase())>=0; }); });
+    if (hasOfficer) {
+      positionPts = 25;
+    } else if (positions.length > 0) {
+      // Chairperson = 15, member = 10 — take the highest
+      positionPts = 15; // default to chair if position held but not officer
+    }
+    positionPts = Math.min(25, positionPts);
   }
   var pts = positionPts;
   // Count by category
@@ -894,8 +924,8 @@ function calcMemberLOSAP(uid, year) {
     var p = a.points || 0;
     catPts[cat] = (catPts[cat]||0) + p;
   });
-  // Add response points
-  var rPts = responses.length;
+  // Emergency responses: 0.5 pts each, no maximum (AACVFA §3f)
+  var rPts = responses.length * 0.5;
   pts += rPts;
   // Add other category points with caps
   Object.keys(catPts).forEach(function(cat) {
@@ -909,9 +939,11 @@ function calcMemberLOSAP(uid, year) {
 }
 
 function calcActivityPts(cat, hours) {
+  if (cat === 'training') return calcTrainingPts(hours);
   var cfg = CAT_CONFIG[cat];
   if (!cfg) return 0;
-  if (cfg.pts) return cfg.pts;
+  if (cfg.tiered) return calcTrainingPts(hours);
+  if (cfg.pts !== undefined) return cfg.pts;
   if (cfg.ptsPerHrs) return Math.floor((parseFloat(hours)||0) / cfg.ptsPerHrs);
   return 0;
 }
@@ -938,11 +970,11 @@ function updateCategoryHelp() {
   [trainingFields,drillFields,dutiesFields,meetingFields].forEach(function(el){ if(el) el.style.display='none'; });
   if (help) {
     var msgs = {
-      training:'📚 Formal Training: Use the Training tab to submit courses for Fire Chief approval and LOSAP credit (1 pt / 2 hrs, max 60 pts/yr)',
-      
-      meeting:'🗓 Company Meeting: 1 pt per meeting. Max 10 pts/yr. (Secretary, President & Admin only)',
-      boardmeeting:'📋 Board Meeting: 1 pt per meeting. Max 10 pts/yr. (Secretary, President & Admin only)',
-      duties:'🛠 Collateral Duties: 1 pt per 3 hrs. Max 25 pts/yr.'
+      training:'📚 Formal Training: Submit courses via Training tab for approval. Points by course length: 6-19 hrs = 5 pts, 20-44 hrs = 10 pts, 45+ hrs = 15 pts. Max 25 pts/yr. (AACVFA §3a)',
+      drill:'🔧 Drills: 1 pt per drill (min 2 hrs). Includes seminars, conferences, EMS protocols, CPR cert. Max 10 pts/yr. (AACVFA §3b)',
+      meeting:'🗓 Meeting: 1 pt per official meeting. Max 20 pts/yr. (AACVFA §3e)',
+      boardmeeting:'📋 Board Meeting: 1 pt per meeting. Max 20 pts/yr. (AACVFA §3e)',
+      duties:'🛠 Standby/Sleep-In/Collateral Duty: 1 pt per 4-hr block or per sleep-in. Max 1 pt per 24-hr period. Max 20 pts/yr. (AACVFA §3c)'
     };
     help.textContent = msgs[cat]||'';
     help.style.display = msgs[cat] ? 'block' : 'none';
@@ -1671,8 +1703,8 @@ function submitTraining() {
   if (!hours || hours <= 0) { showToast('⚠️ Total hours is required.'); return; }
   if (!name)          { showToast('⚠️ Course name is required.'); return; }
 
-  var pts = Math.floor(hours / 2);
-  if (pts < 1) pts = 1;
+  var pts = calcTrainingPts(hours);
+  // pts: 5 (6-19h), 10 (20-44h), 15 (45+h) per AACVFA §3a
 
   if (!Array.isArray(state.trainingSubmissions)) state.trainingSubmissions = [];
   state.trainingSubmissions.push({
@@ -3259,6 +3291,7 @@ function applyUserSession(m) {
   loadProfile();
   // Auto year-end archive check and monthly email check
   setTimeout(function() {
+    clearStaleClockedInFlags();
     checkYearRollover();
     checkMonthlyEmail();
   }, 1500);
@@ -4645,6 +4678,21 @@ function notifyUnderstaffedDay(date) {
 }
 
 // ── CLOCK IN / CANCEL / REMOVE ────────────────────────────────
+function clearStaleClockedInFlags() {
+  // If a shift has clockedIn=true but its date is in the past and has no clockedOutAt,
+  // it was never properly clocked out. Mark it as complete.
+  var today = new Date().toISOString().slice(0,10);
+  var hadStale = false;
+  (state.staffingShifts||[]).forEach(function(s) {
+    if (s.clockedIn && !s.clockedOutAt && s.date < today) {
+      s.clockedOutAt = s.date + 'T23:59:59.000Z';
+      s.status = 'complete';
+      hadStale = true;
+    }
+  });
+  if (hadStale) save();
+}
+
 function _canClockInNow(shiftDate, shiftStartHHMM) {
   // Only restriction: must be the shift date. Time restriction removed — handled by clock-in modal.
   var today = new Date().toISOString().slice(0, 10);
@@ -4666,10 +4714,15 @@ function staffClockIn(elOrId) {
   // Can't clock into a shift while already clocked into an overlapping one
   // Use shift.memberId — officer may be clocking in a different member
   var targetMemberId = shift.memberId || state.currentUserId;
+  var today2 = new Date().toISOString().slice(0,10);
   var nowShift = (state.staffingShifts||[]).find(function(s){
-    return s.id !== shift.id && s.memberId === targetMemberId
-        && s.clockedIn && !s.clockedOutAt
-        && _shiftsOverlap(s.shiftStart||'0700', s.shiftHours||24, shift.shiftStart||'0700', shift.shiftHours||24);
+    // Only consider active (clocked-in but not out) shifts from today
+    if (s.id === shift.id) return false;
+    if (s.memberId !== targetMemberId) return false;
+    if (!s.clockedIn) return false;
+    if (s.clockedOutAt) return false;
+    if (s.date !== today2) return false; // ignore stale past shifts
+    return _shiftsOverlap(s.shiftStart||'0700', s.shiftHours||24, shift.shiftStart||'0700', shift.shiftHours||24);
   });
   if (nowShift) {
     var m2 = (state.roster||[]).find(function(r){ return r.id===targetMemberId; });
@@ -12074,21 +12127,23 @@ function applyBulkEdit() {
         <strong style="color:#F0F0F0;">LOSAP</strong> (Length of Service Award Program) is a Maryland state benefit program that rewards active volunteer fire and EMS members for their service to the community.
       </p>
       <p style="font-size:13px;color:#AAA;line-height:1.6;margin-bottom:12px;">
-        Members who earn <strong style="color:#F5A623;">50 or more points</strong> in a calendar year qualify for an annual benefit payment deposited into a tax-deferred retirement account.
+        Members who earn <strong style="color:#F5A623;">50 or more points</strong> in a calendar year qualify for active service credit. Training points are tiered: <strong style="color:#CCC;">6-19 hrs = 5 pts</strong>, <strong style="color:#CCC;">20-44 hrs = 10 pts</strong>, <strong style="color:#CCC;">45+ hrs = 15 pts</strong>. Points must be earned in at least two categories to qualify.
       </p>
       <div style="background:#111;border:1px solid #222;border-radius:8px;padding:14px;margin-bottom:12px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#C8102E;margin-bottom:10px;">How Points Are Earned</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
-          <div style="font-size:13px;color:#888;">🚒 Emergency Response</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">1 pt each</div>
-          <div style="font-size:13px;color:#888;">🏛 Company Meeting</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">1 pt (max 10)</div>
-          <div style="font-size:13px;color:#888;">📋 Board Meeting</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">1 pt (max 10)</div>
-          <div style="font-size:13px;color:#888;">📚 Training / Drill</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">2 pts/hr (max 20)</div>
-          <div style="font-size:13px;color:#888;">🕐 Station Duty</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">3 pts/hr (max 25)</div>
-          <div style="font-size:13px;color:#888;">🏅 Elected Position</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">25 pts (max 25)</div>
+          <div style="font-size:13px;color:#888;">&#128658; Emergency Response</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">0.5 pt each, no max</div>
+          <div style="font-size:13px;color:#888;">&#127963; Meeting</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">1 pt each (max 20)</div>
+          <div style="font-size:13px;color:#888;">&#128218; Formal Training</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">5/10/15 pts by hrs (max 25)</div>
+          <div style="font-size:13px;color:#888;">&#128295; Drill/In-House</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">1 pt per drill (max 10)</div>
+          <div style="font-size:13px;color:#888;">&#128336; Standby/Sleep-In/Duty</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">1 pt per 4-hr block (max 20)</div>
+          <div style="font-size:13px;color:#888;">&#127941; Elected Officer</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">25 pts/yr (max 25)</div>
+          <div style="font-size:13px;color:#888;">&#127941; Committee Chair</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">15 pts/yr (max 25)</div>
+          <div style="font-size:13px;color:#888;">&#127941; Committee Member</div><div style="font-size:13px;color:#F0F0F0;text-align:right;">10 pts/yr (max 25)</div>
         </div>
       </div>
       <p style="font-size:12px;color:#666;line-height:1.5;margin:0;">
-        Questions? Contact your LOSAP Committee Chair or visit <a href="https://mfri.org" target="_blank" style="color:#C8102E;">mfri.org</a> for official program details.
+        Questions? Contact your LOSAP Committee Chair or visit <a href="https://www.aacvfa.org/content/losap/LOSAP%20Information%20Manual%20(Version%204.1).pdf" target="_blank" style="color:#C8102E;">AACVFA LOSAP Manual v4.1</a> for official program details.
       </p>
     </div>
   </div>
