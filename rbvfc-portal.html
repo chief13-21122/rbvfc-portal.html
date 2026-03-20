@@ -4664,13 +4664,17 @@ function staffClockIn(elOrId) {
     return;
   }
   // Can't clock into a shift while already clocked into an overlapping one
+  // Use shift.memberId — officer may be clocking in a different member
+  var targetMemberId = shift.memberId || state.currentUserId;
   var nowShift = (state.staffingShifts||[]).find(function(s){
-    return s.id !== shift.id && s.memberId === state.currentUserId
+    return s.id !== shift.id && s.memberId === targetMemberId
         && s.clockedIn && !s.clockedOutAt
         && _shiftsOverlap(s.shiftStart||'0700', s.shiftHours||24, shift.shiftStart||'0700', shift.shiftHours||24);
   });
   if (nowShift) {
-    showToast('\u26a0\ufe0f Already clocked in to '+(UNIT_LABELS[nowShift.unitId]||nowShift.unitId)+'. Clock out first.');
+    var m2 = (state.roster||[]).find(function(r){ return r.id===targetMemberId; });
+    var mName = m2 ? m2.last+', '+m2.first : 'Member';
+    showToast('\u26a0\ufe0f '+mName+' is already clocked in to '+(UNIT_LABELS[nowShift.unitId]||nowShift.unitId)+'. Clock out first.');
     return;
   }
   openClockInModal(shift);
@@ -4906,9 +4910,12 @@ function confirmStaffClockIn() {
     if (startTime < sched) startTime = sched;
   }
   shift.clockedIn=true; shift.clockedInAt=startTime.toISOString(); shift.status='active';
-  if (!state.currentSession) {
+  var shiftMemberId = shift.memberId || state.currentUserId;
+  var isClockingForSelf = shiftMemberId === state.currentUserId;
+  // Create session for the shift's member (may be different from current user)
+  if (isClockingForSelf && !state.currentSession) {
     var desc = (UNIT_LABELS[shift.unitId]||shift.unitId)+(shift.position?' \u00b7 '+shift.position:'');
-    state.currentSession = { id:'sess_'+Date.now(), userId:state.currentUserId, start:startTime.toISOString(),
+    state.currentSession = { id:'sess_'+Date.now(), userId:shiftMemberId, start:startTime.toISOString(),
       activity:'duty', desc:desc, shiftId:shift.id, end:null, duration:null };
     if (typeof _clockTimerInterval!=='undefined') {
       if (_clockTimerInterval) clearInterval(_clockTimerInterval);
@@ -4920,7 +4927,13 @@ function confirmStaffClockIn() {
   var mo = document.getElementById('clockInConfirmModal'); if (mo) mo.remove();
   renderStaffingBoard(); renderMyShifts();
   var bMsg = backHours>0 ? ' (started '+backHours+(backHours===1?' hr':' hrs')+' ago)' : '';
-  showToast('\u2705 Clocked in for '+UNIT_LABELS[shift.unitId]+bMsg+'!');
+  if (isClockingForSelf) {
+    showToast('\u2705 Clocked in for '+UNIT_LABELS[shift.unitId]+bMsg+'!');
+  } else {
+    var clockedMember = (state.roster||[]).find(function(r){ return r.id===shiftMemberId; });
+    var cName = clockedMember ? clockedMember.last+', '+clockedMember.first : 'Member';
+    showToast('\u2705 '+cName+' clocked in for '+(UNIT_LABELS[shift.unitId]||shift.unitId)+bMsg+'.');
+  }
 }
 
 
