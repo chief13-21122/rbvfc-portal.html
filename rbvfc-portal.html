@@ -4111,7 +4111,9 @@ function renderStaffingBoard() {
         html += '<select id="assignPos_'+uId+'" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
         uPos.forEach(function(pos, i) {
           var taken = uShifts.some(function(s){ return s.positionIndex===i && s.memberId; });
-          if (!taken) html += '<option value="'+i+'">'+pos+'</option>';
+          // Always include in dropdown — value is the ORIGINAL index so officerAssign maps correctly
+          // Show filled positions as disabled so officer can see full picture
+          html += '<option value="'+i+'"'+(taken?' disabled style="color:#444;"':'')+'>'+pos+(taken?' (filled)':'')+'</option>';
         });
         html += '<option value="999">\uD83D\uDCDA Student</option>';
         html += '</select></div>';
@@ -4353,7 +4355,7 @@ function officerAssign(date, unitId) {
   var taken = posIdx !== 999 && (state.staffingShifts||[]).some(function(s){
     return s.date===date && s.unitId===unitId && s.positionIndex===posIdx && s.memberId;
   });
-  if (taken) { showToast('⚠️ That position is already filled.'); return; }
+  if (taken) { showToast('\u26a0\ufe0f ' + posName + ' is already filled. Choose a different position.'); return; }
 
   // Check for conflicts — allow linked units (e131 ↔ Tk13), block everything else
   var alreadyAny = (state.staffingShifts||[]).find(function(s){
@@ -4382,13 +4384,14 @@ function officerAssign(date, unitId) {
     memberId:      memberId,
     shiftStart:    start,
     shiftHours:    hours,
-    clockedIn:     false
+    clockedIn:     false,
+    status:        'assigned'
   };
+  state.staffingShifts.push(assignedShift);  // push BEFORE save so it persists
   save();
   renderStaffingBoard();
   renderMyShifts();
   var m2 = (state.roster||[]).find(function(r){ return r.id===memberId; });
-  state.staffingShifts.push(assignedShift);
   sendCalendarInvite(memberId, shiftToCalDetails(assignedShift));
   showToast('\u2705 '+(m2?m2.last+', '+m2.first:'Member')+' assigned to '+posName+'. Calendar invite sent!');
 }
