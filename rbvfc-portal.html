@@ -497,6 +497,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
   body.public-view #tabBar { display:none !important; }
 }
 </style>
+<!-- Firebase SDKs loaded dynamically by initFirebase() when config is saved -->
 <script>
 
 
@@ -504,29 +505,128 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 //  FIREBASE PUSH NOTIFICATIONS
 // ══════════════════════════════════════════════════════════════
 
-var FIREBASE_CONFIG = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId:             "YOUR_APP_ID"
-};
+// ── Firebase Configuration (populated from Admin settings) ─────────────
 var FIREBASE_VAPID_KEY = "YOUR_VAPID_KEY_HERE";
+var fbApp = null, fbDb = null, fbAuth = null, fbMessaging = null;
+var _fbSyncUnsubscribe = null;   // real-time listener handle
+var _fbSyncing = false;
+var _fbInitialized = false;
 
-var fbApp = null;
-var fbMessaging = null;
+function getFirebaseConfig() {
+  // Read config from state (saved by admin) or fall back to hardcoded placeholders
+  return {
+    apiKey:            state.fbApiKey            || "YOUR_API_KEY",
+    authDomain:        state.fbAuthDomain        || "YOUR_PROJECT.firebaseapp.com",
+    projectId:         state.fbProjectId         || "YOUR_PROJECT",
+    storageBucket:     state.fbStorageBucket     || "YOUR_PROJECT.appspot.com",
+    messagingSenderId: state.fbMessagingSenderId || "YOUR_SENDER_ID",
+    appId:             state.fbAppId             || "YOUR_APP_ID"
+  };
+}
 
-function initFirebase() {
-  if (fbApp) return;
+function _fbConfigured() {
+  var cfg = getFirebaseConfig();
+  return cfg.apiKey && cfg.apiKey !== "YOUR_API_KEY" && cfg.projectId && cfg.projectId !== "YOUR_PROJECT";
+}
+
+function initFirebase(onReady) {
+  if (_fbInitialized) { if (onReady) onReady(fbApp); return; }
+  if (!_fbConfigured()) { console.log("[RBVFC] Firebase not configured."); return; }
+
+  // Dynamically load Firebase compat SDK if not yet loaded
+  function _loadSdk(url, cb) {
+    var s = document.createElement('script');
+    s.src = url; s.onload = cb; s.onerror = function(){ console.warn('[RBVFC] Failed to load', url); };
+    document.head.appendChild(s);
+  }
+
+  var SDK_VER = '10.8.1';
+  var CDN = 'https://www.gstatic.com/firebasejs/' + SDK_VER + '/';
+  var loaded = 0, needed = 3;
+  function onLoad() {
+    loaded++;
+    if (loaded < needed) return;
+    try {
+      var cfg = getFirebaseConfig();
+      // Avoid duplicate app init
+      if (typeof firebase !== 'undefined') {
+        try { fbApp = firebase.app(); } catch(e) { fbApp = firebase.initializeApp(cfg); }
+      }
+      fbDb   = firebase.firestore();
+      fbAuth = firebase.auth();
+      // Enable offline persistence (works across tabs)
+      fbDb.enablePersistence({synchronizeTabs: true}).catch(function(e){
+        if (e.code !== 'failed-precondition' && e.code !== 'unimplemented')
+          console.warn('[RBVFC] Persistence error:', e);
+      });
+      _fbInitialized = true;
+      console.log('[RBVFC] Firebase + Firestore ready.');
+      if (onReady) onReady(fbApp);
+      _startFbSync();
+    } catch(e) { console.error('[RBVFC] Firebase init error:', e); }
+  }
+  _loadSdk(CDN + 'firebase-app-compat.js',       onLoad);
+  _loadSdk(CDN + 'firebase-firestore-compat.js',  onLoad);
+  _loadSdk(CDN + 'firebase-auth-compat.js',       onLoad);
+}
+
+// ── Company document path ─────────────────────────────────
+function _fbDocPath() {
+  var projectId = (getFirebaseConfig().projectId || 'rbvfc').replace(/[^a-zA-Z0-9-_]/g,'');
+  return 'companies/' + projectId + '/data/portal';
+}
+
+// ── Save to Firestore (debounced, with localStorage backup) ──
+var _fbSaveTimer = null;
+function _fbSave() {
+  if (!_fbConfigured() || !_fbInitialized || !fbDb) return;
+  clearTimeout(_fbSaveTimer);
+  _fbSaveTimer = setTimeout(function() {
+    var payload = JSON.parse(JSON.stringify(state)); // deep clone
+    fbDb.doc(_fbDocPath()).set(payload)
+      .then(function(){ console.log('[RBVFC] Firestore saved.'); })
+      .catch(function(e){ console.error('[RBVFC] Firestore save error:', e); });
+  }, 800); // debounce 800ms
+}
+
+// ── Real-time listener — keeps all devices in sync ────────
+function _startFbSync() {
+  if (!_fbConfigured() || !_fbInitialized || !fbDb) return;
+  if (_fbSyncUnsubscribe) _fbSyncUnsubscribe(); // detach any old listener
+  _fbSyncing = true;
+  _fbSyncUnsubscribe = fbDb.doc(_fbDocPath()).onSnapshot(function(doc) {
+    if (!doc.exists) return;
+    var remote = doc.data();
+    if (!remote) return;
+    // Merge remote data into state (remote wins for shared data)
+    Object.assign(state, remote);
+    // Re-render active views
+    try { renderMyShifts(); } catch(e){}
+    try { renderStaffingBoard(); } catch(e){}
+    try { renderLOSAP(); } catch(e){}
+    try { renderCompanyLOSAP(); } catch(e){}
+    try { updateClockUI(); } catch(e){}
+    // Also persist locally as fallback cache
+    try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
+    console.log('[RBVFC] Synced from Firestore.');
+  }, function(err) {
+    console.warn('[RBVFC] Sync listener error:', err);
+    _fbSyncing = false;
+  });
+}
+
+function stopFbSync() {
+  if (_fbSyncUnsubscribe) { _fbSyncUnsubscribe(); _fbSyncUnsubscribe = null; }
+  _fbSyncing = false;
+}
+
+// ── Push to Firestore (for messaging if configured) ──
+function initFirebaseMessaging() {
+  if (!_fbInitialized || !fbApp) return;
   try {
-    if (typeof firebase === 'undefined') { console.log('[RBVFC] Firebase SDK not configured — push notifications disabled.'); return; }
-    if (FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY') { console.log('Firebase config not set.'); return; }
-    fbApp       = firebase.initializeApp(FIREBASE_CONFIG);
     fbMessaging = firebase.messaging(fbApp);
-    console.log('Firebase initialized.');
     registerServiceWorker();
-  } catch(e) { console.warn('Firebase init error:', e); }
+  } catch(e) { console.warn('[RBVFC] Messaging init error:', e); }
 }
 
 function registerServiceWorker() {
@@ -687,22 +787,48 @@ const FIRE_UNITS = ['e131','e132','Tk13','U13','Br13','RB13','FB13','CH13'];
 //  STORAGE
 // ═══════════════════════════════════════════════════
 function save() {
-  try {
-    localStorage.setItem('rbvfc', JSON.stringify(state));
-  } catch(e) {
+  // Always write to localStorage as local cache/fallback
+  try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e) {
     console.error('[RBVFC] localStorage save failed:', e);
-    showToast('⚠️ Could not save data — storage may be blocked.');
+  }
+  // Write to Firestore if configured (debounced)
+  if (_fbConfigured() && _fbInitialized) {
+    _fbSave();
   }
   sheetSyncDebounce();
 }
 function load() {
+  // Load from localStorage immediately (instant, works offline)
   try {
     var d = localStorage.getItem('rbvfc');
-    if (d) {
-      var parsed = JSON.parse(d);
-      Object.assign(state, parsed);
-    }
-  } catch(e) { console.error('Load error:', e); }
+    if (d) { var parsed = JSON.parse(d); Object.assign(state, parsed); }
+  } catch(e) { console.error('[RBVFC] Load error:', e); }
+}
+
+function loadFromFirestore(onComplete) {
+  // Pull latest data from Firestore (called after Firebase is ready)
+  if (!_fbConfigured() || !_fbInitialized || !fbDb) {
+    if (onComplete) onComplete(false); return;
+  }
+  fbDb.doc(_fbDocPath()).get()
+    .then(function(doc) {
+      if (doc.exists) {
+        var remote = doc.data();
+        Object.assign(state, remote);
+        // Update local cache
+        try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
+        console.log('[RBVFC] Loaded from Firestore.');
+      } else {
+        // First time — push local state up to Firestore
+        console.log('[RBVFC] No Firestore doc yet — pushing local state.');
+        _fbSave();
+      }
+      if (onComplete) onComplete(true);
+    })
+    .catch(function(e) {
+      console.warn('[RBVFC] Firestore load error (using local cache):', e);
+      if (onComplete) onComplete(false);
+    });
 }
 
 // ═══════════════════════════════════════════════════
@@ -2618,6 +2744,7 @@ function autoSuggestEmail() {
 }
 
 function onAdminTabShow() {
+  try { initFirestoreConfigCard(); } catch(e){}
   initPublicLinkCard();
   renderUmUnitPositions();
   initCadScriptUrl();
@@ -3292,6 +3419,19 @@ function applyUserSession(m) {
   // Auto year-end archive check and monthly email check
   setTimeout(function() {
     clearStaleClockedInFlags();
+    // Initialize Firestore sync if config is saved in state
+    if (_fbConfigured()) {
+      initFirebase(function() {
+        loadFromFirestore(function(ok) {
+          if (ok) {
+            try{renderMyShifts();}catch(e){}
+            try{renderStaffingBoard();}catch(e){}
+            try{renderLOSAP();}catch(e){}
+            updateFbSyncBadge();
+          }
+        });
+      });
+    }
     checkYearRollover();
     checkMonthlyEmail();
   }, 1500);
@@ -3725,6 +3865,108 @@ function memberMeetsRank(member, positionName) {
 
 // ── INIT ──────────────────────────────────────────────────────
 
+function initFirestoreConfigCard() {
+  var cfg = getFirebaseConfig();
+  var f = function(id, val){ var el=document.getElementById(id); if(el) el.value=val||''; };
+  f('fbApiKeyInput',        state.fbApiKey            || '');
+  f('fbProjectIdInput',     state.fbProjectId         || '');
+  f('fbAuthDomainInput',    state.fbAuthDomain        || '');
+  f('fbStorageBucketInput', state.fbStorageBucket     || '');
+  f('fbSenderIdInput',      state.fbMessagingSenderId || '');
+  f('fbAppIdInput',         state.fbAppId             || '');
+  updateFbSyncBadge();
+}
+
+function saveFirestoreConfig() {
+  var g = function(id){ return ((document.getElementById(id)||{}).value||'').trim(); };
+  state.fbApiKey            = g('fbApiKeyInput');
+  state.fbProjectId         = g('fbProjectIdInput');
+  state.fbAuthDomain        = g('fbAuthDomainInput');
+  state.fbStorageBucket     = g('fbStorageBucketInput');
+  state.fbMessagingSenderId = g('fbSenderIdInput');
+  state.fbAppId             = g('fbAppIdInput');
+  // Save to localStorage first
+  try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
+  if (!_fbConfigured()) { showToast('\u26a0\ufe0f Please fill in all Firebase config fields.'); return; }
+  _fbInitialized = false; // force re-init
+  var status = document.getElementById('fbConfigStatus');
+  if (status) { status.textContent = 'Connecting...'; status.style.color='#F5A623'; }
+  initFirebase(function() {
+    loadFromFirestore(function(ok) {
+      if (ok) {
+        showToast('\u2705 Connected to Firestore! Data synced.');
+        if (status) { status.textContent = '\u2705 Connected and syncing'; status.style.color='#27AE60'; }
+        updateFbSyncBadge();
+        // Re-render everything with synced data
+        try{renderMyShifts();}catch(e){} try{renderStaffingBoard();}catch(e){}
+        try{renderLOSAP();}catch(e){} try{renderCompanyLOSAP();}catch(e){}
+      } else {
+        showToast('\u26a0\ufe0f Could not reach Firestore. Check config and Firestore rules.');
+        if (status) { status.textContent = '\u26a0\ufe0f Connection failed — check config'; status.style.color='#E74C3C'; }
+        updateFbSyncBadge();
+      }
+    });
+  });
+}
+
+function testFirestoreConnection() {
+  if (!_fbConfigured()) { showToast('\u26a0\ufe0f Enter Firebase config first.'); return; }
+  if (!_fbInitialized) { showToast('\u26a0\ufe0f Click Save & Connect first.'); return; }
+  var status = document.getElementById('fbConfigStatus');
+  if (status) { status.textContent = 'Testing...'; status.style.color='#F5A623'; }
+  fbDb.doc(_fbDocPath()).get()
+    .then(function(doc) {
+      showToast('\u2705 Firestore connection OK!');
+      if (status) { status.textContent = '\u2705 Connection test passed — doc ' + (doc.exists?'found':'not yet created'); status.style.color='#27AE60'; }
+    })
+    .catch(function(e) {
+      showToast('\u26a0\ufe0f Firestore error: ' + e.message);
+      if (status) { status.textContent = '\u26a0\ufe0f Error: ' + e.message; status.style.color='#E74C3C'; }
+    });
+}
+
+function updateFbSyncBadge() {
+  var badge = document.getElementById('fbSyncStatusBadge');
+  if (!badge) return;
+  if (!_fbConfigured()) {
+    badge.textContent = 'Not configured'; badge.style.color='#555'; badge.style.borderColor='#333';
+  } else if (_fbInitialized && _fbSyncing) {
+    badge.textContent = '\u2022 Live sync'; badge.style.color='#27AE60'; badge.style.borderColor='#27AE60';
+  } else if (_fbInitialized) {
+    badge.textContent = 'Connected'; badge.style.color='#3498DB'; badge.style.borderColor='#3498DB';
+  } else {
+    badge.textContent = 'Configured (not connected)'; badge.style.color='#F5A623'; badge.style.borderColor='#F5A623';
+  }
+}
+
+function openResetDemoData() {
+  var pk = prompt('Enter passkey to reset demo roster:');
+  if (pk !== '1313') { showToast('\u26a0\ufe0f Incorrect passkey.'); return; }
+  if (!confirm('This will permanently delete ALL members (except admin), plus their shifts, activities, sessions, responses, training, and drills. Admin account and all settings are preserved.\n\nContinue?')) return;
+  if (!confirm('FINAL WARNING: This cannot be undone. Delete all demo/member data now?')) return;
+  var adminIds = (state.roster||[]).filter(function(m){ return m.appRole==='admin'; }).map(function(m){ return m.id; });
+  state.roster = (state.roster||[]).filter(function(m){ return m.appRole==='admin'; });
+  state.staffingShifts      = (state.staffingShifts||[]).filter(function(s){ return adminIds.indexOf(s.memberId)>=0; });
+  state.losapActivities     = (state.losapActivities||[]).filter(function(a){ return adminIds.indexOf(a.memberId)>=0; });
+  state.emergencyResponses  = (state.emergencyResponses||[]).map(function(r){
+    return Object.assign({},r,{members:(r.members||[]).filter(function(id){ return adminIds.indexOf(id)>=0; })});
+  }).filter(function(r){ return (r.members||[]).length>0; });
+  state.trainingSubmissions = (state.trainingSubmissions||[]).filter(function(t){ return adminIds.indexOf(t.memberId)>=0; });
+  state.drills              = (state.drills||[]).filter(function(d){ return adminIds.indexOf(d.submittedBy)>=0; });
+  state.sessions            = (state.sessions||[]).filter(function(s){ return adminIds.indexOf(s.userId)>=0; });
+  state.staffingAlerts      = [];
+  state.currentSession      = null;
+  state.independentDates    = {};
+  state.meetings            = [];
+  state.specialEvents       = (state.specialEvents||[]).map(function(ev){
+    return Object.assign({},ev,{signups:(ev.signups||[]).filter(function(sg){ return adminIds.indexOf(sg.memberId)>=0; })});
+  });
+  save();
+  try{renderMyShifts();}catch(e){} try{renderStaffingBoard();}catch(e){} try{renderLOSAP();}catch(e){}
+  try{renderCompanyLOSAP();}catch(e){} try{initApprovalsTab();}catch(e){}
+  showToast('\u2705 Demo roster cleared. Ready for actual roster import via Admin > Members.');
+}
+
 function togglePastAlerts(pastId) {
   var el = document.getElementById(pastId);
   var ic = document.getElementById(pastId + '_ic');
@@ -4150,6 +4392,35 @@ function renderStaffingBoard() {
         }
         html += '</div>';
       });
+
+      // Student slots (positionIndex 999) shown after named positions
+      var _ss = uShifts.filter(function(s){ return s.positionIndex===999 && s.memberId; });
+      if (_ss.length) {
+        html += '<div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1.5px;padding:6px 0 2px;border-top:1px dashed #222;">Students</div>';
+        _ss.forEach(function(_sh) {
+          var _sm = (state.roster||[]).find(function(m){ return m.id===_sh.memberId; });
+          var _me = _sh.memberId===uid, _ci=_sh.clockedIn;
+          var _nm = _sm ? _sm.last+', '+_sm.first+(isProbationary(_sm)?' [PROB]':'') : 'Unknown';
+          var _rk = _sm ? (_sm.ranks&&_sm.ranks.length?_sm.ranks.join(' / '):(_sm.rank||'')) : '';
+          html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;flex-wrap:wrap;">';
+          html += '<div style="min-width:130px;"><div style="font-size:12px;color:#888;font-weight:600;">Student</div></div>';
+          html += '<div style="flex:1;">';
+          html += '<div style="font-size:14px;font-weight:700;color:'+(_me?'#27AE60':'#F0F0F0')+';">'+_nm+(_me?' (You)':'')+'</div>';
+          if (_rk) html += '<div style="font-size:11px;color:#666;">'+_rk+'</div>';
+          html += '<div style="font-size:11px;color:#555;">'+shiftLabel(_sh)+'</div>';
+          html += '</div>';
+          if (_me) {
+            if (!_ci) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+_sh.id+'">Clock In</button>';
+            else html += '<span style="font-size:11px;color:#27AE60;font-weight:700;">\u2713 In</span>';
+            html += '<button class="btn btn-sm btn-danger" onclick="cancelShift(this)" data-id="'+_sh.id+'" style="margin-left:4px;">&#10005;</button>';
+          } else if (isOfficer) {
+            if (!_ci) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+_sh.id+'">Clock In</button>';
+            else html += '<span style="font-size:11px;color:#27AE60;">\u2713 In</span>';
+            html += '<button class="btn btn-sm btn-danger" onclick="removeFromShift(this)" data-id="'+_sh.id+'" style="margin-left:4px;font-size:10px;">Remove</button>';
+          }
+          html += '</div>';
+        });
+      }
     }
 
     // ── Render primary unit positions ──
@@ -11984,6 +12255,11 @@ function applyBulkEdit() {
             <div style="border-top:1px solid #333;padding-top:12px;">
               <div style="font-size:12px;color:#E74C3C;font-weight:700;margin-bottom:8px;">⚠️ Danger Zone</div>
               <button class="btn btn-danger btn-sm" onclick="confirmClearAllData()">🗑 Clear All Data</button>
+              <div style="margin-top:12px;padding-top:12px;border-top:1px solid #3A0000;">
+                <div style="font-size:11px;color:#C8102E;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Reset Demo Roster</div>
+                <p style="font-size:11px;color:#666;margin-bottom:8px;">Removes all demo members &amp; data. Keeps admin account and all settings. Requires passkey.</p>
+                <button onclick="openResetDemoData()" style="background:#2A0000;border:1px solid #C8102E;color:#C8102E;border-radius:6px;padding:7px 12px;cursor:pointer;font-weight:700;font-size:12px;width:100%;">&#128465; Reset Demo Roster &amp; Data</button>
+              </div>
             </div>
           </div>
         </div>
@@ -12009,6 +12285,29 @@ function applyBulkEdit() {
         </div>
       </div>
 
+
+      <!-- Firestore Sync Configuration -->
+      <div class="card" id="firestoreConfigCard">
+        <div class="card-header">
+          <div class="icon">&#9729;</div>
+          <h2>Cloud Sync (Firestore)</h2>
+          <span id="fbSyncStatusBadge" style="margin-left:auto;font-size:11px;padding:3px 8px;border-radius:10px;background:#1A1A1A;border:1px solid #333;color:#555;">Not configured</span>
+        </div>
+        <p style="font-size:12px;color:#888;margin-bottom:14px;line-height:1.5;">Connect to Firebase Firestore so all devices share the same live data. Get your config from <a href="https://console.firebase.google.com" target="_blank" style="color:#27AE60;">console.firebase.google.com</a> &#8594; Project Settings &#8594; Your apps &#8594; SDK snippet &#8594; Config.</p>
+        <div class="form-grid">
+          <div class="form-group"><label>API Key</label><input type="text" id="fbApiKeyInput" placeholder="AIzaSy..." style="font-family:monospace;font-size:12px;"></div>
+          <div class="form-group"><label>Project ID</label><input type="text" id="fbProjectIdInput" placeholder="my-project-id" style="font-family:monospace;font-size:12px;"></div>
+          <div class="form-group"><label>Auth Domain</label><input type="text" id="fbAuthDomainInput" placeholder="my-project.firebaseapp.com" style="font-family:monospace;font-size:12px;"></div>
+          <div class="form-group"><label>Storage Bucket</label><input type="text" id="fbStorageBucketInput" placeholder="my-project.appspot.com" style="font-family:monospace;font-size:12px;"></div>
+          <div class="form-group"><label>Messaging Sender ID</label><input type="text" id="fbSenderIdInput" placeholder="123456789012" style="font-family:monospace;font-size:12px;"></div>
+          <div class="form-group"><label>App ID</label><input type="text" id="fbAppIdInput" placeholder="1:123456:web:abc123" style="font-family:monospace;font-size:12px;"></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          <button class="btn btn-primary" onclick="saveFirestoreConfig()" style="flex:1;">&#9729; Save &amp; Connect</button>
+          <button class="btn btn-secondary" onclick="testFirestoreConnection()">Test</button>
+        </div>
+        <div id="fbConfigStatus" style="margin-top:10px;font-size:12px;color:#666;"></div>
+      </div>
 
       <!-- Notifications -->
       <div class="card">
