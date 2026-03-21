@@ -817,7 +817,8 @@ var state = {
   sheetWebhookUrl: '',
   driveFolderId: '',
   independentDates: {},
-  meetings: [],    // { 'e131_Tk13': ['2026-03-19', ...] } — dates when linked units staff independently
+  meetings: [],
+  meetingAttendance: [],
   adminPin: '1234',
   currentUserId: null,
   lastYearReset: null,
@@ -3495,6 +3496,8 @@ function applyUserSession(m) {
   // Auto year-end archive check and monthly email check
   setTimeout(function() {
     clearStaleClockedInFlags();
+    checkAutoClockOuts();
+    setInterval(checkAutoClockOuts, 60000); // auto clock-out every minute
     // Initialize Firestore sync if config is saved in state
     if (_fbConfigured()) {
       initFirebase(function() {
@@ -3805,6 +3808,7 @@ function areUnitsLinked(unitA, unitB, date) {
 
 function isIndependentDate(group, date) {
   // group is an array like ['e131','Tk13']
+  if (!group || !Array.isArray(group)) return false;
   var key = group.slice().sort().join('_');
   var dates = (state.independentDates && state.independentDates[key]) || [];
   return dates.indexOf(date) >= 0;
@@ -4375,8 +4379,9 @@ function renderStaffingBoard() {
       html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
       html += '<span style="font-size:18px;font-weight:700;letter-spacing:1.5px;color:#F0F0F0;">'+combinedLabel+'</span>';
       // Check if this group has any independent staffing on this date
-      var _grp = LINKED_UNIT_GROUPS[getLinkedGroup(unitId)];
-      var _isIndep = isIndependentDate(_grp, date);
+      var _grpIdx = getLinkedGroup(unitId);
+      var _grp = _grpIdx >= 0 ? LINKED_UNIT_GROUPS[_grpIdx] : null;
+      var _isIndep = _grp ? isIndependentDate(_grp, date) : false;
       if (_isIndep) {
         // Show independent badge — units staffing separately
         html += '<span style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;background:rgba(245,166,35,.12);border:1px solid rgba(245,166,35,.5);color:#F5A623;border-radius:4px;padding:2px 7px;">INDEPENDENT</span>';
@@ -4562,21 +4567,18 @@ function renderStaffingBoard() {
 
 
 function shiftLabel(shift) {
-  if (!shift.shiftStart || shift.shiftStart === '0700') {
-    var hrs = shift.shiftHours || 24;
-    if (hrs === 24) return '0700–0700 (24h)';
-    // compute end time
-    var startH = 7, startM = 0;
-    if (shift.shiftStart) {
-      startH = parseInt(shift.shiftStart.slice(0,2));
-      startM = parseInt(shift.shiftStart.slice(2,4)||'0');
-    }
-    var totalMin = startH*60 + startM + (hrs*60);
-    totalMin = totalMin % (24*60);
-    var endH = Math.floor(totalMin/60), endM = totalMin%60;
-    return (shift.shiftStart||'0700')+'–'+(endH<10?'0':'')+endH+(endM<10?'0':'')+endM+' ('+hrs+'h)';
-  }
-  return (shift.shiftStart||'0700')+'–'+(shift.shiftEnd||'0700')+' ('+(shift.shiftHours||24)+'h)';
+  // Normalize: handle both shiftStart/shiftHours AND legacy start/hours field names
+  var st  = shift.shiftStart || shift.start || '0700';
+  var hrs = parseFloat(shift.shiftHours || shift.hours || 24);
+  var startH = parseInt(st.slice(0,2)||'07');
+  var startM = parseInt(st.slice(2,4)||'0');
+  var endMin = (startH*60 + startM + Math.round(hrs*60)) % (24*60);
+  var endH = Math.floor(endMin/60), endM = endMin%60;
+  var endStr = (endH<10?'0':'')+endH+(endM<10?'0':'')+endM;
+  var startDisp = (startH%12||12)+':'+(startM<10?'0':'')+startM+' '+(startH>=12?'PM':'AM');
+  var endDisp   = (endH%12||12)+':'+(endM<10?'0':'')+endM+' '+(endH>=12?'PM':'AM');
+  if (hrs === 24 && st === '0700') return '0700–0700 (24h)';
+  return st+'–'+endStr+' ('+startDisp+' – '+endDisp+')';
 }
 
 // ── SIGN UP MODAL ─────────────────────────────────────────────
@@ -4589,8 +4591,48 @@ function openSignUpModal(date, unitId, posIdx, posName) {
   document.getElementById('suUnitId').value = unitId;
   document.getElementById('suPosIdx').value = posIdx;
   document.getElementById('suPosName').value = posName;
-  document.getElementById('suStart').value = '07:00';
-  document.getElementById('suHours').value = '24';
+
+  // Smart default: find next uncovered time window on this unit
+  var existingShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===unitId && s.memberId; });
+  var suggestedStart = '07:00', suggestedHours = 24;
+
+  if (existingShifts.length) {
+    // Find latest shift end time
+    var latestEndMin = 0;
+    existingShifts.forEach(function(s) {
+      var st = (s.shiftStart||s.start||'0700');
+      var sh = parseFloat(s.shiftHours||s.hours||24);
+      var startH = parseInt(st.slice(0,2)), startM = parseInt(st.slice(2,4)||'0');
+      var endMin = startH*60 + startM + Math.round(sh*60);
+      if (endMin > latestEndMin) latestEndMin = endMin;
+    });
+    if (latestEndMin > 0 && latestEndMin < 24*60) {
+      var h = Math.floor(latestEndMin/60), m = latestEndMin%60;
+      suggestedStart = (h<10?'0':'')+h+':'+(m<10?'0':'')+m;
+      suggestedHours = Math.max(1, 24 - latestEndMin/60);
+    }
+    // Show coverage hint
+    var hintEl = document.getElementById('suCoverageHint');
+    if (hintEl) {
+      var cov = existingShifts.map(function(s) {
+        var st = (s.shiftStart||s.start||'0700');
+        var sh = parseFloat(s.shiftHours||s.hours||24);
+        var sH = parseInt(st.slice(0,2)), sM = parseInt(st.slice(2,4)||'0');
+        var eMin = (sH*60+sM+Math.round(sh*60))%(24*60);
+        var eH = Math.floor(eMin/60), eM = eMin%60;
+        var m = (state.roster||[]).find(function(r){ return r.id===s.memberId; });
+        return (m?m.last+', '+m.first:'?')+': '+st+'–'+(eH<10?'0':'')+eH+(eM<10?'0':'')+eM;
+      }).join(' | ');
+      hintEl.textContent = 'Already covered: '+cov;
+      hintEl.style.display = 'block';
+    }
+  } else {
+    var hintEl2 = document.getElementById('suCoverageHint');
+    if (hintEl2) hintEl2.style.display = 'none';
+  }
+
+  document.getElementById('suStart').value = suggestedStart;
+  document.getElementById('suHours').value = suggestedHours;
   var minRank = POSITION_MIN_RANK[posName];
   var rankEl = document.getElementById('suRankReq');
   if (rankEl) rankEl.textContent = minRank ? 'Recommended: ' + minRank + ' or above' : '';
@@ -4720,9 +4762,10 @@ function confirmSignUp() {
     positionIndex: posIdx,
     position: posName,
     memberId: uid,
-    start: start,
-    hours: hours,
-    clockedIn: false
+    shiftStart: start,
+    shiftHours: hours,
+    clockedIn: false,
+    status: 'assigned'
   };
   state.staffingShifts.push(newShift);
   save();
@@ -4753,9 +4796,12 @@ function _shiftsOverlap(s1Start, s1Hours, s2Start, s2Hours) {
 
 function _memberHasOverlappingShift(memberId, date, newStart, newHours) {
   // Returns the conflicting shift (or null) for a proposed shift
+  // Handles both shiftStart/shiftHours (officer assign) and start/hours (legacy self sign-up)
   return (state.staffingShifts||[]).find(function(s) {
     if (s.date !== date || s.memberId !== memberId) return false;
-    return _shiftsOverlap(s.shiftStart||'0700', s.shiftHours||24, newStart||'0700', newHours||24);
+    var sStart = s.shiftStart || s.start || '0700';
+    var sHours = s.shiftHours || s.hours || 24;
+    return _shiftsOverlap(sStart, sHours, newStart||'0700', newHours||24);
   }) || null;
 }
 
@@ -5031,6 +5077,9 @@ function clearStaleClockedInFlags() {
   var today = new Date().toISOString().slice(0,10);
   var hadStale = false;
   (state.staffingShifts||[]).forEach(function(s) {
+    // Normalize legacy field names before checking
+    if (!s.shiftStart && s.start) { s.shiftStart = s.start; }
+    if (!s.shiftHours && s.hours) { s.shiftHours = s.hours; }
     if (s.clockedIn && !s.clockedOutAt && s.date < today) {
       s.clockedOutAt = s.date + 'T23:59:59.000Z';
       s.status = 'complete';
@@ -5425,9 +5474,16 @@ function renderMyShifts() {
     return;
   }
 
+  var myMtgItems = [];
+  (state.meetings||[]).forEach(function(mtg) {
+    var nOcc = nextMeetingOccurrence(mtg);
+    if (!nOcc) return;
+    var att = (state.meetingAttendance||[]).find(function(a){ return a.mtgId===mtg.id&&a.date===nOcc&&a.memberId===uid; });
+    if (att || mtg.recurrence) myMtgItems.push({ type:'meeting', date:nOcc, data:mtg, att:att||null });
+  });
   var allItems = myShifts.map(function(s){ return {type:'shift', date:s.date, data:s}; })
     .concat(myEvents.map(function(ev){ return {type:'event', date:ev.date, data:ev}; }))
-    .concat(myClassItems)
+    .concat(myClassItems).concat(myMtgItems)
     .sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
 
   var html = '';
@@ -5519,6 +5575,43 @@ function renderMyShifts() {
       else if (clsDone) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">✓ Attended</div>';
       else if (isToday) html += '<div style="font-size:11px;color:#3498DB;font-weight:700;margin-top:2px;">Class today — see Training tab to clock in</div>';
       html += '</div></div>';
+    }
+
+    if (item.type === 'meeting') {
+      var _m=item.data,_a=item.att,_od=item.date;
+      var _dO=new Date(_od+'T12:00:00'),_nw=new Date();
+      var _ms=new Date(_od+'T'+_m.time+':00');
+      var _me=new Date(_ms.getTime()+(_m.duration||60)*60000);
+      var _ci=_a&&_a.clockedInAt&&!_a.clockedOutAt;
+      var _can=_nw>=new Date(_ms.getTime()-3600000)&&_nw<=_me&&_od===today;
+      var _tp=(function(){ var p=_m.time.split(':'); var h=parseInt(p[0]); return (h%12||12)+':'+p[1]+' '+(h>=12?'PM':'AM'); })();
+      var _rl={weekly:'Weekly',biweekly:'Every 2 wks',monthly:'Monthly'};
+      html += '<div style="background:#181818;border:2px solid '+(_ci?'#27AE60':'#2A2A2A')+';border-radius:12px;padding:14px;display:flex;gap:12px;align-items:stretch;">'
+        +'<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:44px;background:#111;border-radius:8px;padding:8px 4px;">'
+        +'<div style="font-size:11px;color:#888;text-transform:uppercase;">'+_dO.toLocaleDateString([],{month:'short'})+'</div>'
+        +'<div style="font-size:22px;font-weight:700;color:#F0F0F0;line-height:1;">'+_dO.getDate()+'</div>'
+        +'<div style="font-size:10px;color:#555;">'+_dO.toLocaleDateString([],{weekday:'short'}).toUpperCase()+'</div>'
+        +'</div>'
+        +'<div style="flex:1;">'
+        +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">'
+        +'<span style="font-size:10px;font-weight:700;letter-spacing:1.5px;padding:2px 7px;border-radius:4px;background:#1A2A3A;color:#3498DB;text-transform:uppercase;">MTG</span>'
+        +(_m.recurrence&&_m.recurrence.freq?'<span style="font-size:10px;color:#555;">Repeats: '+(_rl[_m.recurrence.freq]||_m.recurrence.freq)+'</span>':'')
+        +'</div>'
+        +'<div style="font-weight:700;font-size:15px;color:#F0F0F0;">'+_m.title+'</div>'
+        +'<div style="font-size:12px;color:#888;margin-top:2px;">'+_tp+(_m.duration?' \u00b7 '+_m.duration+'min':'')+(_m.location?' \u00b7 '+_m.location:'')+'</div>'
+        +(_ci?'<div style="font-size:11px;color:#27AE60;margin-top:3px;font-weight:700;">\u2713 Clocked In</div>':'')
+        +'</div>'
+        +'<div style="display:flex;flex-direction:column;gap:6px;justify-content:center;">'
+        +(_ci
+          ?'<button onclick="clockOutMeeting(\''+_m.id+'\',\''+_od+'\')" class="btn btn-sm" style="background:#1A0000;border:1px solid #E74C3C;color:#E74C3C;">\u23f9 Out</button>'
+          :_can
+            ?'<button onclick="clockInMeeting(\''+_m.id+'\',\''+_od+'\')" class="btn btn-sm btn-primary">\u23F0 Clock In</button>'
+            :!_a
+              ?'<button onclick="signUpForMeeting(\''+_m.id+'\',\''+_od+'\')" class="btn btn-sm btn-success">\u270B Sign Up</button>'
+              :'<span style="font-size:11px;color:#27AE60;">\u2713 Going</span>'
+               +'<button onclick="cancelMeetingSignup(\''+_m.id+'\',\''+_od+'\')" class="btn btn-sm btn-secondary" style="font-size:10px;">Cancel</button>'
+          )
+        +'</div></div>';
     }
   });
   container.innerHTML = html;
@@ -6095,11 +6188,22 @@ function clockInSpecialEvent(elOrId) {
   var ev = (state.specialEvents||[]).find(function(e){ return e.id===evId; });
   if (!ev) return;
   var signup = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
-  if (!signup) { showToast('⚠️ Sign up first.'); return; }
+  if (!signup) { showToast('\u26a0\ufe0f Sign up first.'); return; }
+  // Time window: 1 hour before start until end
+  var now = new Date();
+  var timeStr = ev.startTime || ev.time || '00:00';
+  var evStart = new Date(ev.date + 'T' + timeStr + ':00');
+  var evEnd   = ev.endTime ? new Date(ev.date + 'T' + ev.endTime + ':00') : new Date(evStart.getTime() + 7200000);
+  if (now < new Date(evStart.getTime() - 3600000)) {
+    var mins = Math.round((evStart - now) / 60000);
+    showToast('\u26a0\ufe0f Clock-in opens 1 hour before the event (' + mins + ' min away).');
+    return;
+  }
+  if (now > evEnd) { showToast('\u26a0\ufe0f This event has already ended.'); return; }
   signup.clockedIn = true;
-  signup.clockedInAt = new Date().toISOString();
+  signup.clockedInAt = now.toISOString();
   save(); renderBothSpecialEventViews();
-  showToast('🟢 Clocked in to '+ev.title+'.');
+  showToast('\u26ab\ufe0f Clocked in to '+ev.title+'.');
 }
 
 function clockOutSpecialEvent(elOrId) {
@@ -6147,48 +6251,104 @@ function sendEventAlert(evId) {
   showToast('✅ Alert sent to ' + signups.length + ' member(s) for ' + ev.title + '.');
 }
 
-// ═══ MEETINGS ═══
+
+// === MEETINGS ===
+
+function toggleMtgRecurrenceOpts() {
+  var sel = document.getElementById('mtgRecurrence');
+  var opts = document.getElementById('mtgRecurrenceOpts');
+  if (opts) opts.style.display = (sel && sel.value) ? 'block' : 'none';
+}
+
+function generateMeetingOccurrences(mtg, fromDate, maxCount) {
+  var from = fromDate || new Date().toISOString().slice(0,10);
+  var max = maxCount || 52;
+  var freq = mtg.recurrence && mtg.recurrence.freq;
+  var until = (mtg.recurrence && mtg.recurrence.until) || null;
+  if (!freq) return mtg.date >= from ? [mtg.date] : [];
+  var results = [], cur = new Date(mtg.date + 'T12:00:00');
+  var fromD = new Date(from + 'T00:00:00');
+  var untilD = until ? new Date(until + 'T23:59:59') : null;
+  for (var i = 0; i < max * 10 && results.length < max; i++) {
+    if (untilD && cur > untilD) break;
+    if (cur >= fromD) results.push(cur.toISOString().slice(0,10));
+    var next = new Date(cur);
+    if (freq === 'weekly') { next.setDate(next.getDate() + 7); }
+    else if (freq === 'biweekly') { next.setDate(next.getDate() + 14); }
+    else if (freq === 'monthly') {
+      var mo = next.getMonth() + 1, yr = next.getFullYear();
+      if (mo > 11) { mo = 0; yr++; }
+      next.setFullYear(yr, mo, cur.getDate());
+      var ld = new Date(yr, mo + 1, 0).getDate();
+      if (cur.getDate() > ld) next.setDate(ld);
+    }
+    cur = next;
+  }
+  return results;
+}
+
+function nextMeetingOccurrence(mtg) {
+  var today = new Date().toISOString().slice(0,10);
+  var dates = generateMeetingOccurrences(mtg, today, 1);
+  return dates.length ? dates[0] : null;
+}
+
 function initMeetingsCard() {
   var canManage = canManageSpecialEvents();
   var card = document.getElementById('meetingsManagerCard');
   if (card) card.style.display = canManage ? 'block' : 'none';
   if (canManage) renderMeetingsList();
-  var dateEl = document.getElementById('mtgDate');
-  if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0,10);
+  var de = document.getElementById('mtgDate');
+  if (de && !de.value) de.value = new Date().toISOString().slice(0,10);
 }
 
 function saveMeeting() {
-  var title  = ((document.getElementById('mtgTitle')||{}).value||'').trim();
-  var date   = ((document.getElementById('mtgDate')||{}).value||'').trim();
-  var time   = ((document.getElementById('mtgTime')||{}).value||'').trim();
-  var loc    = ((document.getElementById('mtgLocation')||{}).value||'').trim();
-  var desc   = ((document.getElementById('mtgDesc')||{}).value||'').trim();
-  var editId = ((document.getElementById('mtgEditId')||{}).value||'').trim();
-  if (!title) { showToast('⚠️ Title required.'); return; }
-  if (!date)  { showToast('⚠️ Date required.'); return; }
-  if (!time)  { showToast('⚠️ Time required.'); return; }
+  var g = function(id){ return ((document.getElementById(id)||{}).value||'').trim(); };
+  var title = g('mtgTitle'), date = g('mtgDate'), time = g('mtgTime');
+  var duration = parseInt(g('mtgDuration')) || 60;
+  var loc = g('mtgLocation'), desc = g('mtgDesc');
+  var recFreq = g('mtgRecurrence'), until = g('mtgUntil');
+  var editId = g('mtgEditId');
+  if (!title) { showToast('\u26a0\ufe0f Title required.'); return; }
+  if (!date)  { showToast('\u26a0\ufe0f Date required.'); return; }
+  if (!time)  { showToast('\u26a0\ufe0f Time required.'); return; }
+  var recurrence = recFreq ? { freq: recFreq, until: until || null } : null;
   if (!Array.isArray(state.meetings)) state.meetings = [];
   if (editId) {
     var ex = state.meetings.find(function(m){ return m.id===editId; });
     if (ex) {
-      ex.title=title; ex.date=date; ex.time=time; ex.location=loc; ex.desc=desc;
+      ex.title=title; ex.date=date; ex.time=time; ex.duration=duration;
+      ex.location=loc; ex.desc=desc; ex.recurrence=recurrence;
       ex.updatedAt=new Date().toISOString();
       save(); cancelEditMeeting(); renderMeetingsList();
-      showToast('✅ Meeting updated.'); return;
+      try { renderMyShifts(); } catch(e){}
+      showToast('\u2705 Meeting updated.'); return;
     }
   }
   state.meetings.push({ id:'mtg_'+Date.now(), title:title, date:date, time:time,
-    location:loc, desc:desc, createdBy:state.currentUserId, createdAt:new Date().toISOString(), attendees:[] });
+    duration:duration, location:loc, desc:desc, recurrence:recurrence,
+    createdBy:state.currentUserId, createdAt:new Date().toISOString() });
   save();
-  ['mtgTitle','mtgTime','mtgLocation','mtgDesc'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+  ['mtgTitle','mtgTime','mtgLocation','mtgDesc','mtgUntil','mtgEditId'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.value='';
+  });
+  var dr=document.getElementById('mtgDuration'); if(dr) dr.value='60';
+  var re2=document.getElementById('mtgRecurrence'); if(re2) re2.value='';
+  toggleMtgRecurrenceOpts();
   var de=document.getElementById('mtgDate'); if(de) de.value=new Date().toISOString().slice(0,10);
   renderMeetingsList();
-  showToast('✅ Meeting scheduled: '+title);
+  try { renderMyShifts(); } catch(e){}
+  showToast('\u2705 Meeting scheduled'+(recurrence?' (repeating)':'')+': '+title);
 }
 
 function cancelEditMeeting() {
-  ['mtgTitle','mtgDate','mtgTime','mtgLocation','mtgDesc','mtgEditId'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
-  var sb=document.getElementById('mtgSubmitBtn'); if(sb) sb.textContent='✓ Schedule';
+  ['mtgTitle','mtgDate','mtgTime','mtgLocation','mtgDesc','mtgEditId','mtgUntil'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.value='';
+  });
+  var dr=document.getElementById('mtgDuration'); if(dr) dr.value='60';
+  var re2=document.getElementById('mtgRecurrence'); if(re2) re2.value='';
+  toggleMtgRecurrenceOpts();
+  var sb=document.getElementById('mtgSubmitBtn'); if(sb) sb.textContent='\u2713 Schedule';
   var cb=document.getElementById('mtgCancelBtn'); if(cb) cb.style.display='none';
   var de=document.getElementById('mtgDate'); if(de) de.value=new Date().toISOString().slice(0,10);
 }
@@ -6198,50 +6358,198 @@ function openEditMeeting(mtgId) {
   if (!m) return;
   var f=function(id,val){ var el=document.getElementById(id); if(el) el.value=val||''; };
   f('mtgTitle',m.title); f('mtgDate',m.date); f('mtgTime',m.time);
-  f('mtgLocation',m.location); f('mtgDesc',m.desc); f('mtgEditId',mtgId);
-  var sb=document.getElementById('mtgSubmitBtn'); if(sb) sb.textContent='✓ Save Changes';
+  f('mtgDuration',m.duration||60); f('mtgLocation',m.location); f('mtgDesc',m.desc);
+  var re2=document.getElementById('mtgRecurrence');
+  if (re2) re2.value=(m.recurrence&&m.recurrence.freq)||'';
+  f('mtgUntil',(m.recurrence&&m.recurrence.until)||'');
+  toggleMtgRecurrenceOpts(); f('mtgEditId',mtgId);
+  var sb=document.getElementById('mtgSubmitBtn'); if(sb) sb.textContent='\u2713 Save Changes';
   var cb=document.getElementById('mtgCancelBtn'); if(cb) cb.style.display='inline-flex';
-  var form=document.getElementById('mtgCreateForm'); if(form) form.scrollIntoView({behavior:'smooth',block:'start'});
+  var form=document.getElementById('mtgCreateForm');
+  if(form) form.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 function deleteMeeting(mtgId) {
   if (!confirm('Delete this meeting?')) return;
   state.meetings=(state.meetings||[]).filter(function(m){ return m.id!==mtgId; });
-  save(); renderMeetingsList(); showToast('Meeting deleted.');
+  state.meetingAttendance=(state.meetingAttendance||[]).filter(function(a){ return a.mtgId!==mtgId; });
+  save(); renderMeetingsList();
+  try { renderMyShifts(); } catch(e){}
+  showToast('Meeting deleted.');
+}
+
+function signUpForMeeting(mtgId, occurrenceDate) {
+  var uid = state.currentUserId;
+  if (!Array.isArray(state.meetingAttendance)) state.meetingAttendance = [];
+  if (state.meetingAttendance.find(function(a){ return a.mtgId===mtgId&&a.date===occurrenceDate&&a.memberId===uid; })) {
+    showToast('Already signed up.'); return;
+  }
+  var mtg=(state.meetings||[]).find(function(m){ return m.id===mtgId; });
+  state.meetingAttendance.push({ id:'ma_'+Date.now(), mtgId:mtgId, date:occurrenceDate,
+    memberId:uid, signedUpAt:new Date().toISOString(), clockedInAt:null, clockedOutAt:null });
+  save();
+  try { renderMyShifts(); } catch(e){}
+  showToast('\u2705 Signed up for '+(mtg?mtg.title:'meeting')+'.');
+}
+
+function cancelMeetingSignup(mtgId, occurrenceDate) {
+  var uid = state.currentUserId;
+  state.meetingAttendance=(state.meetingAttendance||[]).filter(function(a){
+    return !(a.mtgId===mtgId&&a.date===occurrenceDate&&a.memberId===uid);
+  });
+  save();
+  try { renderMyShifts(); } catch(e){}
+  showToast('Meeting signup cancelled.');
+}
+
+function clockInMeeting(mtgId, occurrenceDate) {
+  var uid = state.currentUserId;
+  var mtg = (state.meetings||[]).find(function(m){ return m.id===mtgId; });
+  if (!mtg) return;
+  var now = new Date();
+  var startDt = new Date(occurrenceDate + 'T' + mtg.time + ':00');
+  var endDt   = new Date(startDt.getTime() + (mtg.duration||60)*60000);
+  var openAt  = new Date(startDt.getTime() - 3600000);
+  if (now < openAt) {
+    var mins = Math.round((startDt - now) / 60000);
+    showToast('\u26a0\ufe0f Clock-in opens 1 hour before (' + mins + ' min away).');
+    return;
+  }
+  if (now > endDt) { showToast('\u26a0\ufe0f This meeting has already ended.'); return; }
+  if (!Array.isArray(state.meetingAttendance)) state.meetingAttendance = [];
+  var att = state.meetingAttendance.find(function(a){ return a.mtgId===mtgId&&a.date===occurrenceDate&&a.memberId===uid; });
+  if (!att) {
+    att = { id:'ma_'+Date.now(), mtgId:mtgId, date:occurrenceDate, memberId:uid,
+      signedUpAt:now.toISOString(), clockedInAt:null, clockedOutAt:null };
+    state.meetingAttendance.push(att);
+  }
+  att.clockedInAt = now.toISOString();
+  att.clockedOutAt = null;
+  if (!state.currentSession || state.currentSession.userId !== uid) {
+    state.currentSession = { id:'sess_mtg_'+Date.now(), userId:uid, start:now.toISOString(),
+      activity:'meeting', desc:mtg.title, mtgId:mtgId, mtgDate:occurrenceDate, end:null, duration:null };
+    if (typeof _clockTimerInterval!=='undefined') {
+      if (_clockTimerInterval) clearInterval(_clockTimerInterval);
+      _clockTimerInterval = setInterval(tickClockTimer, 1000);
+    }
+    try{updateClockUI(true);}catch(e){} try{updateClockStats();}catch(e){}
+  }
+  save();
+  try { renderMyShifts(); } catch(e){}
+  showToast('\u2705 Clocked in to ' + mtg.title + '.');
+}
+
+function clockOutMeeting(mtgId, occurrenceDate) {
+  var uid = state.currentUserId;
+  var mtg = (state.meetings||[]).find(function(m){ return m.id===mtgId; });
+  var att = (state.meetingAttendance||[]).find(function(a){ return a.mtgId===mtgId&&a.date===occurrenceDate&&a.memberId===uid; });
+  if (!att) return;
+  att.clockedOutAt = new Date().toISOString();
+  if (state.currentSession && state.currentSession.mtgId===mtgId && state.currentSession.userId===uid) {
+    var dur = (new Date() - new Date(state.currentSession.start)) / 1000;
+    state.currentSession.end = new Date().toISOString();
+    state.currentSession.duration = dur;
+    if (!Array.isArray(state.sessions)) state.sessions = [];
+    state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+    state.currentSession = null;
+    if (typeof _clockTimerInterval!=='undefined' && _clockTimerInterval) {
+      clearInterval(_clockTimerInterval); _clockTimerInterval = null;
+    }
+    try{updateClockUI(false);}catch(e){} try{updateClockStats();}catch(e){}
+  }
+  save();
+  try { renderMyShifts(); } catch(e){}
+  showToast('\u23f9 Clocked out of ' + (mtg?mtg.title:'meeting') + '.');
+}
+
+function checkAutoClockOuts() {
+  var now = new Date(), changed = false;
+  (state.specialEvents||[]).forEach(function(ev) {
+    var ts = ev.endTime || ev.startTime;
+    if (!ts) return;
+    var evEnd = new Date(ev.date + 'T' + ts + ':00');
+    if (!ev.endTime) evEnd = new Date(evEnd.getTime() + 7200000);
+    if (now < evEnd) return;
+    (ev.signups||[]).forEach(function(s) {
+      if (s.clockedIn && !s.clockedOutAt) { s.clockedIn=false; s.clockedOutAt=evEnd.toISOString(); changed=true; }
+    });
+  });
+  (state.meetingAttendance||[]).forEach(function(att) {
+    if (!att.clockedInAt || att.clockedOutAt) return;
+    var mtg = (state.meetings||[]).find(function(m){ return m.id===att.mtgId; });
+    if (!mtg) return;
+    var mEnd = new Date(att.date + 'T' + mtg.time + ':00');
+    mEnd = new Date(mEnd.getTime() + (mtg.duration||60)*60000);
+    if (now < mEnd) return;
+    att.clockedOutAt = mEnd.toISOString(); changed = true;
+    if (state.currentSession && state.currentSession.mtgId===att.mtgId && state.currentSession.userId===att.memberId) {
+      state.currentSession.end = mEnd.toISOString();
+      state.currentSession.duration = (mEnd - new Date(state.currentSession.start)) / 1000;
+      if (!Array.isArray(state.sessions)) state.sessions = [];
+      state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+      state.currentSession = null;
+      try{updateClockUI(false);}catch(e){}
+    }
+  });
+  (state.staffingShifts||[]).forEach(function(s) {
+    if (!s.clockedIn || s.clockedOutAt) return;
+    var sh=parseInt((s.shiftStart||'0700').slice(0,2));
+    var sm=parseInt((s.shiftStart||'0700').slice(2,4)||'0');
+    var startMs=new Date(s.date+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00').getTime();
+    var endMs=startMs+(s.shiftHours||24)*3600000;
+    if (now.getTime() < endMs) return;
+    s.clockedOutAt=new Date(endMs).toISOString(); s.clockedIn=false; s.status='complete'; changed=true;
+    if (state.currentSession && state.currentSession.shiftId===s.id) {
+      state.currentSession.end=new Date(endMs).toISOString();
+      state.currentSession.duration=(endMs-new Date(state.currentSession.start).getTime())/1000;
+      if (!Array.isArray(state.sessions)) state.sessions=[];
+      state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+      state.currentSession=null;
+      try{updateClockUI(false);}catch(e){}
+    }
+  });
+  if (changed) { save(); try{renderMyShifts();}catch(e){} try{renderStaffingBoard();}catch(e){} }
 }
 
 function renderMeetingsList() {
   var container=document.getElementById('meetingsListContainer'); if(!container) return;
   var mtgs=(state.meetings||[]).slice().sort(function(a,b){ return b.date.localeCompare(a.date); });
   if (!mtgs.length) { container.innerHTML='<p style="color:#666;font-size:13px;text-align:center;padding:16px;">No meetings scheduled.</p>'; return; }
-  var today=new Date().toISOString().slice(0,10);
-  var upcoming=mtgs.filter(function(m){ return m.date>=today; });
-  var past=mtgs.filter(function(m){ return m.date<today; });
-  function mtgCard(m,isPast) {
-    var d=new Date(m.date+'T12:00:00');
+  var rlabels={weekly:'Weekly',biweekly:'Every 2 wks',monthly:'Monthly'};
+  function fmtRec(mtg) {
+    if (!mtg.recurrence||!mtg.recurrence.freq) return '';
+    return ' \u00b7 Repeats: '+(rlabels[mtg.recurrence.freq]||mtg.recurrence.freq)+(mtg.recurrence.until?' until '+mtg.recurrence.until:'');
+  }
+  function mtgCard(mtg) {
+    var nd=nextMeetingOccurrence(mtg), isPast=!nd, sd=nd||mtg.date;
+    var d=new Date(sd+'T12:00:00');
     var ds=d.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric',year:'numeric'});
-    var ts=m.time?(function(){ var p=m.time.split(':'); var h=parseInt(p[0]); return (h%12||12)+':'+p[1]+' '+(h>=12?'PM':'AM'); })():'';
+    var ts=mtg.time?(function(){ var p=mtg.time.split(':'); var h=parseInt(p[0]); return (h%12||12)+':'+p[1]+' '+(h>=12?'PM':'AM'); })():'';
+    var cnt=(state.meetingAttendance||[]).filter(function(a){ return a.mtgId===mtg.id&&a.date===sd; }).length;
     return '<div style="background:#181818;border:1px solid #2A2A2A;border-radius:10px;padding:14px;margin-bottom:10px;'+(isPast?'opacity:0.6;':'')+'">'  
       +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">'
       +'<div style="flex:1;">'
-      +'<div style="font-weight:700;font-size:15px;color:#F0F0F0;">'+(m.title||'')+'</div>'
-      +'<div style="font-size:12px;color:#888;margin-top:3px;">'+ds+(ts?' · '+ts:'')+(m.location?' · '+m.location:'')+'</div>'
-      +(m.desc?'<div style="font-size:12px;color:#666;margin-top:4px;">'+m.desc+'</div>':'')
+      +'<div style="font-weight:700;font-size:15px;color:#F0F0F0;">'+(mtg.title||'')+'</div>'
+      +'<div style="font-size:12px;color:#888;margin-top:3px;">'+ds+(ts?' \u00b7 '+ts:'')+(mtg.duration?' \u00b7 '+mtg.duration+'min':'')+(mtg.location?' \u00b7 '+mtg.location:'')+fmtRec(mtg)+'</div>'
+      +(mtg.desc?'<div style="font-size:12px;color:#666;margin-top:4px;">'+mtg.desc+'</div>':'')
+      +(cnt?'<div style="font-size:11px;color:#555;margin-top:3px;">'+cnt+' signed up</div>':'')
       +'</div>'
       +'<div style="display:flex;flex-direction:column;gap:5px;">'
-      +'<button onclick="openEditMeeting(\''+m.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#9998; Edit</button>'
-      +'<button onclick="deleteMeeting(\''+m.id+'\')" style="background:none;border:1px solid #333;color:#E74C3C;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#128465; Delete</button>'
+      +'<button onclick="openEditMeeting(\''+mtg.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#9998; Edit</button>'
+      +'<button onclick="deleteMeeting(\''+mtg.id+'\')" style="background:none;border:1px solid #333;color:#E74C3C;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#128465; Delete</button>'
       +'</div></div></div>';
   }
-  var h=upcoming.map(function(m){return mtgCard(m,false);}).join('');
+  var upcoming=mtgs.filter(function(m){ return !!nextMeetingOccurrence(m); });
+  var past=mtgs.filter(function(m){ return !nextMeetingOccurrence(m); });
+  var h=upcoming.map(function(m){ return mtgCard(m); }).join('');
   if (past.length) {
     h+='<div style="margin-top:14px;border-top:1px solid #2A2A2A;padding-top:10px;">'
        +'<div style="font-size:10px;color:#444;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;">Past Meetings</div>'
-       +past.map(function(m){return mtgCard(m,true);}).join('')
-       +'</div>';
+       +past.map(function(m){ return mtgCard(m); }).join('')+'</div>';
   }
-  container.innerHTML = h;
+  container.innerHTML=h;
 }
+
 
 function cancelEditSpecialEvent() {
   var editId = document.getElementById('seEditId');
@@ -11718,6 +12026,11 @@ function applyBulkEdit() {
               <div class="form-group"><label>Date *</label><input type="date" id="mtgDate"></div>
               <div class="form-group"><label>Time *</label><input type="time" id="mtgTime"></div>
             </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div class="form-group"><label>Duration (min)</label><input type="number" id="mtgDuration" value="60" min="15" max="480" step="15"></div>
+              <div class="form-group"><label>Repeats</label><select id="mtgRecurrence" onchange="toggleMtgRecurrenceOpts()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;"><option value="">No repeat</option><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></div>
+            </div>
+            <div id="mtgRecurrenceOpts" style="display:none;margin-bottom:8px;"><div class="form-group"><label>Repeat until (optional)</label><input type="date" id="mtgUntil"></div></div>
             <div class="form-group"><label>Location</label><input type="text" id="mtgLocation" placeholder="e.g. Station 13 &#8212; Bay Floor"></div>
             <div class="form-group"><label>Agenda / Notes</label><textarea id="mtgDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
             <input type="hidden" id="mtgEditId" value="">
@@ -12581,7 +12894,8 @@ function applyBulkEdit() {
   <div style="background:#1A1A1A;border:1px solid #333;border-radius:14px;padding:24px;width:90%;max-width:420px;">
     <div style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;color:#F0F0F0;margin-bottom:2px;" id="suModalUnit">Sign Up</div>
     <div id="suModalDate" style="font-size:13px;color:#888;margin-bottom:4px;"></div>
-    <div id="suRankReq" style="font-size:11px;color:#888;margin-bottom:14px;"></div>
+    <div id="suRankReq" style="font-size:11px;color:#888;margin-bottom:6px;"></div>
+    <div id="suCoverageHint" style="display:none;font-size:11px;color:#888;background:#111;border:1px solid #2A2A2A;border-radius:6px;padding:7px 10px;margin-bottom:10px;line-height:1.5;"></div>
     <!-- Hidden state fields -->
     <input type="hidden" id="suDate">
     <input type="hidden" id="suUnitId">
