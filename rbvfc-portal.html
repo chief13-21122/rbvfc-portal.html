@@ -540,34 +540,38 @@ function initFirebase(onReady) {
     document.head.appendChild(s);
   }
 
-  var SDK_VER = '10.8.1';
-  var CDN = 'https://www.gstatic.com/firebasejs/' + SDK_VER + '/';
-  var loaded = 0, needed = 3;
-  function onLoad() {
-    loaded++;
-    if (loaded < needed) return;
-    try {
-      var cfg = getFirebaseConfig();
-      // Avoid duplicate app init
-      if (typeof firebase !== 'undefined') {
-        try { fbApp = firebase.app(); } catch(e) { fbApp = firebase.initializeApp(cfg); }
-      }
-      fbDb   = firebase.firestore();
-      fbAuth = firebase.auth();
-      // Enable offline persistence (works across tabs)
-      fbDb.enablePersistence({synchronizeTabs: true}).catch(function(e){
-        if (e.code !== 'failed-precondition' && e.code !== 'unimplemented')
-          console.warn('[RBVFC] Persistence error:', e);
+  // Sequential SDK load: App → Auth → Firestore → anonymous sign-in → sync
+  var CDN = 'https://www.gstatic.com/firebasejs/9.23.0/';
+  _loadSdk(CDN + 'firebase-app-compat.js', function() {
+    _loadSdk(CDN + 'firebase-auth-compat.js', function() {
+      _loadSdk(CDN + 'firebase-firestore-compat.js', function() {
+        try {
+          var cfg = getFirebaseConfig();
+          try { fbApp = firebase.app(); } catch(e) { fbApp = firebase.initializeApp(cfg); }
+          fbAuth = firebase.auth(fbApp);
+          fbDb   = firebase.firestore(fbApp);
+          // Enable offline persistence
+          fbDb.enablePersistence({synchronizeTabs: true}).catch(function(e){
+            if (e.code !== 'failed-precondition' && e.code !== 'unimplemented')
+              console.warn('[RBVFC] Persistence error:', e);
+          });
+          // Sign in anonymously so Firestore rules (require auth) pass
+          fbAuth.signInAnonymously().then(function() {
+            _fbInitialized = true;
+            console.log('[RBVFC] Firebase + Firestore ready (anonymous auth).');
+            if (onReady) onReady(fbApp);
+            _startFbSync();
+          }).catch(function(authErr) {
+            // Anonymous auth failed (may be disabled) — try without auth
+            console.warn('[RBVFC] Anonymous auth failed, trying without auth:', authErr.code);
+            _fbInitialized = true;
+            if (onReady) onReady(fbApp);
+            _startFbSync();
+          });
+        } catch(e) { console.error('[RBVFC] Firebase init error:', e); }
       });
-      _fbInitialized = true;
-      console.log('[RBVFC] Firebase + Firestore ready.');
-      if (onReady) onReady(fbApp);
-      _startFbSync();
-    } catch(e) { console.error('[RBVFC] Firebase init error:', e); }
-  }
-  _loadSdk(CDN + 'firebase-app-compat.js',       onLoad);
-  _loadSdk(CDN + 'firebase-firestore-compat.js',  onLoad);
-  _loadSdk(CDN + 'firebase-auth-compat.js',       onLoad);
+    });
+  });
 }
 
 // ── Company document path ─────────────────────────────────
