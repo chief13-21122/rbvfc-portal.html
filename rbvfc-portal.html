@@ -4359,7 +4359,7 @@ function renderStaffingBoard() {
           if (date === new Date().toISOString().slice(0,10)) {
             isPastTime = new Date().getHours() >= 20;
           }
-          var meetsRankForPos = me ? memberMeetsRank(me, posName) : true;
+          var meetsRankForPos = member ? memberMeetsRank(member, posName) : true;
           if (!blocked && !adminRestricted && !isPastDate && !isPastTime && meetsRankForPos) {
             html += '<button class="btn btn-sm btn-success" onclick="openSignUpModal(\''+date+'\',\''+uId+'\',' +posIdx+ ',\''+posName.replace(/'/g,"\\\'")+'\')">\u270B Sign Up</button>';
           } else if (!blocked && adminRestricted && !isPastDate) {
