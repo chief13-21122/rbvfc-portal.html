@@ -580,47 +580,99 @@ function _fbDocPath() {
   return 'companies/' + projectId + '/data/portal';
 }
 
-// ── Save to Firestore (debounced, with localStorage backup) ──
+// ── Multi-doc split: state is stored across 3 Firestore documents ──────────
+// Doc 1: portal_main  — everything except large arrays (~50KB)
+// Doc 2: portal_acts  — losapActivities (can be 500KB+)
+// Doc 3: portal_train — trainingSubmissions (can be 400KB+)
+// This keeps each doc well under Firestore's 1MB limit.
+
+function _fbDocMain()  { return 'companies/' + (state.fbProjectId||'rbvfc') + '/data/portal_main'; }
+function _fbDocActs()  { return 'companies/' + (state.fbProjectId||'rbvfc') + '/data/portal_acts'; }
+function _fbDocTrain() { return 'companies/' + (state.fbProjectId||'rbvfc') + '/data/portal_train'; }
+
+function _fbSplitState() {
+  var full = JSON.parse(JSON.stringify(state));
+  // Strip base64 cert data from training submissions (stored in Drive)
+  if (full.trainingSubmissions) {
+    full.trainingSubmissions = full.trainingSubmissions.map(function(s) {
+      var c = Object.assign({}, s); delete c.certBase64; return c;
+    });
+  }
+  var acts  = { losapActivities: full.losapActivities || [] };
+  var train = { trainingSubmissions: full.trainingSubmissions || [] };
+  delete full.losapActivities;
+  delete full.trainingSubmissions;
+  return { main: full, acts: acts, train: train };
+}
+
+// ── Save to Firestore (debounced) ────────────────────────────────────────────
 var _fbSaveTimer = null;
 function _fbSave() {
   if (!_fbConfigured() || !_fbInitialized || !fbDb) return;
   clearTimeout(_fbSaveTimer);
   _fbSaveTimer = setTimeout(function() {
-    var payload = JSON.parse(JSON.stringify(state)); // deep clone
-    fbDb.doc(_fbDocPath()).set(payload)
-      .then(function(){ console.log('[RBVFC] Firestore saved.'); })
-      .catch(function(e){ console.error('[RBVFC] Firestore save error:', e); });
-  }, 800); // debounce 800ms
+    var parts = _fbSplitState();
+    var saves = [
+      fbDb.doc(_fbDocMain()).set(parts.main),
+      fbDb.doc(_fbDocActs()).set(parts.acts),
+      fbDb.doc(_fbDocTrain()).set(parts.train)
+    ];
+    Promise.all(saves)
+      .then(function(){ console.log('[RBVFC] Firestore saved (3 docs).'); })
+      .catch(function(e){ console.error('[RBVFC] Firestore save error:', e.message); });
+  }, 800);
 }
 
-// ── Real-time listener — keeps all devices in sync ────────
+// ── Real-time listeners — one per doc ────────────────────────────────────────
+var _fbSyncUnsubMain  = null;
+var _fbSyncUnsubActs  = null;
+var _fbSyncUnsubTrain = null;
+
+function _mergeAndRender(remote) {
+  if (!remote) return;
+  Object.assign(state, remote);
+  try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
+  try { renderMyShifts(); }     catch(e){}
+  try { renderStaffingBoard(); } catch(e){}
+  try { renderLOSAP(); }        catch(e){}
+  try { renderCompanyLOSAP(); } catch(e){}
+  try { updateClockUI(); }      catch(e){}
+  console.log('[RBVFC] Synced from Firestore.');
+}
+
 function _startFbSync() {
   if (!_fbConfigured() || !_fbInitialized || !fbDb) return;
-  if (_fbSyncUnsubscribe) _fbSyncUnsubscribe(); // detach any old listener
+  if (_fbSyncUnsubMain)  { _fbSyncUnsubMain();  _fbSyncUnsubMain  = null; }
+  if (_fbSyncUnsubActs)  { _fbSyncUnsubActs();  _fbSyncUnsubActs  = null; }
+  if (_fbSyncUnsubTrain) { _fbSyncUnsubTrain(); _fbSyncUnsubTrain = null; }
   _fbSyncing = true;
-  _fbSyncUnsubscribe = fbDb.doc(_fbDocPath()).onSnapshot(function(doc) {
-    if (!doc.exists) return;
-    var remote = doc.data();
-    if (!remote) return;
-    // Merge remote data into state (remote wins for shared data)
-    Object.assign(state, remote);
-    // Re-render active views
-    try { renderMyShifts(); } catch(e){}
-    try { renderStaffingBoard(); } catch(e){}
-    try { renderLOSAP(); } catch(e){}
-    try { renderCompanyLOSAP(); } catch(e){}
-    try { updateClockUI(); } catch(e){}
-    // Also persist locally as fallback cache
-    try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
-    console.log('[RBVFC] Synced from Firestore.');
-  }, function(err) {
-    console.warn('[RBVFC] Sync listener error:', err);
-    _fbSyncing = false;
-  });
+
+  _fbSyncUnsubMain = fbDb.doc(_fbDocMain()).onSnapshot(function(doc) {
+    if (doc.exists) _mergeAndRender(doc.data());
+  }, function(e){ console.warn('[RBVFC] Main sync error:', e.message); });
+
+  _fbSyncUnsubActs = fbDb.doc(_fbDocActs()).onSnapshot(function(doc) {
+    if (doc.exists && doc.data().losapActivities) {
+      state.losapActivities = doc.data().losapActivities;
+      try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
+      try { renderLOSAP(); } catch(e){}
+      try { renderCompanyLOSAP(); } catch(e){}
+    }
+  }, function(e){ console.warn('[RBVFC] Acts sync error:', e.message); });
+
+  _fbSyncUnsubTrain = fbDb.doc(_fbDocTrain()).onSnapshot(function(doc) {
+    if (doc.exists && doc.data().trainingSubmissions) {
+      state.trainingSubmissions = doc.data().trainingSubmissions;
+      try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
+      try { renderTrainingReview(); } catch(e){}
+    }
+  }, function(e){ console.warn('[RBVFC] Train sync error:', e.message); });
 }
 
 function stopFbSync() {
-  if (_fbSyncUnsubscribe) { _fbSyncUnsubscribe(); _fbSyncUnsubscribe = null; }
+  if (_fbSyncUnsubMain)  { _fbSyncUnsubMain();  _fbSyncUnsubMain  = null; }
+  if (_fbSyncUnsubActs)  { _fbSyncUnsubActs();  _fbSyncUnsubActs  = null; }
+  if (_fbSyncUnsubTrain) { _fbSyncUnsubTrain(); _fbSyncUnsubTrain = null; }
   _fbSyncing = false;
 }
 
@@ -810,29 +862,33 @@ function load() {
 }
 
 function loadFromFirestore(onComplete) {
-  // Pull latest data from Firestore (called after Firebase is ready)
   if (!_fbConfigured() || !_fbInitialized || !fbDb) {
     if (onComplete) onComplete(false); return;
   }
-  fbDb.doc(_fbDocPath()).get()
-    .then(function(doc) {
-      if (doc.exists) {
-        var remote = doc.data();
-        Object.assign(state, remote);
-        // Update local cache
-        try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
-        console.log('[RBVFC] Loaded from Firestore.');
-      } else {
-        // First time — push local state up to Firestore
-        console.log('[RBVFC] No Firestore doc yet — pushing local state.');
-        _fbSave();
-      }
-      if (onComplete) onComplete(true);
-    })
-    .catch(function(e) {
-      console.warn('[RBVFC] Firestore load error (using local cache):', e);
-      if (onComplete) onComplete(false);
-    });
+  // Load all 3 split documents in parallel
+  Promise.all([
+    fbDb.doc(_fbDocMain()).get(),
+    fbDb.doc(_fbDocActs()).get(),
+    fbDb.doc(_fbDocTrain()).get()
+  ]).then(function(docs) {
+    var anyExists = docs.some(function(d){ return d.exists; });
+    if (anyExists) {
+      if (docs[0].exists) Object.assign(state, docs[0].data());
+      if (docs[1].exists && docs[1].data().losapActivities)
+        state.losapActivities = docs[1].data().losapActivities;
+      if (docs[2].exists && docs[2].data().trainingSubmissions)
+        state.trainingSubmissions = docs[2].data().trainingSubmissions;
+      try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
+      console.log('[RBVFC] Loaded from Firestore (3 docs).');
+    } else {
+      console.log('[RBVFC] No Firestore docs yet — pushing local state.');
+      _fbSave();
+    }
+    if (onComplete) onComplete(true);
+  }).catch(function(e) {
+    console.warn('[RBVFC] Firestore load error (using local cache):', e.message);
+    if (onComplete) onComplete(false);
+  });
 }
 
 // ═══════════════════════════════════════════════════
