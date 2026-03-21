@@ -631,21 +631,28 @@ var _fbSyncUnsubTrain = null;
 
 function _mergeAndRender(remote) {
   if (!remote) return;
-  // Preserve local fb config before merge so incognito doesn't lose baked-in values
+  // Preserve local fb config so incognito doesn't lose baked-in values
   var _savedCfg = { fbApiKey: state.fbApiKey, fbProjectId: state.fbProjectId,
     fbAuthDomain: state.fbAuthDomain, fbStorageBucket: state.fbStorageBucket,
     fbMessagingSenderId: state.fbMessagingSenderId, fbAppId: state.fbAppId };
+  // Preserve current user's active session — Firestore may have null or another user's session
+  var _savedSession = (state.currentSession && state.currentSession.userId === state.currentUserId)
+    ? state.currentSession : null;
   Object.assign(state, remote);
   // Restore config (baked-in values always take priority over synced placeholders)
   Object.keys(_savedCfg).forEach(function(k){
     if (!state[k] || state[k].indexOf('YOUR_') === 0) state[k] = _savedCfg[k];
   });
+  // Restore current session if Firestore wiped it (e.g. officer saved state without this user's session)
+  if (_savedSession && !state.currentSession) {
+    state.currentSession = _savedSession;
+  }
   try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
   try { renderMyShifts(); }     catch(e){}
   try { renderStaffingBoard(); } catch(e){}
   try { renderLOSAP(); }        catch(e){}
   try { renderCompanyLOSAP(); } catch(e){}
-  try { updateClockUI(); }      catch(e){}
+  try { restoreClockState(); }  catch(e){}  // rebuilds session from active shifts if needed
   console.log('[RBVFC] Synced from Firestore.');
 }
 
@@ -5326,6 +5333,8 @@ function confirmStaffClockIn() {
     var clockedMember = (state.roster||[]).find(function(r){ return r.id===shiftMemberId; });
     var cName = clockedMember ? clockedMember.last+', '+clockedMember.first : 'Member';
     showToast('\u2705 '+cName+' clocked in for '+(UNIT_LABELS[shift.unitId]||shift.unitId)+bMsg+'.');
+    // If the clocked member happens to be viewing the portal right now, update their Clock tab
+    // (their Firestore listener will also trigger restoreClockState via _mergeAndRender)
   }
 }
 
@@ -8677,7 +8686,7 @@ function restoreClockState() {
       return s.memberId === state.currentUserId &&
              s.date === todayStr &&
              s.clockedIn === true &&
-             !s.clockedOut;
+             !s.clockedOutAt;   // clockedOutAt is the correct property name
     });
     if (activeShift) {
       var desc = (UNIT_LABELS[activeShift.unitId]||activeShift.unitId) + (activeShift.position ? ' · ' + activeShift.position : '');
