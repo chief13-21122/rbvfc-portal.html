@@ -513,14 +513,15 @@ var _fbSyncing = false;
 var _fbInitialized = false;
 
 function getFirebaseConfig() {
-  // Read config from state (saved by admin) or fall back to hardcoded placeholders
+  // Baked-in config — works in incognito/kiosk without localStorage
+  // Override with admin-saved values if present
   return {
-    apiKey:            state.fbApiKey            || "YOUR_API_KEY",
-    authDomain:        state.fbAuthDomain        || "YOUR_PROJECT.firebaseapp.com",
-    projectId:         state.fbProjectId         || "YOUR_PROJECT",
-    storageBucket:     state.fbStorageBucket     || "YOUR_PROJECT.appspot.com",
-    messagingSenderId: state.fbMessagingSenderId || "YOUR_SENDER_ID",
-    appId:             state.fbAppId             || "YOUR_APP_ID"
+    apiKey:            state.fbApiKey            || "AIzaSyDx14iFA-z_N3_XTGdp7WRpPhBseSwNnmc",
+    authDomain:        state.fbAuthDomain        || "rbvfc-losap.firebaseapp.com",
+    projectId:         state.fbProjectId         || "rbvfc-losap",
+    storageBucket:     state.fbStorageBucket     || "rbvfc-losap.firebasestorage.app",
+    messagingSenderId: state.fbMessagingSenderId || "782412260564",
+    appId:             state.fbAppId             || "1:782412260564:web:a8669ef676216300480741"
   };
 }
 
@@ -586,9 +587,9 @@ function _fbDocPath() {
 // Doc 3: portal_train — trainingSubmissions (can be 400KB+)
 // This keeps each doc well under Firestore's 1MB limit.
 
-function _fbDocMain()  { return 'companies/' + (state.fbProjectId||'rbvfc') + '/data/portal_main'; }
-function _fbDocActs()  { return 'companies/' + (state.fbProjectId||'rbvfc') + '/data/portal_acts'; }
-function _fbDocTrain() { return 'companies/' + (state.fbProjectId||'rbvfc') + '/data/portal_train'; }
+function _fbDocMain()  { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_main'; }
+function _fbDocActs()  { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_acts'; }
+function _fbDocTrain() { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_train'; }
 
 function _fbSplitState() {
   var full = JSON.parse(JSON.stringify(state));
@@ -630,7 +631,15 @@ var _fbSyncUnsubTrain = null;
 
 function _mergeAndRender(remote) {
   if (!remote) return;
+  // Preserve local fb config before merge so incognito doesn't lose baked-in values
+  var _savedCfg = { fbApiKey: state.fbApiKey, fbProjectId: state.fbProjectId,
+    fbAuthDomain: state.fbAuthDomain, fbStorageBucket: state.fbStorageBucket,
+    fbMessagingSenderId: state.fbMessagingSenderId, fbAppId: state.fbAppId };
   Object.assign(state, remote);
+  // Restore config (baked-in values always take priority over synced placeholders)
+  Object.keys(_savedCfg).forEach(function(k){
+    if (!state[k] || state[k].indexOf('YOUR_') === 0) state[k] = _savedCfg[k];
+  });
   try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
   try { renderMyShifts(); }     catch(e){}
   try { renderStaffingBoard(); } catch(e){}
