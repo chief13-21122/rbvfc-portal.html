@@ -1946,6 +1946,234 @@ function submitTraining() {
   showToast('✅ Training submitted for Fire Chief approval.');
 }
 
+
+// ═══════════════════════════════════════════════════
+//  TRAINING CLASS MANAGEMENT
+// ═══════════════════════════════════════════════════
+
+function openClassModal(editId) {
+  var modal = document.getElementById('classModal');
+  if (!modal) { buildClassModal(); modal = document.getElementById('classModal'); }
+  if (!modal) return;
+
+  // Reset form
+  ['cmName','cmDesc','cmInstructor','cmStartDate','cmEndDate','cmStartTime','cmEndTime'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.getElementById('cmEditId').value = editId || '';
+
+  if (editId) {
+    var cls = (state.trainingClasses||[]).find(function(c){ return c.id===editId; });
+    if (cls) {
+      ['cmName','cmDesc','cmInstructor','cmStartDate','cmEndDate','cmStartTime','cmEndTime'].forEach(function(id){
+        var field = id.replace('cm','').toLowerCase();
+        var el = document.getElementById(id);
+        if (el && cls[field] !== undefined) el.value = cls[field];
+      });
+      var nameEl = document.getElementById('cmName'); if (nameEl) nameEl.value = cls.name||'';
+      var descEl = document.getElementById('cmDesc'); if (descEl) descEl.value = cls.description||'';
+      var instrEl = document.getElementById('cmInstructor'); if (instrEl) instrEl.value = cls.instructor||'';
+      var sdEl = document.getElementById('cmStartDate'); if (sdEl) sdEl.value = cls.startDate||'';
+      var edEl = document.getElementById('cmEndDate'); if (edEl) edEl.value = cls.endDate||'';
+      var stEl = document.getElementById('cmStartTime'); if (stEl) stEl.value = cls.startTime||'';
+      var etEl = document.getElementById('cmEndTime'); if (etEl) etEl.value = cls.endTime||'';
+    }
+  }
+
+  var title = document.getElementById('cmModalTitle');
+  if (title) title.textContent = editId ? 'Edit Class' : 'Create Training Class';
+  modal.style.display = 'flex';
+}
+
+function closeClassModal() {
+  var modal = document.getElementById('classModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function saveTrainingClass() {
+  var editId = (document.getElementById('cmEditId')||{}).value || '';
+  var name   = ((document.getElementById('cmName')||{}).value||'').trim();
+  var desc   = ((document.getElementById('cmDesc')||{}).value||'').trim();
+  var instr  = ((document.getElementById('cmInstructor')||{}).value||'').trim();
+  var sDate  = ((document.getElementById('cmStartDate')||{}).value||'').trim();
+  var eDate  = ((document.getElementById('cmEndDate')||{}).value||'').trim();
+  var sTime  = ((document.getElementById('cmStartTime')||{}).value||'').trim();
+  var eTime  = ((document.getElementById('cmEndTime')||{}).value||'').trim();
+
+  if (!name || !sDate) { showToast('\u26a0\ufe0f Class name and start date are required.'); return; }
+
+  if (!Array.isArray(state.trainingClasses)) state.trainingClasses = [];
+
+  if (editId) {
+    var existing = state.trainingClasses.find(function(c){ return c.id===editId; });
+    if (existing) {
+      existing.name=name; existing.description=desc; existing.instructor=instr;
+      existing.startDate=sDate; existing.endDate=eDate||sDate;
+      existing.startTime=sTime; existing.endTime=eTime;
+      existing.updatedAt=new Date().toISOString();
+    }
+  } else {
+    state.trainingClasses.push({
+      id: 'cls_'+Date.now(), name:name, description:desc, instructor:instr,
+      startDate:sDate, endDate:eDate||sDate, startTime:sTime, endTime:eTime,
+      members:[], active:true, createdAt:new Date().toISOString(),
+      createdBy:state.currentUserId
+    });
+  }
+
+  save();
+  closeClassModal();
+  renderTrainingClasses();
+  showToast('\u2705 Class '+(editId?'updated':'created')+': '+name);
+}
+
+function deleteTrainingClass(classId) {
+  if (!confirm('Delete this training class? This cannot be undone.')) return;
+  state.trainingClasses = (state.trainingClasses||[]).filter(function(c){ return c.id!==classId; });
+  save();
+  renderTrainingClasses();
+  showToast('Class deleted.');
+}
+
+function openClassDetailModal(classId) {
+  var cls = (state.trainingClasses||[]).find(function(c){ return c.id===classId; });
+  var modal = document.getElementById('classDetailModal');
+  if (!modal) { buildClassDetailModal(); modal = document.getElementById('classDetailModal'); }
+  if (!modal || !cls) return;
+
+  var body = document.getElementById('classDetailBody');
+  if (!body) return;
+
+  var enrolled = (cls.members||[]).map(function(id){
+    var m=(state.roster||[]).find(function(x){ return x.id===id; });
+    return m ? m.last+', '+m.first : id;
+  });
+  var attendance = (state.classAttendance||[]).filter(function(a){ return a.classId===classId; });
+
+  var h = '<div style="margin-bottom:12px;">';
+  h += '<div style="font-size:14px;color:#888;margin-bottom:4px;">'+cls.startDate+(cls.endDate&&cls.endDate!==cls.startDate?' – '+cls.endDate:'')+'</div>';
+  if (cls.instructor) h += '<div style="font-size:13px;color:#AAA;">Instructor: '+cls.instructor+'</div>';
+  if (cls.description) h += '<div style="font-size:12px;color:#666;margin-top:4px;">'+cls.description+'</div>';
+  h += '</div>';
+
+  h += '<div style="font-size:11px;font-weight:700;color:#888;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">Enrolled Members ('+enrolled.length+')</div>';
+  if (!enrolled.length) {
+    h += '<div style="color:#555;font-size:13px;">No members enrolled yet.</div>';
+  } else {
+    enrolled.forEach(function(name){ h += '<div style="font-size:13px;color:#CCC;padding:3px 0;border-bottom:1px solid #1A1A1A;">'+name+'</div>'; });
+  }
+
+  body.innerHTML = h;
+  var titleEl = document.getElementById('classDetailTitle');
+  if (titleEl) titleEl.textContent = cls.name;
+  modal.style.display = 'flex';
+}
+
+function closeClassDetailModal() {
+  var modal = document.getElementById('classDetailModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function renderTrainingClasses() {
+  var container = document.getElementById('trainingClassesContainer');
+  if (!container) return;
+  var uid = state.currentUserId;
+  var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+  var isOfficer = m && (m.appRole==='officer'||m.appRole==='admin');
+  var classes = (state.trainingClasses||[]).filter(function(c){ return c.active!==false; })
+    .sort(function(a,b){ return (b.startDate||'').localeCompare(a.startDate||''); });
+
+  if (!classes.length) {
+    container.innerHTML = '<p style="color:#555;font-size:13px;text-align:center;padding:16px;">No training classes scheduled.</p>';
+    return;
+  }
+
+  var h = '';
+  classes.forEach(function(cls){
+    var enrolled = (cls.members||[]).length;
+    var myEnrolled = (cls.members||[]).indexOf(uid) >= 0;
+    h += '<div style="background:#181818;border:1px solid #2A2A2A;border-radius:10px;padding:14px;margin-bottom:10px;">';
+    h += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap;">';
+    h += '<div style="flex:1;">';
+    h += '<div style="font-size:14px;font-weight:700;color:#F0F0F0;">'+cls.name+'</div>';
+    h += '<div style="font-size:11px;color:#888;margin-top:2px;">'+cls.startDate+(cls.endDate&&cls.endDate!==cls.startDate?' – '+cls.endDate:'')+(cls.startTime?' &nbsp;&#183;&nbsp; '+cls.startTime:'')+'</div>';
+    if (cls.instructor) h += '<div style="font-size:11px;color:#666;">Instructor: '+cls.instructor+'</div>';
+    if (cls.description) h += '<div style="font-size:12px;color:#555;margin-top:4px;">'+cls.description+'</div>';
+    h += '</div>';
+    h += '<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;">';
+    h += '<span style="font-size:11px;color:#888;padding:3px 8px;border:1px solid #333;border-radius:4px;">'+enrolled+' enrolled</span>';
+    if (isOfficer) {
+      h += '<button onclick="openClassModal(\''+cls.id+'\')" class="btn btn-sm btn-secondary" style="font-size:10px;">Edit</button>';
+      h += '<button onclick="deleteTrainingClass(\''+cls.id+'\')" class="btn btn-sm btn-danger" style="font-size:10px;">Delete</button>';
+    }
+    h += '<button onclick="openClassDetailModal(\''+cls.id+'\')" class="btn btn-sm btn-secondary" style="font-size:10px;">Details</button>';
+    if (myEnrolled) {
+      h += '<span style="font-size:11px;font-weight:700;color:#27AE60;">&#10003; Enrolled</span>';
+    } else {
+      h += '<button onclick="enrollInClass(\''+cls.id+'\')" class="btn btn-sm btn-success" style="font-size:10px;">Enroll</button>';
+    }
+    h += '</div></div></div>';
+  });
+  container.innerHTML = h;
+}
+
+function enrollInClass(classId) {
+  var cls = (state.trainingClasses||[]).find(function(c){ return c.id===classId; });
+  if (!cls) return;
+  if (!Array.isArray(cls.members)) cls.members = [];
+  var uid = state.currentUserId;
+  if (cls.members.indexOf(uid) >= 0) { showToast('Already enrolled.'); return; }
+  cls.members.push(uid);
+  save();
+  renderTrainingClasses();
+  showToast('\u2705 Enrolled in '+cls.name);
+}
+
+function buildClassModal() {
+  if (document.getElementById('classModal')) return;
+  var m = document.createElement('div');
+  m.id = 'classModal';
+  m.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center;padding:20px;';
+  m.innerHTML = '<div style="background:#1A1A1A;border:1px solid #333;border-radius:14px;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">'
+    + '<h2 id="cmModalTitle" style="margin:0;font-size:16px;color:#F0F0F0;">Create Training Class</h2>'
+    + '<button onclick="closeClassModal()" style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;">&#10005;</button>'
+    + '</div>'
+    + '<input type="hidden" id="cmEditId">'
+    + '<div class="form-group"><label>Class Name *</label><input type="text" id="cmName" placeholder="e.g. Firefighter I Operations"></div>'
+    + '<div class="form-group"><label>Description</label><textarea id="cmDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;" placeholder="Class overview…"></textarea></div>'
+    + '<div class="form-group"><label>Instructor</label><input type="text" id="cmInstructor" placeholder="e.g. Chief Smith"></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
+    + '<div class="form-group"><label>Start Date *</label><input type="date" id="cmStartDate"></div>'
+    + '<div class="form-group"><label>End Date</label><input type="date" id="cmEndDate"></div>'
+    + '<div class="form-group"><label>Start Time</label><input type="time" id="cmStartTime"></div>'
+    + '<div class="form-group"><label>End Time</label><input type="time" id="cmEndTime"></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;margin-top:8px;">'
+    + '<button class="btn btn-primary btn-full" onclick="saveTrainingClass()">&#128190; Save Class</button>'
+    + '<button class="btn btn-secondary" onclick="closeClassModal()">Cancel</button>'
+    + '</div>'
+    + '</div>';
+  document.body.appendChild(m);
+}
+
+function buildClassDetailModal() {
+  if (document.getElementById('classDetailModal')) return;
+  var m = document.createElement('div');
+  m.id = 'classDetailModal';
+  m.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center;padding:20px;';
+  m.innerHTML = '<div style="background:#1A1A1A;border:1px solid #333;border-radius:14px;padding:20px;width:100%;max-width:440px;max-height:80vh;overflow-y:auto;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'
+    + '<h2 id="classDetailTitle" style="margin:0;font-size:16px;color:#F0F0F0;"></h2>'
+    + '<button onclick="closeClassDetailModal()" style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;">&#10005;</button>'
+    + '</div>'
+    + '<div id="classDetailBody"></div>'
+    + '</div>';
+  document.body.appendChild(m);
+}
+
+
 function initTrainingTab() {
   var uid = state.currentUserId;
   var m = (state.roster||[]).find(function(x){ return x.id===uid; });
@@ -1956,6 +2184,10 @@ function initTrainingTab() {
   // Review card: officers see all, others see own
   var rc = document.getElementById('trainingSubmissionsCard');
   if (rc) rc.style.display = 'block';
+  // Training classes
+  var tcBtn = document.getElementById('trainingClassesOfficerBtn');
+  if (tcBtn) tcBtn.style.display = isOfficer ? 'block' : 'none';
+  renderTrainingClasses();
   renderTrainingReview();
 }
 
@@ -9050,7 +9282,10 @@ function renderRankEditor() {
       + '<div style="padding:12px 14px;">';
 
     positions.forEach(function(pos) {
-      var currentReq = unitReqs[pos] || '';
+      var _storedReq  = unitReqs[pos] || null;
+      var currentReq  = _storedReq ? (typeof _storedReq==='object' ? (_storedReq.minRank||'') : _storedReq) : '';
+      var currentCert = _storedReq && typeof _storedReq==='object' ? (_storedReq.reqCert||'') : '';
+      var defaultRank = POSITION_MIN_RANK[pos] || '';
       // Build rank options and cert options
       var opts = '<option value="">No minimum</option>'        + RANK_ORDER.map(function(r) {
             return '<option value="' + r + '"' + (currentReq === r ? ' selected' : '') + '>' + r + '</option>';
@@ -9786,7 +10021,7 @@ function buildPublicCombinedRespondersCol(yr, todayStr) {
   return '<div style="display:flex;flex-direction:column;border-right:1px solid #1E1E1E;overflow:hidden;">'
     + '<div style="padding:10px 14px;background:#111;border-bottom:1px solid #1E1E1E;flex-shrink:0;display:flex;align-items:center;gap:8px;">'
     +   '<span style="font-size:16px;">\uD83D\uDD25\uD83D\uDE91</span>'
-    +   '<span style="font-size:13px;font-weight:700;color:'+accentColor+';letter-spacing:3px;text-transform:uppercase;">'+yr+' TOP RESPONDERS</span>'
+    +   '<span style="font-size:13px;font-weight:700;color:#3498DB;letter-spacing:3px;text-transform:uppercase;">'+yr+' TOP RESPONDERS</span>'
     + '</div>'
     + '<div style="flex:1;overflow-y:auto;">'
     + buildSection(fireCounts, '#C8102E', '\uD83D\uDD25', 'Fire Responses')
