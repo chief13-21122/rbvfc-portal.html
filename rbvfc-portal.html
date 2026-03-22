@@ -4414,7 +4414,28 @@ function renderStaffingBoard() {
         html += '</div>';
 
         if (isEmpty) {
-          html += '<div style="flex:1;font-size:13px;color:#666;font-style:italic;">\u2014 Open \u2014</div>';
+          // Show partial coverage info on this position slot
+          var _covShifts = (state.staffingShifts||[]).filter(function(s){
+            return s.date===date && s.unitId===uId && s.positionIndex===posIdx && s.memberId && !s.clockedOutAt;
+          });
+          if (_covShifts.length) {
+            // Position has partial coverage — show covered windows
+            var _covStr = _covShifts.map(function(s){
+              var _m = (state.roster||[]).find(function(r){ return r.id===s.memberId; });
+              var _st = s.shiftStart||s.start||'0700';
+              var _sh = parseFloat(s.shiftHours||s.hours||24);
+              var _sH = parseInt(_st.slice(0,2)), _sM = parseInt(_st.slice(2,4)||'0');
+              var _eMin = (_sH*60+_sM+Math.round(_sh*60))%(24*60);
+              var _eH = Math.floor(_eMin/60), _eM = _eMin%60;
+              return (_m?_m.last:'?')+': '+_st+'\u2013'+((_eH<10?'0':'')+_eH+(_eM<10?'0':'')+_eM);
+            }).join(', ');
+            html += '<div style="flex:1;">';
+            html += '<div style="font-size:11px;color:#F5A623;font-style:normal;margin-bottom:2px;">\u26A0 Partially covered</div>';
+            html += '<div style="font-size:10px;color:#666;">'+_covStr+'</div>';
+            html += '</div>';
+          } else {
+            html += '<div style="flex:1;font-size:13px;color:#666;font-style:italic;">\u2014 Open \u2014</div>';
+          }
           // Determine if member can sign up here
           var myShiftsOnDate  = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.memberId===uid; });
           // EMS units (a139, Mu13) are compatible with fire units — no conflict cross-type
