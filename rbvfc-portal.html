@@ -843,6 +843,7 @@ var state = {
   lastSync: null,              // ISO date of last sheet sync
   pendingYearArchive: null,    // pending year-end archive request
   rankRequirements: {},        // custom rank requirements per position
+  customUnitPositions: null,    // null = use UNIT_POSITIONS defaults; {unitId: [pos1, pos2, ...]}
   trainingClasses: [],         // [{id,name,description,instructor,startDate,endDate,daysOfWeek,startTime,endTime,members,active,createdAt}]
   classAttendance: []          // [{id,classId,memberId,sessionDate,clockedInAt,clockedOutAt}]
 };
@@ -2880,6 +2881,8 @@ function onAdminTabShow() {
   // Position Rank Requirements — admin only
   var rankRequirementsCard = document.getElementById('rankRequirementsCard');
   if (rankRequirementsCard) rankRequirementsCard.style.display = isAdmin2 ? '' : 'none';
+  var unitPosMgmtCard = document.getElementById('unitPositionMgmtCard');
+  if (unitPosMgmtCard) unitPosMgmtCard.style.display = isAdmin2 ? '' : 'none';
 }
 
 // ═══════════════════════════════════════════════════
@@ -3919,6 +3922,14 @@ var UNIT_POSITIONS = {
 
 var staffingReminderInterval = null;
 
+// Get positions for a unit, respecting admin customizations
+function getUnitPositions(unitId) {
+  if (state.customUnitPositions && state.customUnitPositions[unitId]) {
+    return state.customUnitPositions[unitId];
+  }
+  return getUnitPositions(unitId);
+}
+
 function rankIndex(rank) {
   var i = RANK_ORDER.indexOf(rank);
   return i === -1 ? 0 : i;
@@ -4832,7 +4843,7 @@ function updateAssignMemberDropdown(unitId, date) {
   if (!posSel || !memSel) return;
 
   var posVal = posSel.value;
-  var positions = UNIT_POSITIONS[unitId] || [];
+  var positions = getUnitPositions(unitId);
   var posName = posVal === '999' ? 'Student'
               : (posVal !== '' ? (positions[parseInt(posVal)] || '') : '');
 
@@ -4886,7 +4897,7 @@ function officerAssign(date, unitId) {
   if (!memberId) { showToast('⚠️ Select a member to assign.'); return; }
   if (isNaN(posIdx) || posIdx < 0) { showToast('⚠️ Select a position.'); return; }
 
-  var positions = UNIT_POSITIONS[unitId] || [];
+  var positions = getUnitPositions(unitId);
   var posName   = posIdx === 999 ? 'Student' : (positions[posIdx] || '');
 
   // Check ineligible ride report restriction
@@ -4956,7 +4967,7 @@ function renderMonthlyCalendar() {
   function getDayStatus(day) {
     var date = yr+'-'+(mo+1<10?'0':'')+(mo+1)+'-'+(day<10?'0':'')+day;
     var unitStatuses = enabledUnits.map(function(unitId) {
-      var positions  = UNIT_POSITIONS[unitId] || [];
+      var positions  = getUnitPositions(unitId);
       var unitShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===unitId && s.memberId; });
       var filled = positions.filter(function(p,i){ return unitShifts.some(function(s){ return s.positionIndex===i; }); }).length;
       var min    = UNIT_MIN_STAFF[unitId] || 1;
@@ -5072,7 +5083,7 @@ function notifyUnderstaffedDay(date) {
   var enabledUnits = UNITS.filter(function(u){ var _e = state.staffingEnabled || {}; return _e[u] !== false; });
   var open = [];
   enabledUnits.forEach(function(unitId) {
-    var positions  = UNIT_POSITIONS[unitId] || [];
+    var positions  = getUnitPositions(unitId);
     var unitShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===unitId && s.memberId; });
     var min = UNIT_MIN_STAFF[unitId] || 1;
     var filled = positions.filter(function(p,i){ return unitShifts.some(function(s){ return s.positionIndex===i; }); }).length;
@@ -5232,7 +5243,7 @@ function _ciUpdateDisplay(backHrs) {
 }
 
 function signUpAllForUnit(date, unitId) {
-  var positions = UNIT_POSITIONS[unitId] || [];
+  var positions = getUnitPositions(unitId);
   var EMS = ['a139', 'Mu13'];
   var unitIsEMS = EMS.indexOf(unitId) >= 0;
   var activeMembers = (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); });
@@ -5915,7 +5926,7 @@ function fillStaffingNeedsMessage() {
   // Compare against min required positions (first N of UNIT_POSITIONS where N=UNIT_MIN_STAFF)
   var needsParts = [];
   activeUnits.forEach(function(unitId){
-    var allPos = UNIT_POSITIONS[unitId] || [];
+    var allPos = getUnitPositions(unitId);
     var minStaff = UNIT_MIN_STAFF[unitId] || 1;
     var required = allPos.slice(0, minStaff); // first positions are the critical ones
     var filled = filledByUnit[unitId] || [];
@@ -8913,7 +8924,7 @@ function renderRankEditor() {
 
   Object.keys(UNIT_POSITIONS).forEach(function(unitId) {
     var unitLabel  = UNIT_LABELS[unitId] || unitId;
-    var positions  = UNIT_POSITIONS[unitId];
+    var positions  = getEffectivePositions(unitId);
     var unitReqs   = state.rankRequirements[unitId] || {};
 
     html += '<div style="margin-bottom:18px;background:#181818;border:1px solid #2A2A2A;border-radius:10px;overflow:hidden;">'
@@ -9387,7 +9398,7 @@ function renderUmUnitPositionRows() {
   var html = '';
   Object.keys(UNIT_LABELS).forEach(function(unitId) {
     var label = UNIT_LABELS[unitId] || unitId;
-    var positions = UNIT_POSITIONS[unitId] || [];
+    var positions = getUnitPositions(unitId);
     html += '<div style="margin-bottom:10px;">'
       + '<div style="font-size:11px;color:#888;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">\u{1F692} ' + label + '</div>'
       + '<div style="display:flex;flex-wrap:wrap;gap:4px 10px;">'
@@ -10530,6 +10541,113 @@ function toggleAdminSubCard(collapseId, iconId) {
   body.style.display = open ? 'block' : 'none';
   if (icon) icon.style.transform = open ? 'rotate(0deg)' : 'rotate(-90deg)';
 }
+
+
+// === UNIT POSITION MANAGEMENT ===
+
+function togglePositionMgmt() {
+  var col = document.getElementById('posMgmtCollapse');
+  var icon = document.getElementById('posMgmtToggleIcon');
+  if (!col) return;
+  var open = col.style.display !== 'none';
+  col.style.display = open ? 'none' : 'block';
+  if (icon) icon.innerHTML = open ? '&#9654; Show' : '&#9660; Hide';
+  if (!open) renderUnitPositionEditor();
+}
+
+function getEffectivePositions(unitId) {
+  if (state.customUnitPositions && state.customUnitPositions[unitId]) {
+    return state.customUnitPositions[unitId].slice();
+  }
+  return (UNIT_POSITIONS[unitId] || []).slice();
+}
+
+function renderUnitPositionEditor() {
+  var container = document.getElementById('unitPositionEditorContainer');
+  if (!container) return;
+  var h = '';
+  var units = Object.keys(UNIT_LABELS);
+  units.forEach(function(unitId) {
+    var positions = getEffectivePositions(unitId);
+    var isCustom = !!(state.customUnitPositions && state.customUnitPositions[unitId]);
+    h += '<div style="background:#181818;border:1px solid '+(isCustom?'#F5A623':'#2A2A2A')+';border-radius:10px;padding:14px;margin-bottom:12px;">';
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">';
+    h += '<span style="font-weight:700;font-size:14px;color:#F0F0F0;">'+UNIT_LABELS[unitId]+'</span>';
+    if (isCustom) h += '<span style="font-size:10px;color:#F5A623;padding:2px 8px;border:1px solid #F5A623;border-radius:4px;">CUSTOM</span>';
+    h += '</div>';
+    // Position tags
+    h += '<div id="posTags_'+unitId+'" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">';
+    positions.forEach(function(pos, i) {
+      h += '<div style="display:flex;align-items:center;gap:4px;background:#111;border:1px solid #333;border-radius:6px;padding:4px 8px;font-size:12px;color:#CCC;">';
+      h += '<span>'+pos+'</span>';
+      h += '<button onclick="removeUnitPosition(\''+unitId+'\','+i+')" style="background:none;border:none;color:#E74C3C;cursor:pointer;padding:0 2px;font-size:13px;line-height:1;">&#10005;</button>';
+      h += '</div>';
+    });
+    h += '</div>';
+    // Add new position
+    h += '<div style="display:flex;gap:6px;">';
+    h += '<input type="text" id="newPos_'+unitId+'" placeholder="New position name" style="flex:1;background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:6px 10px;font-size:12px;" onkeydown="if(event.key===\'Enter\')addUnitPosition(\''+unitId+'\')">'; 
+    h += '<button onclick="addUnitPosition(\''+unitId+'\')" class="btn btn-sm btn-primary">+ Add</button>';
+    if (isCustom) h += '<button onclick="resetUnitPositions(\''+unitId+'\')" class="btn btn-sm btn-secondary" title="Reset to default">&#8635;</button>';
+    h += '</div>';
+    h += '</div>';
+  });
+  container.innerHTML = h;
+}
+
+function addUnitPosition(unitId) {
+  var input = document.getElementById('newPos_' + unitId);
+  if (!input) return;
+  var name = input.value.trim();
+  if (!name) { showToast('\u26a0\ufe0f Enter a position name.'); return; }
+  if (!state.customUnitPositions) state.customUnitPositions = {};
+  if (!state.customUnitPositions[unitId]) {
+    state.customUnitPositions[unitId] = (UNIT_POSITIONS[unitId] || []).slice();
+  }
+  if (state.customUnitPositions[unitId].indexOf(name) >= 0) {
+    showToast('\u26a0\ufe0f That position already exists.'); return;
+  }
+  state.customUnitPositions[unitId].push(name);
+  input.value = '';
+  save();
+  renderUnitPositionEditor();
+  try { renderStaffingBoard(); } catch(e){}
+  showToast('\u2705 Position added: ' + name);
+}
+
+function removeUnitPosition(unitId, index) {
+  if (!state.customUnitPositions) state.customUnitPositions = {};
+  if (!state.customUnitPositions[unitId]) {
+    state.customUnitPositions[unitId] = (UNIT_POSITIONS[unitId] || []).slice();
+  }
+  var positions = state.customUnitPositions[unitId];
+  var removing = positions[index];
+  if (!confirm('Remove \"' + removing + '\" from ' + (UNIT_LABELS[unitId]||unitId) + '?')) return;
+  positions.splice(index, 1);
+  save();
+  renderUnitPositionEditor();
+  try { renderStaffingBoard(); } catch(e){}
+  showToast('Position removed.');
+}
+
+function resetUnitPositions(unitId) {
+  if (!confirm('Reset ' + (UNIT_LABELS[unitId]||unitId) + ' to default positions?')) return;
+  if (state.customUnitPositions) delete state.customUnitPositions[unitId];
+  save();
+  renderUnitPositionEditor();
+  try { renderStaffingBoard(); } catch(e){}
+  showToast('\u2705 Reset to defaults.');
+}
+
+function resetAllUnitPositions() {
+  if (!confirm('Reset ALL units to their default positions? Custom changes will be lost.')) return;
+  state.customUnitPositions = null;
+  save();
+  renderUnitPositionEditor();
+  try { renderStaffingBoard(); } catch(e){}
+  showToast('\u2705 All units reset to defaults.');
+}
+
 
 function toggleRankEditor() {
   toggleAdminRankCard();
@@ -12539,7 +12657,23 @@ function applyBulkEdit() {
       </div>
 
       <!-- Position Rank Requirements -->
-      <div class="card" data-no-collapse="1" id="rankRequirementsCard">
+      <div class="card" id="unitPositionMgmtCard">
+          <div class="card-header">
+            <div class="icon">&#127381;</div><h2>Unit Position Management</h2>
+            <button class="btn btn-sm btn-secondary" style="margin-left:auto;" onclick="togglePositionMgmt()">
+              <span id="posMgmtToggleIcon">&#9654; Show</span>
+            </button>
+          </div>
+          <div id="posMgmtCollapse" style="display:none;">
+            <div style="font-size:12px;color:#888;margin-bottom:14px;line-height:1.5;">Customize the positions on each unit. Changes apply to the staffing board immediately. Drag to reorder, click &#10005; to remove, or add new positions below each unit.</div>
+            <div id="unitPositionEditorContainer"></div>
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid #2A2A2A;">
+              <button class="btn btn-secondary btn-sm" onclick="resetAllUnitPositions()">&#8635; Reset All to Defaults</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" data-no-collapse="1" id="rankRequirementsCard">
         <div class="card-header">
           <div class="icon">🎖️</div><h2>Position Rank Requirements</h2>
           <button class="btn btn-sm btn-secondary" style="margin-left:auto;" onclick="toggleRankEditor()">
