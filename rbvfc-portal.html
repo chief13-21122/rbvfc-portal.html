@@ -4429,33 +4429,60 @@ function renderStaffingBoard() {
         var isEmpty = !shift || !shift.memberId;
         var clockedIn = shift && shift.clockedIn;
 
-        html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;flex-wrap:wrap;">';
-        html += '<div style="min-width:130px;">';
-        html += '<div style="font-size:12px;color:#888;font-weight:600;">'+posName+'</div>';
-        html += '</div>';
+        html += '<div style="padding:10px 0;border-bottom:1px solid #1E1E1E;">';
+        html += '<div style="font-size:11px;color:#666;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">'+posName+'</div>';
+        html += '<div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;">';
 
         if (isEmpty) {
-          // Show partial coverage info on this position slot
+          // Find all partial-coverage shifts for this position slot
           var _covShifts = (state.staffingShifts||[]).filter(function(s){
             return s.date===date && s.unitId===uId && s.positionIndex===posIdx && s.memberId && !s.clockedOutAt;
+          }).sort(function(a,b){
+            return (a.shiftStart||a.start||'0700').localeCompare(b.shiftStart||b.start||'0700');
           });
-          if (_covShifts.length) {
-            // Position has partial coverage — show covered windows
-            var _covStr = _covShifts.map(function(s){
-              var _m = (state.roster||[]).find(function(r){ return r.id===s.memberId; });
-              var _st = s.shiftStart||s.start||'0700';
-              var _sh = parseFloat(s.shiftHours||s.hours||24);
+
+          if (!_covShifts.length) {
+            // Fully open — show open badge + direct Sign Up
+            html += '<div style="flex:1;display:flex;align-items:center;gap:8px;">';
+            html += '<div style="display:inline-flex;align-items:center;gap:5px;background:#0D1A0D;border:1px solid #1A4A1A;border-radius:6px;padding:4px 10px;">';
+            html += '<div style="width:7px;height:7px;border-radius:50%;background:#27AE60;"></div>';
+            html += '<div style="font-size:13px;color:#27AE60;font-weight:700;letter-spacing:1px;">OPEN &ndash; Full Shift (0700&ndash;0700)</div>';
+            html += '</div>';
+            html += '</div>';
+          } else {
+            // Partially covered — show each window + highlight open gap
+            html += '<div style="flex:1;">';
+            // Coverage summary line
+            html += '<div style="display:flex;align-items:center;gap:5px;margin-bottom:6px;">';
+            html += '<div style="font-size:11px;font-weight:700;color:#F5A623;letter-spacing:1px;text-transform:uppercase;">\u26A0 Partially Covered</div>';
+            html += '</div>';
+            // Each covered window as a pill
+            _covShifts.forEach(function(_cs){
+              var _cm = (state.roster||[]).find(function(r){ return r.id===_cs.memberId; });
+              var _st = _cs.shiftStart||_cs.start||'0700';
+              var _sh = parseFloat(_cs.shiftHours||_cs.hours||24);
               var _sH = parseInt(_st.slice(0,2)), _sM = parseInt(_st.slice(2,4)||'0');
               var _eMin = (_sH*60+_sM+Math.round(_sh*60))%(24*60);
               var _eH = Math.floor(_eMin/60), _eM = _eMin%60;
-              return (_m?_m.last:'?')+': '+_st+'\u2013'+((_eH<10?'0':'')+_eH+(_eM<10?'0':'')+_eM);
-            }).join(', ');
-            html += '<div style="flex:1;">';
-            html += '<div style="font-size:11px;color:#F5A623;font-style:normal;margin-bottom:2px;">\u26A0 Partially covered</div>';
-            html += '<div style="font-size:10px;color:#666;">'+_covStr+'</div>';
+              var _eStr = (_eH<10?'0':'')+_eH+(_eM<10?'0':'')+_eM;
+              var _stFmt = (parseInt(_st.slice(0,2))%12||12)+':'+(parseInt(_st.slice(2,4)||'0')<10?'0':'')+parseInt(_st.slice(2,4)||'0')+' '+(parseInt(_st.slice(0,2))>=12?'PM':'AM');
+              var _eFmt  = (_eH%12||12)+':'+(_eM<10?'0':'')+_eM+' '+(_eH>=12?'PM':'AM');
+              var _ci = _cs.clockedIn;
+              html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;background:#1A1A0A;border:1px solid #3A3A1A;border-radius:6px;padding:5px 10px;">';
+              html += '<div style="width:6px;height:6px;border-radius:50%;background:'+(_ci?'#27AE60':'#F5A623')+';flex-shrink:0;"></div>';
+              html += '<div style="flex:1;">';
+              html += '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">'+(_cm?_cm.last+', '+_cm.first:'?')+'</div>';
+              html += '<div style="font-size:11px;color:#888;">'+_stFmt+' &ndash; '+_eFmt+'</div>';
+              html += '</div>';
+              if (_ci) html += '<div style="font-size:10px;font-weight:700;color:#27AE60;letter-spacing:1px;">IN</div>';
+              html += '</div>';
+            });
+            // Show open gap notice
+            html += '<div style="display:flex;align-items:center;gap:6px;margin-top:4px;background:#0D1A1A;border:1px dashed #1A3A3A;border-radius:6px;padding:5px 10px;">';
+            html += '<div style="width:6px;height:6px;border-radius:50%;background:#3498DB;flex-shrink:0;"></div>';
+            html += '<div style="font-size:12px;color:#3498DB;font-weight:700;letter-spacing:1px;">Other windows open &ndash; Sign Up below</div>';
             html += '</div>';
-          } else {
-            html += '<div style="flex:1;font-size:13px;color:#666;font-style:italic;">\u2014 Open \u2014</div>';
+            html += '</div>';
           }
           // Determine if member can sign up here
           var myShiftsOnDate  = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.memberId===uid; });
@@ -4514,6 +4541,7 @@ function renderStaffingBoard() {
           }
         }
         html += '</div>';
+        html += '</div>'; // end inner flex
       });
 
       // Student slots (positionIndex 999) shown after named positions
@@ -9496,794 +9524,78 @@ function renderPublicView() {
   var yr  = new Date().getFullYear();
   var now = new Date();
   var pad = function(n){ return String(n).padStart(2,'0'); };
-  var todayStr = yr+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
-  var compName = state.companyName || 'RIVIERA BEACH VOL. FIRE CO. 13';
-  var QUALIFY_PTS = 50;
+  var todayStr    = now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
+  var tomorrowObj = new Date(now); tomorrowObj.setDate(now.getDate()+1);
+  var tomorrowStr = tomorrowObj.getFullYear()+'-'+pad(tomorrowObj.getMonth()+1)+'-'+pad(tomorrowObj.getDate());
 
-  // ── Build LOSAP totals ──────────────────────────────────────────
-  var yearStart = yr+'-01-01', yearEnd = yr+'-12-31';
-  var totals = {};
-  (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).forEach(function(m){
-    totals[m.id] = { member:m, pts:0, responses:0, dutyHrs:0, cats:{} };
-  });
-  (state.losapActivities||[]).forEach(function(a){
-    if (a.date>=yearStart && a.date<=yearEnd && totals[a.memberId]) {
-      totals[a.memberId].pts += (a.pts||0);
-      if (!totals[a.memberId].cats[a.category]) totals[a.memberId].cats[a.category]=0;
-      totals[a.memberId].cats[a.category] += (a.pts||0);
-    }
-  });
-  (state.emergencyResponses||[]).forEach(function(r){
-    if (r.date>=yearStart && r.date<=yearEnd) {
-      (r.memberIds||[]).forEach(function(id){
-        if (totals[id]) { totals[id].responses++; totals[id].pts+=0.5; }
-      });
-    }
-  });
-  (state.staffingShifts||[]).filter(function(s){ return s.date>=yearStart&&s.date<=yearEnd&&s.clockedOutAt; }).forEach(function(s){
-    if (!totals[s.memberId]) return;
-    var hrs = parseFloat(s.shiftHours||s.hours||0);
-    totals[s.memberId].pts += Math.floor(hrs/4);
-    totals[s.memberId].dutyHrs += hrs;
-  });
-
-  var rows = Object.values(totals).filter(function(r){ return r.member && r.member.id; })
-    .sort(function(a,b){ return b.pts-a.pts || (a.member.last||'').localeCompare(b.member.last||''); });
-
-  var qualified = rows.filter(function(r){ return r.pts>=QUALIFY_PTS; });
-  var totalActive = rows.length;
-
-  // ── Build On-Duty list ──────────────────────────────────────────
+  // Open sessions
   var openSessions = {};
-  (state.sessions||[]).filter(function(s){ return !s.end&&s.userId; }).forEach(function(s){
-    openSessions[s.userId]={ activity:s.activity||'duty', desc:s.desc||'' };
+  (state.sessions||[]).filter(function(s){ return !s.end && s.userId; }).forEach(function(s){
+    openSessions[s.userId] = { activity: s.activity||'duty', desc: s.desc||'' };
   });
-  if (state.currentSession&&state.currentSession.userId&&!state.currentSession.end) {
-    openSessions[state.currentSession.userId]={
-      activity:state.currentSession.activity||'duty', desc:state.currentSession.desc||''
+  if (state.currentSession && state.currentSession.userId && !state.currentSession.end) {
+    openSessions[state.currentSession.userId] = {
+      activity: state.currentSession.activity||'duty',
+      desc: state.currentSession.desc||''
     };
   }
-  (state.staffingShifts||[]).filter(function(s){ return s.date===todayStr&&s.clockedIn&&!s.clockedOutAt; }).forEach(function(s){
-    if (!openSessions[s.memberId]) openSessions[s.memberId]={
-      activity:'duty',
-      desc:(UNIT_LABELS[s.unitId]||s.unitId)+(s.position?' \u00b7 '+s.position:'')
-    };
-  });
-
-  var onDuty = Object.keys(openSessions).map(function(uid){
-    var m=(state.roster||[]).find(function(x){ return x.id===uid; });
-    if (!m||m.active===false) return null;
-    var shift=(state.staffingShifts||[]).find(function(s){ return s.date===todayStr&&s.memberId===uid&&s.clockedIn; });
-    return { member:m, info:openSessions[uid], shift:shift||null };
-  }).filter(Boolean).sort(function(a,b){ return (a.member.last||'').localeCompare(b.member.last||''); });
-
-  var logoSrc = getLogoData();
-
-  // ── Build HTML ──────────────────────────────────────────────────
-  var h = '<div style="display:flex;flex-direction:column;height:100vh;overflow:hidden;background:#080808;'
-        + 'font-family:\'Barlow Condensed\',sans-serif;box-sizing:border-box;">';
-
-  // TOP HEADER
-  h += '<div style="display:flex;align-items:center;gap:24px;padding:8px 28px;background:#0C0C0C;border-bottom:3px solid #C8102E;flex-shrink:0;">';
-  if (logoSrc) h += '<img src="'+logoSrc+'" style="height:46px;width:auto;object-fit:contain;">';
-  h += '<div style="flex:1;">'
-     + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:26px;letter-spacing:4px;color:#F0F0F0;line-height:1;">'+compName+'</div>'
-     + '<div style="font-size:12px;color:#555;letter-spacing:2px;text-transform:uppercase;">'+yr+' LOSAP &nbsp;\u00b7&nbsp; '+qualified.length+'/'+totalActive+' QUALIFIED</div>'
-     + '</div>';
-  // Stats mini row
-  h += '<div style="display:flex;gap:28px;align-items:center;">';
-  [
-    { v:qualified.length,  l:'QUALIFIED',    c:'#27AE60' },
-    { v:onDuty.length,     l:'ON DUTY NOW',  c:'#C8102E' },
-    { v:totalActive,       l:'ACTIVE MBR',   c:'#3498DB' },
-  ].forEach(function(s){
-    h += '<div style="text-align:center;">'
-       + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:30px;color:'+s.c+';line-height:1;letter-spacing:1px;">'+s.v+'</div>'
-       + '<div style="font-size:9px;color:#444;letter-spacing:2px;text-transform:uppercase;">'+s.l+'</div>'
-       + '</div>';
-  });
-  h += '</div>';
-  h += '<div style="text-align:right;min-width:120px;">'
-     + '<div id="tvClock" style="font-family:\'Bebas Neue\',sans-serif;font-size:40px;color:#C8102E;line-height:1;letter-spacing:2px;"></div>'
-     + '<div id="tvDate" style="font-size:10px;color:#444;letter-spacing:1px;"></div>'
-     + '</div>';
-  h += '</div>';
-
-  // MAIN BODY: left leaderboard + right on-duty
-  h += '<div style="display:flex;flex:1;overflow:hidden;gap:0;">';
-
-  // ── LEFT: LEADERBOARD ─────────────────────────────────────────
-  h += '<div style="flex:1;display:flex;flex-direction:column;border-right:2px solid #1A1A1A;overflow:hidden;">';
-  // Leaderboard header
-  h += '<div style="display:grid;grid-template-columns:48px 1fr 80px 80px 100px;gap:0;'
-     + 'padding:7px 16px;background:#111;border-bottom:1px solid #1E1E1E;flex-shrink:0;">';
-  ['#','MEMBER','RESP','DUTY','PTS'].forEach(function(label,i){
-    var align = i>=2 ? 'right' : 'left';
-    h += '<div style="font-size:9px;font-weight:700;color:#444;letter-spacing:2px;text-align:'+align+';">'+label+'</div>';
-  });
-  h += '</div>';
-
-  // Scrollable rows — auto-scroll every 8s if too many to fit
-  h += '<div id="tvLeaderScroll" style="flex:1;overflow:hidden;position:relative;">';
-  h += '<div id="tvLeaderRows" style="position:absolute;top:0;left:0;right:0;transition:top 0.8s ease;">';
-
-  rows.forEach(function(r, i) {
-    var q    = r.pts >= QUALIFY_PTS;
-    var pct  = Math.min(100, Math.round((r.pts/QUALIFY_PTS)*100));
-    var rankC = i===0?'#F5A623':i===1?'#B0B0B0':i===2?'#CD7F32':'#3A3A3A';
-    var rowBg = q ? (i%2===0?'#0D0D0D':'#0B0B0B') : (i%2===0?'#0A0808':'#090707');
-    var leftBorder = q ? 'border-left:3px solid #27AE60;' : 'border-left:3px solid #2A1A1A;';
-    var m = r.member;
-    var isNowOnDuty = !!openSessions[m.id];
-    var name = m.last.toUpperCase()+', '+m.first;
-    var rk = m.ranks&&m.ranks.length ? m.ranks[0] : (m.rank||'');
-
-    h += '<div style="display:grid;grid-template-columns:48px 1fr 80px 80px 100px;gap:0;'
-       + 'padding:6px 16px;background:'+rowBg+';border-bottom:1px solid #111;align-items:center;'+leftBorder+'">';
-    // Rank number
-    h += '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:20px;color:'+rankC+';line-height:1;">'+(i+1)+'</div>';
-    // Name + rank
-    h += '<div style="min-width:0;">'
-       + '<div style="display:flex;align-items:center;gap:6px;">'
-       + '<div style="font-size:15px;font-weight:700;color:'+(q?'#F0F0F0':'#666')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1;">'+name+'</div>'
-       + (isNowOnDuty ? '<div style="font-size:9px;font-weight:700;color:#27AE60;padding:1px 5px;background:#0A1A0A;border:1px solid #1A3A1A;border-radius:3px;white-space:nowrap;flex-shrink:0;">\u2022 ON DUTY</div>' : '')
-       + '</div>'
-       + (rk ? '<div style="font-size:9px;color:#3A3A3A;letter-spacing:1px;text-transform:uppercase;line-height:1;">'+rk+'</div>' : '')
-       + '</div>';
-    // Responses
-    h += '<div style="font-size:15px;font-weight:700;color:#3498DB;text-align:right;line-height:1;">'+r.responses+'</div>';
-    // Duty hrs
-    h += '<div style="font-size:15px;font-weight:700;color:#555;text-align:right;line-height:1;">'+Math.round(r.dutyHrs)+'h</div>';
-    // Points + bar
-    h += '<div style="text-align:right;">'
-       + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:22px;color:'+(q?'#27AE60':'#F5A623')+';line-height:1;letter-spacing:1px;">'+Math.round(r.pts)+'</div>'
-       + '<div style="height:2px;background:#1A1A1A;border-radius:1px;margin-top:2px;">'
-       +   '<div style="height:2px;background:'+(q?'#27AE60':'#F5A623')+';border-radius:1px;width:'+pct+'%;"></div>'
-       + '</div>'
-       + '</div>';
-    h += '</div>';
-  });
-
-  h += '</div></div></div>'; // end leaderRows, leaderScroll, left panel
-
-  // ── RIGHT: ON DUTY NOW ────────────────────────────────────────
-  var rightW = onDuty.length > 15 ? '320px' : '280px';
-  h += '<div style="width:'+rightW+';flex-shrink:0;display:flex;flex-direction:column;background:#090909;overflow:hidden;">';
-  h += '<div style="padding:10px 16px;background:#0F0F0F;border-bottom:2px solid #C8102E;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;">'
-     + '<div style="font-size:13px;font-weight:700;color:#C8102E;letter-spacing:3px;text-transform:uppercase;">ON DUTY NOW</div>'
-     + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:24px;color:#C8102E;letter-spacing:1px;">'+onDuty.length+'</div>'
-     + '</div>';
-  h += '<div style="flex:1;overflow-y:auto;padding:8px 0;">';
-
-  if (!onDuty.length) {
-    h += '<div style="color:#333;font-size:14px;text-align:center;padding:32px 16px;letter-spacing:1px;">No members currently on duty</div>';
-  } else {
-    // Group by unit
-    var byUnit = {};
-    var noUnit = [];
-    onDuty.forEach(function(od){
-      if (od.shift && od.shift.unitId) {
-        var u = od.shift.unitId;
-        if (!byUnit[u]) byUnit[u]=[];
-        byUnit[u].push(od);
-      } else { noUnit.push(od); }
-    });
-
-    Object.keys(byUnit).sort().forEach(function(unitId){
-      var label = (UNIT_LABELS&&UNIT_LABELS[unitId]) ? UNIT_LABELS[unitId].toUpperCase() : unitId.toUpperCase();
-      h += '<div style="padding:6px 16px 2px;font-size:9px;font-weight:700;color:#C8102E;letter-spacing:3px;text-transform:uppercase;border-top:1px solid #181818;">'+label+'</div>';
-      byUnit[unitId].forEach(function(od){
-        var m=od.member;
-        var r = totals[m.id];
-        var pts = r ? Math.round(r.pts) : 0;
-        var q = pts >= QUALIFY_PTS;
-        h += '<div style="display:flex;align-items:center;gap:8px;padding:7px 16px;border-bottom:1px solid #0F0F0F;">'
-           + '<div style="width:8px;height:8px;border-radius:50%;background:#27AE60;flex-shrink:0;box-shadow:0 0 5px #27AE60;"></div>'
-           + '<div style="flex:1;min-width:0;">'
-           + '<div style="font-size:15px;font-weight:700;color:#F0F0F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+m.last.toUpperCase()+', '+m.first+'</div>'
-           + (od.shift&&od.shift.position ? '<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;line-height:1;">'+od.shift.position+'</div>' : '')
-           + '</div>'
-           + '<div style="text-align:right;flex-shrink:0;">'
-           + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:18px;color:'+(q?'#27AE60':'#F5A623')+';line-height:1;">'+pts+'</div>'
-           + '<div style="font-size:8px;color:#333;letter-spacing:1px;">PTS</div>'
-           + '</div>'
-           + '</div>';
-      });
-    });
-
-    if (noUnit.length) {
-      h += '<div style="padding:6px 16px 2px;font-size:9px;font-weight:700;color:#555;letter-spacing:3px;border-top:1px solid #181818;">OTHER</div>';
-      noUnit.forEach(function(od){
-        var m=od.member;
-        var pts = totals[m.id] ? Math.round(totals[m.id].pts) : 0;
-        var q = pts>=QUALIFY_PTS;
-        h += '<div style="display:flex;align-items:center;gap:8px;padding:7px 16px;border-bottom:1px solid #0F0F0F;">'
-           + '<div style="width:8px;height:8px;border-radius:50%;background:#27AE60;box-shadow:0 0 5px #27AE60;"></div>'
-           + '<div style="flex:1;font-size:15px;font-weight:700;color:#F0F0F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+m.last.toUpperCase()+', '+m.first+'</div>'
-           + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:18px;color:'+(q?'#27AE60':'#F5A623')+';margin-left:4px;">'+pts+'</div>'
-           + '</div>';
-      });
+  (state.staffingShifts||[]).filter(function(s){ return s.date===todayStr && s.clockedIn && !s.clockedOutAt; }).forEach(function(s){
+    if (!openSessions[s.memberId]) {
+      openSessions[s.memberId] = {
+        activity: 'duty',
+        desc: (UNIT_LABELS[s.unitId]||s.unitId) + (s.position ? ' \u00b7 '+s.position : '')
+      };
     }
-  }
-  h += '</div></div>'; // end on-duty panel
+  });
 
-  h += '</div></div>'; // end main body, tvBoard
+  var logoSrc  = getLogoData();
+  var compName = state.companyName || 'RIVIERA BEACH VOL. FIRE CO. 13';
 
+  var h = '<div id="tvBoard" style="display:flex;flex-direction:column;height:100vh;overflow:hidden;'
+        + 'background:#080808;font-family:Barlow Condensed,sans-serif;box-sizing:border-box;">';
+
+  // Header
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 28px;'
+     + 'background:#0C0C0C;border-bottom:3px solid #C8102E;flex-shrink:0;">';
+  h += (logoSrc ? '<img src="'+logoSrc+'" style="height:48px;width:auto;object-fit:contain;">'
+                : '<div style="width:60px;"></div>');
+  h += '<div style="text-align:center;">'
+     + '<div style="font-family:Bebas Neue,sans-serif;font-size:28px;letter-spacing:5px;color:#F0F0F0;line-height:1;">'+compName+'</div>'
+     + '<div id="tvDateLine" style="font-size:13px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-top:2px;"></div>'
+     + '</div>';
+  h += '<div id="tvClock" style="font-family:Bebas Neue,sans-serif;font-size:48px;color:#C8102E;'
+     + 'line-height:1;letter-spacing:2px;text-align:right;"></div>';
+  h += '</div>';
+
+  // 4-column grid: Today | Tomorrow | Responses | On Duty
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1.4fr 1.1fr;gap:0;flex:1;overflow:hidden;">';
+  h += buildPublicStaffingCol(todayStr, now, openSessions, "TODAY\'S STAFFING", '#C8102E', true);
+  h += buildPublicStaffingCol(tomorrowStr, tomorrowObj, openSessions, "TOMORROW\'S STAFFING", '#F5A623', false);
+  h += buildPublicCombinedRespondersCol(yr, todayStr);
+  h += buildPublicOnDutyColTV(openSessions, todayStr);
+  h += '</div>';
+
+  h += '</div>';
   sa.innerHTML = h;
   document.body.style.overflow = 'hidden';
 
-  // ── Live clock ───────────────────────────────────────────────
   function tickClock() {
-    var el = document.getElementById('tvClock');
-    if (!el) return;
+    var cl = document.getElementById('tvClock');
+    var dl = document.getElementById('tvDateLine');
+    if (!cl) return;
     var t=new Date(), hh=t.getHours(), mm=t.getMinutes(), ss=t.getSeconds();
     var ap=hh>=12?'PM':'AM'; hh=hh%12||12;
-    el.textContent = hh+':'+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0')+' '+ap;
-    var de=document.getElementById('tvDate');
-    if (de) de.textContent=t.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+    cl.textContent = hh+':'+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0')+' '+ap;
+    if (dl) dl.textContent = t.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
   }
   tickClock();
   if (window._tvClockInterval) clearInterval(window._tvClockInterval);
   window._tvClockInterval = setInterval(tickClock, 1000);
-
-  // ── Auto-scroll leaderboard for 70 members ───────────────────
-  (function() {
-    var scrollEl = document.getElementById('tvLeaderScroll');
-    var rowsEl   = document.getElementById('tvLeaderRows');
-    if (!scrollEl || !rowsEl) return;
-
-    var scrollPos   = 0;
-    var rowHeight   = 36; // approx px per row
-    var visibleRows = Math.floor(scrollEl.offsetHeight / rowHeight);
-    var totalRows   = rows.length;
-    var maxScroll   = Math.max(0, (totalRows - visibleRows) * rowHeight);
-
-    if (maxScroll <= 0) return; // all fit on screen
-
-    var scrollStep = Math.floor(visibleRows * 0.8) * rowHeight; // scroll 80% of visible area
-
-    if (window._tvScrollInterval) clearInterval(window._tvScrollInterval);
-    window._tvScrollInterval = setInterval(function() {
-      scrollPos += scrollStep;
-      if (scrollPos > maxScroll) scrollPos = 0; // loop back to top
-      rowsEl.style.top = (-scrollPos) + 'px';
-    }, 8000); // advance every 8 seconds
-  })();
-
-  // ── Auto-refresh every 3 minutes ────────────────────────────
   if (window._pubRefreshInterval) clearInterval(window._pubRefreshInterval);
   window._pubRefreshInterval = setInterval(renderPublicView, 180000);
 }
 
 
-// ═══════════════════════════════════════════════════
-//  SHARED HELPERS
-// ═══════════════════════════════════════════════════
-function isCurrentUserOfficer() {
-  var me = (state.roster||[]).find(function(m){ return m.id === state.currentUserId; });
-  return !!(me && (me.appRole === 'officer' || me.appRole === 'admin'));
-}
-
-function escHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-// ═══════════════════════════════════════════════════
-//  TRAINING CLASSES
-// ═══════════════════════════════════════════════════
-
-var DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-var DAY_FULL  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-
-// Generate all session dates for a class based on its recurring schedule
-function generateClassSessions(cls) {
-  if (!cls || !cls.startDate || !cls.endDate || !cls.daysOfWeek || !cls.daysOfWeek.length) return [];
-  var sessions = [];
-  var cur = new Date(cls.startDate + 'T12:00:00');
-  var end = new Date(cls.endDate   + 'T12:00:00');
-  var maxIter = 500; var iter = 0;
-  while (cur <= end && iter++ < maxIter) {
-    if (cls.daysOfWeek.indexOf(cur.getDay()) >= 0) {
-      var pad = function(n){ return String(n).padStart(2,'0'); };
-      sessions.push(cur.getFullYear()+'-'+pad(cur.getMonth()+1)+'-'+pad(cur.getDate()));
-    }
-    cur.setDate(cur.getDate() + 1);
-  }
-  return sessions;
-}
-
-// Render the training classes card (call when staffing tab opens or classes change)
-function renderTrainingClasses() {
-  var container = document.getElementById('trainingClassesContainer');
-  if (!container) return;
-  var classes = (state.trainingClasses||[]).filter(function(c){ return c.active !== false; });
-  var uid = state.currentUserId;
-  var isOfficer = isCurrentUserOfficer();
-  var todayStr = new Date().toISOString().slice(0,10);
-
-  if (!classes.length) {
-    container.innerHTML = '<p style="color:#666;font-size:13px;text-align:center;padding:20px 0;">'
-      + (isOfficer ? 'No training classes yet. Click <strong style="color:#F0F0F0;">+ Create Class</strong> to add one.' : 'No active training classes.')
-      + '</p>';
-    return;
-  }
-
-  container.innerHTML = classes.map(function(cls) {
-    var sessions = generateClassSessions(cls);
-    var total    = sessions.length;
-    var past     = sessions.filter(function(d){ return d < todayStr; }).length;
-    var upcoming = sessions.filter(function(d){ return d >= todayStr; }).length;
-    var myAtt    = (state.classAttendance||[]).filter(function(a){ return a.classId===cls.id && a.memberId===uid && a.clockedInAt; }).length;
-    var isMember = (cls.members||[]).indexOf(uid) >= 0;
-    var daysLabel = (cls.daysOfWeek||[]).map(function(d){ return DAY_NAMES[d]; }).join(', ');
-    var timeLabel = '';
-    if (cls.startTime) {
-      var sh = cls.startTime.slice(0,2), sm = cls.startTime.slice(2);
-      var sh2 = parseInt(sh), ampm = sh2>=12?'PM':'AM'; sh2=sh2%12||12;
-      timeLabel = sh2+':'+sm+' '+ampm;
-    }
-    if (cls.endTime) {
-      var eh = cls.endTime.slice(0,2), em = cls.endTime.slice(2);
-      var eh2 = parseInt(eh), eampm = eh2>=12?'PM':'AM'; eh2=eh2%12||12;
-      timeLabel += ' – '+eh2+':'+em+' '+eampm;
-    }
-    var progress = total > 0 ? Math.round((past/total)*100) : 0;
-    var memberCount = (cls.members||[]).length;
-    // Count clocked-in members today
-    var todayAtt = (state.classAttendance||[]).filter(function(a){
-      return a.classId===cls.id && a.sessionDate===todayStr && a.clockedInAt && !a.clockedOutAt;
-    }).length;
-    var hasSessionToday = sessions.indexOf(todayStr) >= 0;
-
-    return '<div style="border:1px solid #2A2A2A;border-radius:10px;padding:14px;margin-bottom:12px;background:#111;">'
-      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;">'
-      +   '<div style="flex:1;min-width:0;">'
-      +     '<div style="font-size:15px;font-weight:700;color:#F0F0F0;margin-bottom:2px;">📚 '+escHtml(cls.name)+'</div>'
-      +     (cls.description ? '<div style="font-size:12px;color:#888;margin-bottom:4px;">'+escHtml(cls.description)+'</div>' : '')
-      +     '<div style="font-size:11px;color:#666;">'+daysLabel+(timeLabel ? ' &nbsp;·&nbsp; '+timeLabel : '')+'</div>'
-      +     '<div style="font-size:11px;color:#666;">'+escHtml(cls.startDate)+' → '+escHtml(cls.endDate)+'</div>'
-      +   '</div>'
-      +   '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">'
-      +     (isMember ? '<span style="font-size:10px;background:#1A3A1A;color:#27AE60;border:1px solid #27AE60;border-radius:10px;padding:2px 8px;">✓ ENROLLED</span>' : '')
-      +     (hasSessionToday ? '<span style="font-size:10px;background:#3A1A1A;color:#C8102E;border:1px solid #C8102E;border-radius:10px;padding:2px 8px;">CLASS TODAY</span>' : '')
-      +     (todayAtt > 0 ? '<span style="font-size:10px;background:#1A2A1A;color:#27AE60;border-radius:10px;padding:2px 8px;">'+todayAtt+' checked in</span>' : '')
-      +   '</div>'
-      + '</div>'
-      // Progress bar
-      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
-      +   '<div style="flex:1;background:#1E1E1E;border-radius:4px;height:5px;overflow:hidden;">'
-      +     '<div style="height:5px;background:linear-gradient(90deg,#3498DB,#27AE60);border-radius:4px;width:'+progress+'%;transition:width .5s;"></div>'
-      +   '</div>'
-      +   '<span style="font-size:11px;color:#666;white-space:nowrap;">'+past+'/'+total+' sessions</span>'
-      + '</div>'
-      // Member count + actions
-      + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
-      +   '<span style="font-size:11px;color:#666;">👥 '+memberCount+' member'+(memberCount!==1?'s':'')+'</span>'
-      +   (cls.instructor ? '<span style="font-size:11px;color:#666;">·&nbsp; 👤 '+escHtml(cls.instructor)+'</span>' : '')
-      +   (isMember && myAtt > 0 ? '<span style="font-size:11px;color:#27AE60;">·&nbsp; ✓ '+myAtt+' attended</span>' : '')
-      + '</div>'
-      // Buttons
-      + '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
-      +   '<button class="btn btn-sm btn-secondary" onclick="viewClassDetail(\''+cls.id+'\')">📋 View Sessions</button>'
-      +   (isOfficer ? '<button class="btn btn-sm btn-secondary" onclick="openClassModal(\''+cls.id+'\')">✏️ Edit</button>' : '')
-      +   (isOfficer ? '<button class="btn btn-sm btn-secondary" style="color:#E74C3C;" onclick="archiveTrainingClass(\''+cls.id+'\')">🗄 Archive</button>' : '')
-      + '</div>'
-      + '</div>';
-  }).join('');
-}
-
-// Render the member's class sessions today (for Clock tab)
-function renderMyClassesToday() {
-  var container = document.getElementById('myClassesTodayContainer');
-  if (!container) return;
-  var uid = state.currentUserId;
-  if (!uid) return;
-  var todayStr = new Date().toISOString().slice(0,10);
-  var myClasses = (state.trainingClasses||[]).filter(function(c){
-    if (c.active === false) return false;
-    if ((c.members||[]).indexOf(uid) < 0) return false;
-    return generateClassSessions(c).indexOf(todayStr) >= 0;
-  });
-
-  var card = document.getElementById('myClassesTodayCard');
-  if (!myClasses.length) {
-    if (card) card.style.display = 'none';
-    return;
-  }
-  if (card) card.style.display = 'block'; var _rb=document.getElementById('losapRankingBody'); if(_rb) _rb.style.display='block';
-
-  container.innerHTML = myClasses.map(function(cls) {
-    var att = (state.classAttendance||[]).find(function(a){
-      return a.classId===cls.id && a.memberId===uid && a.sessionDate===todayStr;
-    });
-    var isIn  = att && att.clockedInAt && !att.clockedOutAt;
-    var isDone = att && att.clockedOutAt;
-    var timeLabel = '';
-    if (cls.startTime) {
-      var sh = parseInt(cls.startTime.slice(0,2)), sm = cls.startTime.slice(2);
-      timeLabel = (sh%12||12)+':'+sm+' '+(sh>=12?'PM':'AM');
-    }
-    if (cls.endTime) {
-      var eh = parseInt(cls.endTime.slice(0,2)), em = cls.endTime.slice(2);
-      timeLabel += ' – '+(eh%12||12)+':'+em+' '+(eh>=12?'PM':'AM');
-    }
-    var sessionCount = generateClassSessions(cls).indexOf(todayStr) + 1;
-    var totalSess    = generateClassSessions(cls).length;
-
-    return '<div style="border:1px solid '+(isIn?'#27AE60':isDone?'#2A2A2A':'#3498DB')+';border-radius:10px;padding:14px;margin-bottom:10px;background:'+(isIn?'rgba(39,174,96,0.05)':'#111')+';">'
-      + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
-      +   '<div style="font-size:15px;font-weight:700;color:#F0F0F0;">📚 '+escHtml(cls.name)+'</div>'
-      +   '<span style="font-size:10px;color:#666;">Session '+sessionCount+'/'+totalSess+'</span>'
-      + '</div>'
-      + (timeLabel ? '<div style="font-size:12px;color:#888;margin-bottom:8px;">🕐 '+timeLabel+'</div>' : '')
-      + (cls.instructor ? '<div style="font-size:12px;color:#666;margin-bottom:8px;">👤 '+escHtml(cls.instructor)+'</div>' : '')
-      + (isDone
-          ? '<div style="font-size:12px;color:#27AE60;">✓ Attended today</div>'
-          : isIn
-            ? '<button class="btn btn-primary" style="background:#E74C3C;border-color:#E74C3C;" onclick="classClockOut()">🔴 Clock Out of Class</button>'
-            : '<button class="btn btn-primary" style="background:#3498DB;border-color:#3498DB;" onclick="classClockIn(\''+cls.id+'\',\''+todayStr+'\')">📚 Clock In to Class</button>'
-        )
-      + '</div>';
-  }).join('');
-}
-
-function classToCalDetails(cls, sessionDate) {
-  var sh = cls.startTime ? parseInt(cls.startTime.slice(0,2)) : 8;
-  var sm = cls.startTime ? parseInt(cls.startTime.slice(2)||'0') : 0;
-  var eh = cls.endTime ? parseInt(cls.endTime.slice(0,2)) : sh + 2;
-  var em = cls.endTime ? parseInt(cls.endTime.slice(2)||'0') : 0;
-  var hours = Math.max(1, (eh + em/60) - (sh + sm/60));
-  return {
-    title: 'RBVFC Training — ' + cls.name,
-    date: sessionDate,
-    startHH: (sh < 10 ? '0' : '') + sh,
-    startMM: (sm < 10 ? '0' : '') + sm,
-    hours: hours,
-    location: cls.location || 'Riviera Beach VFC, Station 13',
-    description: (cls.description || '') + (cls.instructor ? '\nInstructor: ' + cls.instructor : '')
-  };
-}
-
-function classClockIn(classId, sessionDate) {
-  // Clear stale sessions from other users (kiosk safety)
-  if (state.currentSession && state.currentSession.userId !== state.currentUserId) {
-    state.currentSession = null; save();
-  }
-  if (state.currentSession) {
-    showToast('⚠️ Already clocked in. Clock out first.');
-    return;
-  }
-  // Enforce: today only, no more than 5 minutes early
-  var cls = (state.trainingClasses||[]).find(function(c){ return c.id===classId; });
-  if (!_canClockInNow(sessionDate, cls ? cls.startTime : null)) {
-    var today = new Date().toISOString().slice(0, 10);
-    if (sessionDate !== today) {
-      showToast('⚠️ You can only clock in on the day of the class.');
-    } else {
-      showToast('⚠️ Class has not started yet — clock in when the class begins.');
-    }
-    return;
-  }
-  if (!cls) return;
-  var uid = state.currentUserId;
-  // Check for existing attendance record for this session
-  var existing = (state.classAttendance||[]).find(function(a){
-    return a.classId===classId && a.memberId===uid && a.sessionDate===sessionDate;
-  });
-  if (existing && existing.clockedInAt && !existing.clockedOutAt) {
-    showToast('Already clocked in to this class.');
-    return;
-  }
-  var now = new Date();
-  var att = existing || {
-    id:           'att_'+Date.now(),
-    classId:      classId,
-    memberId:     uid,
-    sessionDate:  sessionDate,
-    clockedInAt:  null,
-    clockedOutAt: null
-  };
-  att.clockedInAt  = now.toISOString();
-  att.clockedOutAt = null;
-  if (!existing) {
-    state.classAttendance = state.classAttendance || [];
-    state.classAttendance.push(att);
-  }
-  state.currentSession = {
-    id:                 'sess_class_'+Date.now(),
-    userId:             uid,
-    start:              now.toISOString(),
-    activity:           'training',
-    desc:               cls.name,
-    classAttendanceId:  att.id,
-    end:                null,
-    duration:           null
-  };
-  if (typeof _clockTimerInterval !== 'undefined') {
-    if (_clockTimerInterval) clearInterval(_clockTimerInterval);
-    _clockTimerInterval = setInterval(tickClockTimer, 1000);
-  }
-  save();
-  updateClockUI(true);
-  try { updateClockStats(); } catch(e){}
-  try { renderMyClassesToday(); } catch(e){}
-  try { updateStats(); } catch(e){}
-  // Send calendar invite for this class session
-  sendCalendarInvite(uid, classToCalDetails(cls, sessionDate));
-  showToast('📚 Clocked in to '+cls.name+'! Calendar invite sent!');
-}
-
-function classClockOut() {
-  clockOut(); // clockOut already handles classAttendanceId sync
-}
-
-function officerClassClockIn(classId, sessionDate) {
-  // Let officer pick a member to clock in to this class session
-  var cls = (state.trainingClasses||[]).find(function(c){ return c.id===classId; });
-  if (!cls) return;
-  var alreadyIn = (state.classAttendance||[])
-    .filter(function(a){ return a.classId===classId && a.sessionDate===sessionDate && a.clockedInAt && !a.clockedOutAt; })
-    .map(function(a){ return a.memberId; });
-  var enrolled = (cls.members||[]).map(function(mid){
-    return (state.roster||[]).find(function(m){ return m.id===mid; });
-  }).filter(Boolean).filter(function(m){ return alreadyIn.indexOf(m.id) < 0; });
-  if (!enrolled.length) { showToast('All enrolled members are already clocked in.'); return; }
-  var listStr = enrolled.map(function(m,i){ return (i+1)+'. '+m.last+', '+m.first; }).join('\n');
-  var pick = prompt('Clock which member into:\n' + cls.name + '\n\n' + listStr + '\n\nEnter number:');
-  if (!pick) return;
-  var idx = parseInt(pick.trim()) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= enrolled.length) { showToast('\u26a0\ufe0f Invalid selection.'); return; }
-  var target = enrolled[idx];
-  var now = new Date().toISOString();
-  var existing = (state.classAttendance||[]).find(function(a){
-    return a.classId===classId && a.memberId===target.id && a.sessionDate===sessionDate;
-  });
-  if (existing) {
-    existing.clockedInAt = now; existing.clockedOutAt = null;
-  } else {
-    state.classAttendance = state.classAttendance || [];
-    state.classAttendance.push({ id:'att_'+Date.now(), classId:classId, memberId:target.id, sessionDate:sessionDate, clockedInAt:now, clockedOutAt:null });
-  }
-  save();
-  try { renderClassDetailBody(classId); } catch(e){}
-  showToast('\u2705 '+target.last+', '+target.first+' clocked in to '+cls.name+'.');
-}
-
-// Open class create/edit modal
-function openClassModal(classId) {
-  var modal = document.getElementById('classModal');
-  if (!modal) return;
-  var cls = classId ? (state.trainingClasses||[]).find(function(c){ return c.id===classId; }) : null;
-  modal.dataset.editId = classId || '';
-
-  document.getElementById('cmTitle').textContent = cls ? 'Edit Class' : 'Create Training Class';
-  document.getElementById('cmName').value        = cls ? (cls.name||'') : '';
-  document.getElementById('cmDesc').value        = cls ? (cls.description||'') : '';
-  document.getElementById('cmInstructor').value  = cls ? (cls.instructor||'') : '';
-  document.getElementById('cmStartDate').value   = cls ? (cls.startDate||'') : '';
-  document.getElementById('cmEndDate').value     = cls ? (cls.endDate||'') : '';
-  document.getElementById('cmStartTime').value   = cls ? (cls.startTime ? cls.startTime.slice(0,2)+':'+cls.startTime.slice(2) : '') : '';
-  document.getElementById('cmEndTime').value     = cls ? (cls.endTime   ? cls.endTime.slice(0,2)+':'+cls.endTime.slice(2)     : '') : '';
-
-  // Day checkboxes
-  var days = cls ? (cls.daysOfWeek||[]) : [];
-  [0,1,2,3,4,5,6].forEach(function(d){
-    var cb = document.getElementById('cmDay'+d);
-    if (cb) cb.checked = days.indexOf(d) >= 0;
-  });
-
-  // Member checkboxes
-  renderClassMemberPicker(cls ? (cls.members||[]) : []);
-
-  modal.style.display = 'flex';
-}
-
-function closeClassModal() {
-  var m = document.getElementById('classModal');
-  if (m) m.style.display = 'none';
-}
-
-function renderClassMemberPicker(selected) {
-  var container = document.getElementById('cmMemberList');
-  if (!container) return;
-  var members = (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); })
-    .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); });
-  container.innerHTML = members.map(function(m){
-    var checked = selected.indexOf(m.id) >= 0;
-    return '<label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;'+(checked?'background:rgba(52,152,219,0.1)':'')+'hover:background:#1A1A1A;">'
-      + '<input type="checkbox" id="cmMbr_'+m.id+'" value="'+m.id+'"'+(checked?' checked':'')
-      +   ' style="accent-color:#3498DB;" onchange="this.closest(\'label\').style.background=this.checked?\'rgba(52,152,219,0.1)\':\'\'">'
-      + '<span style="font-size:13px;color:#F0F0F0;">'+escHtml(m.last+', '+m.first)+'</span>'
-      + '<span style="font-size:11px;color:#666;margin-left:auto;">'+m.rank+'</span>'
-      + '</label>';
-  }).join('');
-}
-
-function saveTrainingClass() {
-  var modal = document.getElementById('classModal');
-  var name      = (document.getElementById('cmName').value||'').trim();
-  var startDate = document.getElementById('cmStartDate').value;
-  var endDate   = document.getElementById('cmEndDate').value;
-  if (!name)      { showToast('⚠️ Class name is required.'); return; }
-  if (!startDate) { showToast('⚠️ Start date is required.'); return; }
-  if (!endDate)   { showToast('⚠️ End date is required.'); return; }
-
-  var days = [];
-  [0,1,2,3,4,5,6].forEach(function(d){
-    var cb = document.getElementById('cmDay'+d);
-    if (cb && cb.checked) days.push(d);
-  });
-  if (!days.length) { showToast('⚠️ Select at least one day of week.'); return; }
-
-  var members = [];
-  (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).forEach(function(m){
-    var cb = document.getElementById('cmMbr_'+m.id);
-    if (cb && cb.checked) members.push(m.id);
-  });
-
-  var startTimeFull = (document.getElementById('cmStartTime').value||'').replace(':','');
-  var endTimeFull   = (document.getElementById('cmEndTime').value||'').replace(':','');
-
-  var editId = modal.dataset.editId;
-  if (editId) {
-    var cls = (state.trainingClasses||[]).find(function(c){ return c.id===editId; });
-    if (cls) {
-      cls.name        = name;
-      cls.description = document.getElementById('cmDesc').value.trim();
-      cls.instructor  = document.getElementById('cmInstructor').value.trim();
-      cls.startDate   = startDate;
-      cls.endDate     = endDate;
-      cls.daysOfWeek  = days;
-      cls.startTime   = startTimeFull;
-      cls.endTime     = endTimeFull;
-      cls.members     = members;
-    }
-  } else {
-    state.trainingClasses = state.trainingClasses || [];
-    state.trainingClasses.push({
-      id:          'cls_'+Date.now(),
-      name:        name,
-      description: document.getElementById('cmDesc').value.trim(),
-      instructor:  document.getElementById('cmInstructor').value.trim(),
-      startDate:   startDate,
-      endDate:     endDate,
-      daysOfWeek:  days,
-      startTime:   startTimeFull,
-      endTime:     endTimeFull,
-      members:     members,
-      active:      true,
-      createdAt:   new Date().toISOString()
-    });
-  }
-  save();
-  closeClassModal();
-  renderTrainingClasses();
-  renderMyClassesToday();
-  showToast('✅ Training class saved.');
-}
-
-function archiveTrainingClass(classId) {
-  if (!confirm('Archive this class? It will be hidden but attendance records are kept.')) return;
-  var cls = (state.trainingClasses||[]).find(function(c){ return c.id===classId; });
-  if (cls) { cls.active = false; save(); renderTrainingClasses(); showToast('Class archived.'); }
-}
-
-// View class detail modal — shows all sessions with attendance
-function viewClassDetail(classId) {
-  var modal = document.getElementById('classDetailModal');
-  if (!modal) return;
-  var cls = (state.trainingClasses||[]).find(function(c){ return c.id===classId; });
-  if (!cls) return;
-  modal.dataset.classId = classId;
-  document.getElementById('cdTitle').textContent = cls.name;
-  renderClassDetailBody(classId);
-  modal.style.display = 'flex';
-}
-
-function closeClassDetailModal() {
-  var m = document.getElementById('classDetailModal');
-  if (m) m.style.display = 'none';
-}
-
-function renderClassDetailBody(classId) {
-  var container = document.getElementById('cdBody');
-  if (!container) return;
-  var cls = (state.trainingClasses||[]).find(function(c){ return c.id===classId; });
-  if (!cls) return;
-  var sessions  = generateClassSessions(cls);
-  var todayStr  = new Date().toISOString().slice(0,10);
-  var uid       = state.currentUserId;
-  var isOfficer = isCurrentUserOfficer();
-  var members   = (cls.members||[]).map(function(mid){
-    return (state.roster||[]).find(function(m){ return m.id===mid; });
-  }).filter(Boolean);
-
-  if (!sessions.length) {
-    container.innerHTML = '<p style="color:#666;font-size:13px;text-align:center;padding:20px;">No sessions generated — check start/end dates and days.</p>';
-    return;
-  }
-
-  var daysLabel = (cls.daysOfWeek||[]).map(function(d){ return DAY_FULL[d]; }).join(', ');
-
-  // Member list at top
-  var memberHtml = '<div style="margin-bottom:16px;">'
-    + '<div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#888;margin-bottom:8px;">ENROLLED MEMBERS ('+members.length+')</div>'
-    + '<div style="display:flex;flex-wrap:wrap;gap:6px;">'
-    + members.map(function(m){
-        var attCount = (state.classAttendance||[]).filter(function(a){
-          return a.classId===classId && a.memberId===m.id && a.clockedInAt;
-        }).length;
-        var pct = sessions.length > 0 ? Math.round((attCount/sessions.length)*100) : 0;
-        return '<div style="background:#1A1A1A;border:1px solid #2A2A2A;border-radius:8px;padding:6px 10px;font-size:12px;">'
-          + '<span style="color:#F0F0F0;">'+escHtml(m.last+', '+m.first)+'</span>'
-          + '<span style="color:#666;margin-left:6px;">'+attCount+'/'+sessions.length+' ('+pct+'%)</span>'
-          + '</div>';
-      }).join('')
-    + '</div>'
-    + '</div>';
-
-  // Sessions table
-  var past     = sessions.filter(function(d){ return d < todayStr; });
-  var upcoming = sessions.filter(function(d){ return d >= todayStr; });
-
-  function buildSessionRow(dateStr) {
-    var isPast   = dateStr < todayStr;
-    var isToday  = dateStr === todayStr;
-    var dayObj   = new Date(dateStr+'T12:00:00');
-    var dayLabel = DAY_NAMES[dayObj.getDay()]+' '+dateStr;
-    var atts     = (state.classAttendance||[]).filter(function(a){ return a.classId===classId && a.sessionDate===dateStr && a.clockedInAt; });
-    var myAtt    = atts.find(function(a){ return a.memberId===uid; });
-    var status   = isToday ? '🔴 TODAY' : isPast ? (atts.length>0?'✓':'–') : '⏳';
-    var statusColor = isToday ? '#C8102E' : isPast ? (atts.length>0?'#27AE60':'#444') : '#666';
-
-    return '<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:6px;background:'+(isToday?'rgba(200,16,46,0.05)':'')+';">'
-      + '<div style="width:120px;font-size:12px;color:'+(isToday?'#F0F0F0':'#888')+';font-weight:'+(isToday?'700':'400')+';">'+dayLabel+'</div>'
-      + '<div style="font-size:12px;color:'+statusColor+';width:60px;">'+status+'</div>'
-      + '<div style="font-size:11px;color:#666;flex:1;">'
-      +   (atts.length ? atts.map(function(a){
-            var m2 = (state.roster||[]).find(function(m){ return m.id===a.memberId; });
-            var dur = a.clockedOutAt ? Math.round((new Date(a.clockedOutAt)-new Date(a.clockedInAt))/60000)+'m' : 'active';
-            return (m2 ? escHtml(m2.last) : a.memberId)+(dur?' ('+dur+')':'');
-          }).join(', ') : (isPast?'No attendance':'—'))
-      + '</div>'
-      + (isToday && !myAtt && (cls.members||[]).indexOf(uid)>=0
-          ? '<button class="btn btn-sm btn-primary" style="background:#3498DB;border-color:#3498DB;font-size:11px;padding:3px 10px;" onclick="classClockIn(\''+classId+'\',\''+dateStr+'\');renderClassDetailBody(\''+classId+'\')">Clock In</button>'
-          : '')
-      + (isToday && isOfficer
-          ? '<button class="btn btn-sm btn-secondary" style="font-size:10px;padding:2px 8px;margin-left:4px;" onclick="officerClassClockIn(\''+classId+'\',\''+dateStr+'\')">+ Clock Member In</button>'
-          : '')
-      + '</div>';
-  }
-
-  var sessionsHtml = '<div>'
-    + '<div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#888;margin-bottom:6px;">TODAY &amp; UPCOMING ('+upcoming.length+')</div>'
-    + (upcoming.length ? upcoming.slice(0,20).map(buildSessionRow).join('') : '<p style="color:#444;font-size:12px;padding:8px 0;">No upcoming sessions.</p>')
-    + (past.length
-        ? '<div style="margin-top:12px;">'
-          + '<div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#888;margin-bottom:6px;cursor:pointer;" onclick="toggleElement(\'cdPastSessions\')">'
-          + '▸ PAST SESSIONS ('+past.length+')</div>'
-          + '<div id="cdPastSessions" style="display:none;">'
-          + past.slice().reverse().map(buildSessionRow).join('')
-          + '</div></div>'
-        : '')
-    + '</div>';
-
-  container.innerHTML = memberHtml + sessionsHtml;
-}
-
-function toggleElement(id) {
-  var el = document.getElementById(id);
-  if (!el) return;
-  el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}
-
-// Update public on-duty col to show IN TRAINING
 function buildPublicInTrainingInfo(uid, todayStr) {
   var att = (state.classAttendance||[]).find(function(a){
     return a.memberId===uid && a.sessionDate===todayStr && a.clockedInAt && !a.clockedOutAt;
@@ -10514,6 +9826,89 @@ function buildPublicOnDutyCol(openSessions, todayStr) {
     + '</div>';
 }
 
+function buildPublicOnDutyColTV(openSessions, todayStr) {
+  // Group clocked-in members by unit for TV display
+  var byUnit = {};
+  var unclassified = [];
+
+  (state.staffingShifts||[]).filter(function(s){
+    return s.date===todayStr && s.clockedIn && !s.clockedOutAt && s.memberId;
+  }).forEach(function(s){
+    var uid = s.memberId;
+    if (!openSessions[uid]) return; // filter only clocked-in
+    var u = s.unitId;
+    if (!byUnit[u]) byUnit[u] = [];
+    // avoid duplicates
+    if (byUnit[u].some(function(x){ return x.uid===uid; })) return;
+    byUnit[u].push({ uid:uid, shift:s });
+  });
+
+  // Members clocked in without a specific shift slot
+  Object.keys(openSessions).forEach(function(uid){
+    var inUnit = Object.keys(byUnit).some(function(u){ return byUnit[u].some(function(x){ return x.uid===uid; }); });
+    if (!inUnit) unclassified.push({ uid:uid, shift:null });
+  });
+
+  var totalOnDuty = Object.keys(openSessions).length;
+  var unitOrder = (typeof UNITS !== 'undefined' ? UNITS : Object.keys(byUnit)).filter(function(u){ return byUnit[u] && byUnit[u].length; });
+
+  var bodyHtml = '';
+  if (totalOnDuty === 0) {
+    bodyHtml = '<div style="color:#333;font-size:18px;text-align:center;padding:40px 16px;letter-spacing:1px;">No members on duty</div>';
+  } else {
+    unitOrder.forEach(function(unitId){
+      var members = byUnit[unitId];
+      if (!members || !members.length) return;
+      var label = (UNIT_LABELS && UNIT_LABELS[unitId]) ? UNIT_LABELS[unitId].toUpperCase() : unitId.toUpperCase();
+      bodyHtml += '<div style="padding:7px 16px 4px;font-size:11px;font-weight:700;color:#C8102E;'
+               + 'letter-spacing:3px;text-transform:uppercase;border-top:1px solid #1A1A1A;margin-top:4px;">'
+               + label + '</div>';
+      members.forEach(function(entry){
+        var m = (state.roster||[]).find(function(x){ return x.id===entry.uid; });
+        if (!m) return;
+        var name  = m.last.toUpperCase()+', '+m.first;
+        var pos   = entry.shift && entry.shift.position ? entry.shift.position : '';
+        var ci    = entry.shift && entry.shift.clockedIn;
+        bodyHtml += '<div style="display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid #111;">'
+                  + '<div style="width:9px;height:9px;border-radius:50%;background:#27AE60;flex-shrink:0;box-shadow:0 0 6px #27AE60;"></div>'
+                  + '<div style="flex:1;min-width:0;">'
+                  + '<div style="font-size:20px;font-weight:700;color:#F0F0F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1;">'+name+'</div>'
+                  + (pos ? '<div style="font-size:12px;color:#555;letter-spacing:1px;text-transform:uppercase;">'+pos+'</div>' : '')
+                  + '</div>'
+                  + '</div>';
+      });
+    });
+
+    if (unclassified.length) {
+      bodyHtml += '<div style="padding:7px 16px 4px;font-size:11px;font-weight:700;color:#555;letter-spacing:3px;border-top:1px solid #1A1A1A;margin-top:4px;">OTHER</div>';
+      unclassified.forEach(function(entry){
+        var m=(state.roster||[]).find(function(x){ return x.id===entry.uid; });
+        if (!m) return;
+        var info = openSessions[entry.uid]||{};
+        bodyHtml += '<div style="display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid #111;">'
+                  + '<div style="width:9px;height:9px;border-radius:50%;background:#27AE60;box-shadow:0 0 6px #27AE60;flex-shrink:0;"></div>'
+                  + '<div style="flex:1;min-width:0;">'
+                  + '<div style="font-size:20px;font-weight:700;color:#F0F0F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+m.last.toUpperCase()+', '+m.first+'</div>'
+                  + (info.desc ? '<div style="font-size:12px;color:#555;letter-spacing:1px;text-transform:uppercase;">'+info.desc+'</div>' : '')
+                  + '</div></div>';
+      });
+    }
+  }
+
+  var badge = totalOnDuty > 0
+    ? '<span style="font-family:Bebas Neue,sans-serif;font-size:28px;color:#C8102E;line-height:1;letter-spacing:1px;margin-left:auto;">'+totalOnDuty+'</span>'
+    : '';
+
+  return '<div style="display:flex;flex-direction:column;overflow:hidden;">'
+    + '<div style="padding:12px 16px;background:#0F0F0F;border-bottom:3px solid #C8102E;flex-shrink:0;display:flex;align-items:center;">'
+    +   '<div style="font-size:16px;font-weight:700;color:#C8102E;letter-spacing:3px;text-transform:uppercase;">ON DUTY NOW</div>'
+    +   badge
+    + '</div>'
+    + '<div style="flex:1;overflow-y:auto;">' + bodyHtml + '</div>'
+    + '</div>';
+}
+
+
 function buildPublicInClassCol(todayStr) {
   // Gather all members currently clocked into a training class session
   var inClass = [];
@@ -10621,7 +10016,7 @@ function buildPublicStaffingCol(dateStr, dateObj, openSessions, title, accentCol
           + '<div style="width:6px;height:6px;border-radius:50%;background:'+(ci?'#27AE60':'#333')+';flex-shrink:0;'+(ci?'box-shadow:0 0 4px #27AE60;':'')+'"></div>'
           + '<div style="flex:1;min-width:0;">'
           +   '<div style="font-size:17px;font-weight:'+(ci?'700':'400')+';color:'+(ci?'#FFFFFF':'#555')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+name+'</div>'
-          +   (sh.position ? '<div style="font-size:12px;color:'+(ci?'#888':'#444')+';letter-spacing:1px;text-transform:uppercase;">'+sh.position+'</div>' : '')
+          +   (sh.position ? '<div style="font-size:13px;color:'+(ci?'#888':'#444')+';letter-spacing:1px;text-transform:uppercase;">'+sh.position+'</div>' : '')
           + '</div>'
           + '</div>';
       }).join('');
@@ -10633,7 +10028,7 @@ function buildPublicStaffingCol(dateStr, dateObj, openSessions, title, accentCol
         var lc  = gi === 0 ? accentColor : '#888';
         if (gi > 0) gHtml += '<div style="border-top:1px dashed #1E1E1E;margin:5px 0 3px;"></div>';
         gHtml += '<div style="margin-bottom:8px;">'
-          + '<div style="font-size:14px;font-weight:700;color:'+lc+';letter-spacing:3px;text-transform:uppercase;margin-bottom:6px;border-bottom:1px solid #1A1A1A;padding-bottom:4px;">'+lbl+'</div>'
+          + '<div style="font-size:16px;font-weight:700;color:'+lc+';letter-spacing:3px;text-transform:uppercase;margin-bottom:7px;border-bottom:1px solid #1A1A1A;padding-bottom:5px;">'+lbl+'</div>'
           + tvMemberRows(unitId)
           + '</div>';
       });
