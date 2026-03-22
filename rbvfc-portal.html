@@ -1083,6 +1083,20 @@ var CAT_CONFIG = {
   committee_member: { pts: 10, maxPts: 25, label: 'Committee Member' }
 };
 
+// ── Canonical LOSAP position title lists (kept in sync with umPositionBoxes) ─
+var LOSAP_OFFICER_TITLES = [
+  'Fire Chief','Deputy Chief','Assistant Chief','Captain','Lieutenant',
+  'Safety Officer','Training Officer','EMS Coordinator','Chaplain',
+  'President','Vice President','Secretary','Recording Secretary','Treasurer',
+  'Board of Directors','Board of Trustees',
+  'County Association Officer','State Association Officer','National Association Officer',
+  // legacy / alternate spellings for backwards compatibility
+  'Chief','Board of Director','Board of Trustee',
+  'County Association','State Association','National Association','Coordinator'
+];
+var LOSAP_CHAIR_TITLES  = ['Committee Chairperson','Committee Chair'];
+var LOSAP_MEMBER_TITLES = ['Committee Member'];
+
 // Training course points — tiered by total hours (§3a)
 function calcTrainingPts(hours) {
   var h = parseFloat(hours) || 0;
@@ -1108,14 +1122,15 @@ function calcMemberLOSAP(uid, year) {
   if (member) {
     var positions = member.losapPositions && member.losapPositions.length ? member.losapPositions : (member.losapPosition ? [member.losapPosition] : []);
     // Define officer ranks that earn full 25 pts
-    var OFFICER_TITLES = ['Chief','Assistant Chief','Deputy Chief','Captain','Lieutenant','EMS Coordinator','President','Vice President','Secretary','Treasurer','Board of Director','Board of Trustee','County Association position','State Association position','National Association position','Fire Chief'];
-    var hasOfficer = positions.some(function(p){ return OFFICER_TITLES.some(function(t){ return p.toLowerCase().indexOf(t.toLowerCase())>=0 || t.toLowerCase().indexOf(p.toLowerCase())>=0; }); });
-    if (hasOfficer) {
-      positionPts = 25;
-    } else if (positions.length > 0) {
-      // Chairperson = 15, member = 10 — take the highest
-      positionPts = 15; // default to chair if position held but not officer
+    function _mlPos(pos, list) {
+      return list.some(function(t){ return pos.toLowerCase().indexOf(t.toLowerCase())>=0||t.toLowerCase().indexOf(pos.toLowerCase())>=0; });
     }
+    var hasOfficer = positions.some(function(p){ return _mlPos(p, LOSAP_OFFICER_TITLES); });
+    var hasChair   = positions.some(function(p){ return _mlPos(p, LOSAP_CHAIR_TITLES);   });
+    var hasMbr     = positions.some(function(p){ return _mlPos(p, LOSAP_MEMBER_TITLES);  });
+    if (hasOfficer)    positionPts = 25;
+    else if (hasChair) positionPts = 15;
+    else if (hasMbr)   positionPts = 10;
     positionPts = Math.min(25, positionPts);
   }
   var pts = positionPts;
@@ -10864,14 +10879,13 @@ function downloadLosapReport() {
     var positions = member.losapPositions && member.losapPositions.length
       ? member.losapPositions : (member.losapPosition ? [member.losapPosition] : []);
     if (!positions.length) return;
-    var OFFICER_TITLES = ['Chief','Assistant Chief','Deputy Chief','Captain','Lieutenant',
-      'EMS Coordinator','President','Vice President','Secretary','Treasurer',
-      'Board of Director','Board of Trustee','County Association','State Association',
-      'National Association','Fire Chief','Coordinator'];
-    var hasOfficer = positions.some(function(p){
-      return OFFICER_TITLES.some(function(t){ return p.toLowerCase().indexOf(t.toLowerCase())>=0; });
-    });
-    positionPts = hasOfficer ? 25 : positions.length > 0 ? 15 : 0;
+    function _mlDl(pos, list){ return list.some(function(t){ return pos.toLowerCase().indexOf(t.toLowerCase())>=0||t.toLowerCase().indexOf(pos.toLowerCase())>=0; }); }
+    var hasOfficer = positions.some(function(p){ return _mlDl(p, LOSAP_OFFICER_TITLES); });
+    var hasChair   = positions.some(function(p){ return _mlDl(p, LOSAP_CHAIR_TITLES);   });
+    var hasMbr     = positions.some(function(p){ return _mlDl(p, LOSAP_MEMBER_TITLES);  });
+    if (hasOfficer)    positionPts = 25;
+    else if (hasChair) positionPts = 15;
+    else if (hasMbr)   positionPts = 10;
     positionPts = Math.min(25, positionPts);
   })();
 
@@ -10891,7 +10905,10 @@ function downloadLosapReport() {
     var _posNames = member.losapPositions && member.losapPositions.length
       ? member.losapPositions.join(', ')
       : (member.losapPosition || 'Elected/Appointed Officer');
-    summaryRows += '<tr><td>Elected/Appointed Position<br><small style="color:#888;">' + esc(_posNames) + '</small></td>'
+    var _posLabel = positionPts === 25 ? 'Elected/Appointed Officer'
+                  : positionPts === 15 ? 'Committee Chairperson'
+                  : 'Committee Member';
+    summaryRows += '<tr><td>' + _posLabel + '<br><small style="color:#888;">' + esc(_posNames) + '</small></td>'
       + '<td style="text-align:center;">—</td>'
       + '<td style="text-align:right;">' + positionPts + '</td></tr>';
   }
@@ -12695,19 +12712,34 @@ function applyBulkEdit() {
               </div>
             </div>
             <label>LOSAP Position(s)</label>
-              <div id="umPositionBoxes" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;background:#111;border:1px solid #333;border-radius:8px;padding:10px;margin-top:4px;">
-                <label class="um-cb-label"><input type="checkbox" value="President" name="umPos"> President</label>
-                <label class="um-cb-label"><input type="checkbox" value="Vice President" name="umPos"> Vice President</label>
-                <label class="um-cb-label"><input type="checkbox" value="Secretary" name="umPos"> Secretary</label>
-                <label class="um-cb-label"><input type="checkbox" value="Recording Secretary" name="umPos"> Recording Secretary</label>
-                <label class="um-cb-label"><input type="checkbox" value="Treasurer" name="umPos"> Treasurer</label>
+              <div id="umPositionBoxes" style="background:#111;border:1px solid #333;border-radius:8px;padding:10px;margin-top:4px;">
+                <div style="font-size:10px;font-weight:700;color:#C8102E;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #222;">&#9650; Elected / Appointed Officer Positions <span style="color:#555;font-weight:400;">(25 pts)</span></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:10px;">
                 <label class="um-cb-label"><input type="checkbox" value="Fire Chief" name="umPos"> Fire Chief</label>
+                <label class="um-cb-label"><input type="checkbox" value="Deputy Chief" name="umPos"> Deputy Chief</label>
                 <label class="um-cb-label"><input type="checkbox" value="Assistant Chief" name="umPos"> Assistant Chief</label>
                 <label class="um-cb-label"><input type="checkbox" value="Captain" name="umPos"> Captain</label>
                 <label class="um-cb-label"><input type="checkbox" value="Lieutenant" name="umPos"> Lieutenant</label>
                 <label class="um-cb-label"><input type="checkbox" value="Safety Officer" name="umPos"> Safety Officer</label>
                 <label class="um-cb-label"><input type="checkbox" value="Training Officer" name="umPos"> Training Officer</label>
                 <label class="um-cb-label"><input type="checkbox" value="EMS Coordinator" name="umPos"> EMS Coordinator</label>
+                <label class="um-cb-label"><input type="checkbox" value="Chaplain" name="umPos"> Chaplain</label>
+                <label class="um-cb-label"><input type="checkbox" value="President" name="umPos"> President</label>
+                <label class="um-cb-label"><input type="checkbox" value="Vice President" name="umPos"> Vice President</label>
+                <label class="um-cb-label"><input type="checkbox" value="Secretary" name="umPos"> Secretary</label>
+                <label class="um-cb-label"><input type="checkbox" value="Recording Secretary" name="umPos"> Recording Secretary</label>
+                <label class="um-cb-label"><input type="checkbox" value="Treasurer" name="umPos"> Treasurer</label>
+                <label class="um-cb-label"><input type="checkbox" value="Board of Directors" name="umPos"> Board of Directors</label>
+                <label class="um-cb-label"><input type="checkbox" value="Board of Trustees" name="umPos"> Board of Trustees</label>
+                <label class="um-cb-label"><input type="checkbox" value="County Association Officer" name="umPos"> County Association Officer</label>
+                <label class="um-cb-label"><input type="checkbox" value="State Association Officer" name="umPos"> State Association Officer</label>
+                <label class="um-cb-label"><input type="checkbox" value="National Association Officer" name="umPos"> National Association Officer</label>
+                </div>
+                <div style="font-size:10px;font-weight:700;color:#F5A623;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #222;">&#9632; Committee Positions</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;">
+                <label class="um-cb-label"><input type="checkbox" value="Committee Chairperson" name="umPos"> Committee Chairperson <span style="color:#555;font-size:10px;">(15 pts)</span></label>
+                <label class="um-cb-label"><input type="checkbox" value="Committee Member" name="umPos"> Committee Member <span style="color:#555;font-size:10px;">(10 pts)</span></label>
+                </div>
               </div>
               <input type="hidden" id="umPosition"><!-- kept for JS compat -->
             </div>
