@@ -1514,7 +1514,9 @@ function saveEmergencyResponse() {
   var autoStaffed = [];
   units.forEach(function(unitId) {
     (state.staffingShifts||[]).filter(function(s){
-      return s.date===todayStr && s.unitId===unitId && s.status==='assigned';
+      // Include both assigned AND active (clocked-in) members
+      return s.date===todayStr && s.unitId===unitId && s.memberId &&
+             (s.status==='assigned' || s.status==='active' || s.clockedIn);
     }).forEach(function(s){
       if (checkedMembers.indexOf(s.memberId)<0 && autoStaffed.indexOf(s.memberId)<0) {
         autoStaffed.push(s.memberId);
@@ -4485,6 +4487,32 @@ function renderStaffingAlerts() {
   container.innerHTML = html + pastHtml;
 }
 
+function initMeetingForm() {
+  // Set date default to today
+  var de = document.getElementById('mtgDate');
+  if (de && !de.value) de.value = new Date().toISOString().slice(0,10);
+  // Populate Member In Charge dropdown with officers + admin
+  var sel = document.getElementById('mtgInCharge');
+  if (!sel) return;
+  var currentVal = sel.value;
+  sel.innerHTML = '<option value="">— Select Member In Charge —</option>';
+  (state.roster||[]).filter(function(m){ return m.active!==false && (m.appRole==='officer'||m.appRole==='admin'); })
+    .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
+    .forEach(function(m){
+      var opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.last+', '+m.first+' ('+( (m.ranks&&m.ranks.length?m.ranks[0]:m.rank)||m.appRole)+')';
+      sel.appendChild(opt);
+    });
+  if (currentVal) sel.value = currentVal;
+  // Show scheduled-by name
+  var disp = document.getElementById('mtgCreatedByDisplay');
+  if (disp) {
+    var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+    disp.textContent = me ? me.last+', '+me.first : 'Unknown';
+  }
+}
+
 function initStaffingTab() {
   renderMemberAlertBanner();
   var uid = state.currentUserId;
@@ -4713,7 +4741,7 @@ function renderStaffingBoard() {
         // Show independent badge — units staffing separately
         html += '<span style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;background:rgba(245,166,35,.12);border:1px solid rgba(245,166,35,.5);color:#F5A623;border-radius:4px;padding:2px 7px;">INDEPENDENT</span>';
       } else {
-        html += '<span style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;background:rgba(200,16,46,.15);border:1px solid rgba(200,16,46,.4);color:#C8102E;border-radius:4px;padding:2px 7px;">COMBINED CREW</span>';
+        // Combined crew — state shown by the toggle button only
       }
       if (isOfficer) {
         var _tA = allUnitsInGroup[0], _tB = allUnitsInGroup[1];
@@ -4874,17 +4902,29 @@ function renderStaffingBoard() {
           html += '</div>';
           html += '</div>';
         } else if (isPartial && !alreadyHaveSlot) {
-          // Show the open gap window clearly
-          html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0;">';
-          var _gapStart = fmt(_nextStart);
-          var _gapEnd   = '7:00 AM';  // always ends at next 0700
-          html += '<div style="background:#0D1A1A;border:2px dashed #3498DB;border-radius:8px;padding:6px 14px;">';
-          html += '<div style="font-size:11px;color:#3498DB;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:1px;">Gap Available</div>';
-          html += '<div style="font-size:13px;color:#88BBDD;font-weight:700;">'+_gapStart+' &rarr; next 0700</div>';
-          html += '<div style="font-size:11px;color:#3498DB;">'+Math.round(_remHours)+'h remaining</div>';
+        } else if (isPartial && !alreadyHaveSlot) {
+          // Compute and show ALL open windows for this position
+          html += '<div style="display:flex;flex-direction:column;gap:5px;flex-wrap:wrap;flex-shrink:0;">';
+          (function(){
+            var _cv = coveredMinutes().sort(function(a,b){ return a[0]-b[0]; });
+            var _cursor = 7*60, _dayEnd = 7*60+1440;
+            var _gaps = [];
+            _cv.forEach(function(r){ if(r[0]>_cursor) _gaps.push([_cursor,r[0]]); if(r[1]>_cursor) _cursor=r[1]; });
+            if(_cursor < _dayEnd) _gaps.push([_cursor, _dayEnd]);
+            _gaps.forEach(function(_gap){
+              var _h0=Math.floor(_gap[0]/60)%24, _m0=_gap[0]%60;
+              var _h1=Math.floor(_gap[1]/60)%24, _m1=_gap[1]%60;
+              var _f0=(_h0%12||12)+':'+(_m0<10?'0':'')+_m0+' '+(_h0>=12?'PM':'AM');
+              var _f1=_gap[1]>=7*60+1440?'7:00 AM (next day)':(_h1%12||12)+':'+(_m1<10?'0':'')+_m1+' '+(_h1>=12?'PM':'AM');
+              var _gh=Math.round((_gap[1]-_gap[0])/60*10)/10;
+              html += '<div style="background:#0D1A1A;border:2px dashed #3498DB;border-radius:8px;padding:6px 14px;">';
+              html += '<div style="font-size:11px;color:#3498DB;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:1px;">Open Window</div>';
+              html += '<div style="font-size:13px;color:#88BBDD;font-weight:700;">'+_f0+' &rarr; '+_f1+'</div>';
+              html += '<div style="font-size:11px;color:#3498DB;">'+_gh+'h available</div>';
+              html += '</div>';
+            });
+          })();
           html += '</div>';
-          html += '</div>';
-        } else if (alreadyHaveSlot && isPartial) {
           html += '<div style="font-size:11px;color:#666;font-style:italic;padding:4px 0;">You have a window on this position.</div>';
         }
 
@@ -6727,10 +6767,12 @@ function saveMeeting() {
   var duration = parseInt(g('mtgDuration')) || 60;
   var loc = g('mtgLocation'), desc = g('mtgDesc');
   var recFreq = g('mtgRecurrence'), until = g('mtgUntil');
+  var inCharge = g('mtgInCharge');
   var editId = g('mtgEditId');
-  if (!title) { showToast('\u26a0\ufe0f Title required.'); return; }
-  if (!date)  { showToast('\u26a0\ufe0f Date required.'); return; }
-  if (!time)  { showToast('\u26a0\ufe0f Time required.'); return; }
+  if (!title)    { showToast('\u26a0\ufe0f Title required.'); return; }
+  if (!date)     { showToast('\u26a0\ufe0f Date required.'); return; }
+  if (!time)     { showToast('\u26a0\ufe0f Time required.'); return; }
+  if (!inCharge) { showToast('\u26a0\ufe0f Please select a Member In Charge.'); return; }
   var recurrence = recFreq ? { freq: recFreq, until: until || null } : null;
   if (!Array.isArray(state.meetings)) state.meetings = [];
   if (editId) {
@@ -6738,6 +6780,7 @@ function saveMeeting() {
     if (ex) {
       ex.title=title; ex.date=date; ex.time=time; ex.duration=duration;
       ex.location=loc; ex.desc=desc; ex.recurrence=recurrence;
+      ex.inCharge=inCharge;
       ex.updatedAt=new Date().toISOString();
       save(); cancelEditMeeting(); renderMeetingsList();
       try { renderMyShifts(); } catch(e){}
@@ -6746,7 +6789,7 @@ function saveMeeting() {
   }
   state.meetings.push({ id:'mtg_'+Date.now(), title:title, date:date, time:time,
     duration:duration, location:loc, desc:desc, recurrence:recurrence,
-    createdBy:state.currentUserId, createdAt:new Date().toISOString() });
+    inCharge:inCharge, createdBy:state.currentUserId, createdAt:new Date().toISOString() });
   save();
   ['mtgTitle','mtgTime','mtgLocation','mtgDesc','mtgUntil','mtgEditId'].forEach(function(id){
     var el=document.getElementById(id); if(el) el.value='';
@@ -6782,6 +6825,9 @@ function openEditMeeting(mtgId) {
   if (re2) re2.value=(m.recurrence&&m.recurrence.freq)||'';
   f('mtgUntil',(m.recurrence&&m.recurrence.until)||'');
   toggleMtgRecurrenceOpts(); f('mtgEditId',mtgId);
+  // Pre-fill inCharge and refresh the form
+  try { initMeetingForm(); } catch(e){}
+  f('mtgInCharge', m.inCharge||'');
   var sb=document.getElementById('mtgSubmitBtn'); if(sb) sb.textContent='\u2713 Save Changes';
   var cb=document.getElementById('mtgCancelBtn'); if(cb) cb.style.display='inline-flex';
   var form=document.getElementById('mtgCreateForm');
@@ -6952,6 +6998,8 @@ function renderMeetingsList() {
       +'<div style="font-size:12px;color:#888;margin-top:3px;">'+ds+(ts?' \u00b7 '+ts:'')+(mtg.duration?' \u00b7 '+mtg.duration+'min':'')+(mtg.location?' \u00b7 '+mtg.location:'')+fmtRec(mtg)+'</div>'
       +(mtg.desc?'<div style="font-size:12px;color:#666;margin-top:4px;">'+mtg.desc+'</div>':'')
       +(cnt?'<div style="font-size:11px;color:#555;margin-top:3px;">'+cnt+' signed up</div>':'')
+      +(mtg.inCharge?(function(){ var _ic=(state.roster||[]).find(function(m){ return m.id===mtg.inCharge; }); return _ic?'<div style="font-size:12px;color:#F5A623;font-weight:700;margin-top:3px;">&#128100; In Charge: '+_ic.last+', '+_ic.first+'</div>':''; })():'')
+      +(mtg.createdBy?(function(){ var _cb=(state.roster||[]).find(function(m){ return m.id===mtg.createdBy; }); return _cb?'<div style="font-size:11px;color:#555;margin-top:2px;">Scheduled by: '+_cb.last+', '+_cb.first+'</div>':''; })():'')
       +'</div>'
       +'<div style="display:flex;flex-direction:column;gap:5px;">'
       +'<button onclick="openEditMeeting(\''+mtg.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#9998; Edit</button>'
@@ -9093,13 +9141,16 @@ function _autoLogCadCall(call) {
   var today = call.date || new Date().toISOString().slice(0, 10);
   var callUnits = _parseCadUnits(call.units || call.apparatus || '');
 
-  // Resolve unit IDs
+  // Resolve unit IDs — robust matching (E-131, E131, Engine 131, e131 all work)
   var resolvedUnitIds = callUnits.map(function(cu) {
+    var cuClean = cu.toLowerCase().replace(/[-\s]/g, '');
     return Object.keys(UNIT_LABELS).find(function(uid) {
-      var lbl = UNIT_LABELS[uid] || '';
-      return uid.toLowerCase() === cu.toLowerCase() ||
-             lbl.toLowerCase().indexOf(cu.toLowerCase()) >= 0 ||
-             cu.toLowerCase().indexOf(uid.toLowerCase()) >= 0;
+      var lbl = (UNIT_LABELS[uid] || '').toLowerCase().replace(/[-\s]/g, '');
+      var uidClean = uid.toLowerCase().replace(/[-\s]/g, '');
+      return uidClean === cuClean ||
+             lbl === cuClean ||
+             lbl.indexOf(cuClean) >= 0 ||
+             cuClean.indexOf(uidClean) >= 0;
     }) || null;
   }).filter(Boolean);
 
@@ -9901,13 +9952,11 @@ function renderPublicView() {
       desc: state.currentSession.desc||''
     };
   }
+  // staffing-position clocked-in members go to Today's Staffing column, NOT On Duty
+  var positionClockedIn = {};
   (state.staffingShifts||[]).filter(function(s){ return s.date===todayStr && s.clockedIn && !s.clockedOutAt; }).forEach(function(s){
-    if (!openSessions[s.memberId]) {
-      openSessions[s.memberId] = {
-        activity: 'duty',
-        desc: (UNIT_LABELS[s.unitId]||s.unitId) + (s.position ? ' \u00b7 '+s.position : '')
-      };
-    }
+    positionClockedIn[s.memberId] = s.unitId;
+    // Do NOT add to openSessions — they show in the staffing columns
   });
 
   var logoSrc  = getLogoData();
@@ -9930,11 +9979,12 @@ function renderPublicView() {
   h += '</div>';
 
   // 4-column grid: Today | Tomorrow | Responses | On Duty
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1.4fr 1.1fr;gap:0;flex:1;overflow:hidden;">';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1.5fr 1fr 0.9fr;gap:0;flex:1;overflow:hidden;">';
   h += buildPublicStaffingCol(todayStr, now, openSessions, "TODAY\'S STAFFING", '#C8102E', true);
   h += buildPublicStaffingCol(tomorrowStr, tomorrowObj, openSessions, "TOMORROW\'S STAFFING", '#F5A623', false);
   h += buildPublicCombinedRespondersCol(yr, todayStr);
-  h += buildPublicOnDutyColTV(openSessions, todayStr);
+  h += buildPublicOnDutyColTV(openSessions, todayStr, positionClockedIn);
+  h += buildPublicInClassCol(todayStr);
   h += '</div>';
 
   h += '</div>';
@@ -10188,8 +10238,10 @@ function buildPublicOnDutyCol(openSessions, todayStr) {
     + '</div>';
 }
 
-function buildPublicOnDutyColTV(openSessions, todayStr) {
-  // Group clocked-in members by unit for TV display
+function buildPublicOnDutyColTV(openSessions, todayStr, positionClockedIn) {
+  // openSessions = clock-tab clocked-in (excludes staffing-position members)
+  // positionClockedIn = {memberId: unitId} for staffing position clocked-in
+  positionClockedIn = positionClockedIn || {};
   var byUnit = {};
   var unclassified = [];
 
@@ -12132,6 +12184,18 @@ function applyBulkEdit() {
             <div id="mtgRecurrenceOpts" style="display:none;margin-bottom:8px;"><div class="form-group"><label>Repeat until (optional)</label><input type="date" id="mtgUntil"></div></div>
             <div class="form-group"><label>Location</label><input type="text" id="mtgLocation" placeholder="e.g. Station 13 &#8212; Bay Floor"></div>
             <div class="form-group"><label>Agenda / Notes</label><textarea id="mtgDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div class="form-group">
+                <label>Member In Charge *</label>
+                <select id="mtgInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+                  <option value="">— Select Member In Charge —</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Scheduled By</label>
+                <div id="mtgCreatedByDisplay" style="background:#141414;border:1px solid #2A2A2A;border-radius:8px;padding:10px;font-size:13px;color:#888;height:42px;display:flex;align-items:center;"></div>
+              </div>
+            </div>
             <input type="hidden" id="mtgEditId" value="">
             <div style="display:flex;gap:8px;">
               <button class="btn btn-primary" id="mtgSubmitBtn" onclick="saveMeeting()" style="flex:1;">&#10003; Schedule</button>
@@ -12292,10 +12356,10 @@ function applyBulkEdit() {
       </div>
 
       <div class="card">
-        <div class="card-header"><div class="icon">📚</div><h2>Training History</h2></div>
-        <div id="trainingReviewContainer">
+        <div class="card-header" onclick="toggleAdminCardById('trainingHistoryCard')" style="cursor:pointer;user-select:none;"><div class="icon">📚</div><h2>Training History</h2><span id="trainingHistoryChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;transform:rotate(-90deg);">&#9660;</span></div>
+        <div id="trainingHistoryCard" style="display:none;"><div id="trainingReviewContainer">
           <p style="color:#666;font-size:13px;text-align:center;padding:16px;">No training submissions yet.</p>
-        </div>
+        </div></div>
       </div>
 
       <!-- ─────── Drill Reports ─────── -->
