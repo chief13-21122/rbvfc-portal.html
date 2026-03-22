@@ -1438,12 +1438,47 @@ function initEmergencyTab() {
   var cadCard = document.getElementById('cadPendingCard');
   if (cadCard) cadCard.style.display = (isOfficer || canLog) ? 'block' : 'none';
   renderCadPendingCalls();
-  // Pre-check active units in the responding units grid
-  var activeU = getActiveUnits();
-  Object.keys(UNIT_LABELS).forEach(function(u) {
-    var cb = document.getElementById('unit_'+u);
-    if (cb) cb.checked = activeU.indexOf(u) > -1;
-  });
+  // Build apparatus checkbox grid
+  var apparatusGrid = document.getElementById('erApparatusGrid');
+  if (apparatusGrid && !apparatusGrid.dataset.built) {
+    apparatusGrid.dataset.built = '1';
+    var activeU = getActiveUnits();
+    Object.keys(UNIT_LABELS).forEach(function(u) {
+      var lbl = UNIT_LABELS[u];
+      var checked = activeU.indexOf(u) > -1;
+      var btn = document.createElement('label');
+      btn.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;background:#1E1E1E;border:1px solid #333;border-radius:7px;padding:8px 12px;transition:background .15s;user-select:none;';
+      btn.innerHTML = '<input type="checkbox" id="unit_'+u+'" value="'+u+'"'+(checked?' checked':'')+' style="accent-color:#C8102E;width:15px;height:15px;cursor:pointer;flex-shrink:0;">'
+        + '<span style="font-size:13px;font-weight:600;color:#F0F0F0;">'+lbl+'</span>';
+      // Highlight label when checked
+      var cb2 = btn.querySelector('input');
+      function updateStyle() {
+        btn.style.background = cb2.checked ? 'rgba(200,16,46,0.12)' : '#1E1E1E';
+        btn.style.borderColor = cb2.checked ? '#C8102E' : '#333';
+      }
+      updateStyle();
+      cb2.addEventListener('change', updateStyle);
+      apparatusGrid.appendChild(btn);
+    });
+  } else {
+    // Already built — just update checked state
+    var activeU = getActiveUnits();
+    Object.keys(UNIT_LABELS).forEach(function(u) {
+      var cb = document.getElementById('unit_'+u);
+      if (cb) cb.checked = activeU.indexOf(u) > -1;
+    });
+  }
+
+  // Set Logged By banner
+  var loggedByEl = document.getElementById('erLoggedByName');
+  if (loggedByEl) {
+    var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+    loggedByEl.textContent = me ? me.last+', '+me.first+' · '+((me.ranks&&me.ranks.length?me.ranks[0]:me.rank)||'') : '—';
+  }
+
+  // Set today's date as default
+  var erDateEl = document.getElementById('erDate');
+  if (erDateEl && !erDateEl.value) erDateEl.value = new Date().toISOString().slice(0,10);
 
   // Log form: drivers and officers only (not admin members)
   var logCard = document.getElementById('erLogCard');
@@ -1495,11 +1530,17 @@ function erClearAll() {
 }
 
 function saveEmergencyResponse() {
-  var date = (document.getElementById('erDate')||{}).value||'';
-  var addr = ((document.getElementById('erAddress')||{}).value||'').trim();
-  var inum = ((document.getElementById('erIncidentNum')||{}).value||'').trim();
-  var ibox = ((document.getElementById('erBoxArea')||{}).value||'').trim();
+  var date  = (document.getElementById('erDate')||{}).value||'';
+  var addr  = ((document.getElementById('erAddress')||{}).value||'').trim();
+  var inum  = ((document.getElementById('erIncidentNum')||{}).value||'').trim();
+  var ibox  = ((document.getElementById('erBoxArea')||{}).value||'').trim();
+  var itype = ((document.getElementById('erType')||{}).value||'').trim();
+  var alarmTime = ((document.getElementById('erAlarmTime')||{}).value||'').trim();
   var enteredBy = state.currentUserId;
+  var enteredByName = (function(){
+    var me = (state.roster||[]).find(function(m){ return m.id===enteredBy; });
+    return me ? me.last+', '+me.first : enteredBy;
+  })();
 
   if (!date||!addr) { showToast('⚠️ Date and address are required.'); return; }
 
@@ -1546,11 +1587,15 @@ function saveEmergencyResponse() {
     address: addr,
     incidentNum: inum,
     boxArea: ibox,
+    type: itype,
+    alarmTime: alarmTime,
     units: units,
+    apparatus: units.map(function(u){ return UNIT_LABELS[u]||u; }).join(', '),
     members: members,
     autoStaffed: autoStaffed,
     notes: combinedNotes,
     enteredBy: enteredBy,
+    enteredByName: enteredByName,
     created: new Date().toISOString()
   });
   save();
@@ -1560,6 +1605,8 @@ function saveEmergencyResponse() {
   // Clear form
   var erDate = document.getElementById('erDate'); if(erDate) erDate.value = new Date().toISOString().slice(0,10);
   var erAddr = document.getElementById('erAddress'); if(erAddr) erAddr.value='';
+  var erTypeSel = document.getElementById('erType'); if(erTypeSel) erTypeSel.value='';
+  var erAlarm = document.getElementById('erAlarmTime'); if(erAlarm) erAlarm.value='';
   var erNum = document.getElementById('erIncidentNum'); if(erNum) erNum.value='';
   var erBox = document.getElementById('erBoxArea'); if(erBox) erBox.value='';
   erClearUnits();
@@ -1596,11 +1643,16 @@ function renderEmergencyResponses() {
         + '<button class="btn btn-sm btn-danger" onclick="deleteResponse(\'' + r.id + '\')">&#128465;</button>'
       : '';
     var tr = document.createElement('tr');
+    var unitPills = (r.units||[]).map(function(u){
+      return '<span style="display:inline-block;background:rgba(200,16,46,.1);border:1px solid rgba(200,16,46,.3);color:#C8102E;border-radius:4px;padding:1px 5px;font-size:10px;margin:1px;white-space:nowrap;">'+(UNIT_LABELS[u]||u)+'</span>';
+    }).join('');
+    var typeStr = r.type ? '<div style="font-size:11px;color:#CCC;">'+r.type+'</div>' : '—';
+    var alarmStr = r.alarmTime ? '<div style="font-size:10px;color:#555;">'+r.alarmTime+'</div>' : '';
     tr.innerHTML =
-      '<td style="padding:8px;color:#CCC;white-space:nowrap;">'+r.date+'</td>'+
+      '<td style="padding:8px;color:#CCC;white-space:nowrap;">'+r.date+(alarmStr?'<br>'+alarmStr:'')+'</td>'+
       '<td style="padding:8px;color:#CCC;">'+_formatCadAddress(r.address)+incNum+'</td>'+
-      '<td style="padding:8px;color:#CCC;">'+(r.boxArea||'—')+editedBadge+'</td>'+
-      '<td style="padding:8px;font-size:11px;color:#AAA;">'+(r.units||[]).map(function(u){ return '<span class="pill gray" style="font-size:10px;padding:2px 5px;">'+u+'</span>'; }).join(' ')+'</td>'+
+      '<td style="padding:8px;">'+typeStr+'</td>'+
+      '<td style="padding:8px;font-size:11px;">'+unitPills+'</td>'+
       '<td style="padding:8px;font-size:11px;color:#888;max-width:200px;">'+memberNames+'</td>'+
       '<td style="padding:8px;">'+loggedCell+'</td>'+
       '<td style="padding:8px;white-space:nowrap;">'+actionCell+'</td>';
@@ -11989,21 +12041,55 @@ function applyBulkEdit() {
       </div>
 
       <!-- Log Emergency Response -->
-      <div class="card">
+      <div class="card" id="erLogCard">
         <div class="card-header">
           <div class="icon">🚒</div>
           <h2>Log Emergency Response</h2>
         </div>
         <div class="alert info" style="margin-bottom:14px;">ℹ️ It is the responsibility of the <strong>DRIVER</strong> to log emergency responses.</div>
+        <!-- Logged By banner -->
+        <div id="erLoggedByBanner" style="display:flex;align-items:center;gap:10px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+          <span style="font-size:18px;">👤</span>
+          <div>
+            <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Logged By</div>
+            <div id="erLoggedByName" style="font-size:14px;font-weight:700;color:#27AE60;"></div>
+          </div>
+        </div>
+
         <div class="form-grid">
           <div class="form-group"><label>Date *</label><input type="date" id="erDate"></div>
-          <div class="form-group"><label>Incident # (optional)</label><input type="text" id="erIncidentNum" placeholder="e.g. 24-01234"></div>
-          <div class="form-group" style="grid-column:1/-1;"><label>Address / Location *</label><input type="text" id="erAddress" placeholder="e.g. 8506 Main Ave"></div>
-          <div class="form-group"><label>Box / Area</label><input type="text" id="erBoxArea" placeholder="e.g. Box 1307"></div>
-
-          <div class="form-group"><label>Apparatus</label><input type="text" id="erApparatus" placeholder="e.g. E131, TK13"></div>
           <div class="form-group"><label>Alarm Time</label><input type="time" id="erAlarmTime"></div>
+          <div class="form-group"><label>Incident # (optional)</label><input type="text" id="erIncidentNum" placeholder="e.g. 24-01234"></div>
+          <div class="form-group"><label>Box / Area</label><input type="text" id="erBoxArea" placeholder="e.g. Box 1307"></div>
+          <div class="form-group" style="grid-column:1/-1;"><label>Address / Location *</label><input type="text" id="erAddress" placeholder="e.g. 8506 Main Ave"></div>
+          <div class="form-group" style="grid-column:1/-1;">
+            <label>Incident Type</label>
+            <select id="erType" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+              <option value="">— Select type —</option>
+              <option value="Structure Fire">Structure Fire</option>
+              <option value="Vehicle Fire">Vehicle Fire</option>
+              <option value="Brush / Wildland Fire">Brush / Wildland Fire</option>
+              <option value="Fire Alarm">Fire Alarm</option>
+              <option value="Mutual Aid - Fire">Mutual Aid — Fire</option>
+              <option value="Rescue / Extrication">Rescue / Extrication</option>
+              <option value="Water Rescue">Water Rescue</option>
+              <option value="Hazmat">Hazmat</option>
+              <option value="EMS - Cardiac">EMS — Cardiac</option>
+              <option value="EMS - Trauma">EMS — Trauma</option>
+              <option value="EMS - Medical">EMS — Medical</option>
+              <option value="EMS - Other">EMS — Other</option>
+              <option value="Mutual Aid - EMS">Mutual Aid — EMS</option>
+              <option value="Service Call">Service Call</option>
+              <option value="False Alarm / Cancelled">False Alarm / Cancelled</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </div>
 
+        <!-- Responding Apparatus -->
+        <div class="form-group" style="margin-top:4px;">
+          <label>Responding Apparatus *</label>
+          <div id="erApparatusGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;background:#181818;border:1px solid #2A2A2A;border-radius:8px;padding:10px;"></div>
         </div>
         <!-- Member checkboxes -->
         <div class="form-group" style="margin-top:8px;">
@@ -12022,13 +12108,13 @@ function applyBulkEdit() {
       </div>
 
       <!-- Response History -->
-      <div class="card">
+      <div class="card" id="erHistoryCard">
         <div class="card-header"><div class="icon">📋</div><h2>Response History</h2></div>
         <div style="overflow-x:auto;">
           <table class="data-table">
             <thead>
               <tr>
-                <th>Date</th><th>Location</th><th>Type</th><th>Box</th><th>Apparatus</th><th>Members</th><th>Logged By</th>
+                <th>Date</th><th>Location / Incident</th><th>Type</th><th>Apparatus</th><th>Members</th><th>Logged By</th><th>Actions</th>
               </tr>
             </thead>
             <tbody id="erHistoryBody">
