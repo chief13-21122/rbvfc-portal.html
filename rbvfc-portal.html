@@ -1945,6 +1945,15 @@ function showTrainingConfirmation(info) {
   var modal = document.createElement('div');
   modal.id = 'tsubConfirmModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  // Compute max backHours (cannot go before shift start)
+  var _nowMs = Date.now();
+  var _shH = parseInt((shift.shiftStart||'0700').slice(0,2));
+  var _shM = parseInt((shift.shiftStart||'0700').slice(2,4)||'0');
+  var _shiftStartMs = new Date(new Date().toISOString().slice(0,10)+'T'+(_shH<10?'0':'')+_shH+':'+(_shM<10?'0':'')+_shM+':00').getTime();
+  var _maxBackHrs   = Math.max(0, (_nowMs - _shiftStartMs) / 3600000);
+  var _shiftEndMs   = _shiftStartMs + (parseFloat(shift.shiftHours||24)) * 3600000;
+  var _remainHrs    = Math.max(0, (_shiftEndMs - _nowMs) / 3600000);
+  modal.dataset.maxBackHrs = _maxBackHrs;
   modal.innerHTML =
     '<div style="background:#1A1A1A;border:1px solid #27AE60;border-top:4px solid #27AE60;border-radius:14px;padding:28px;width:100%;max-width:380px;text-align:center;">' +
     '<div style="font-size:40px;margin-bottom:12px;">&#10003;</div>' +
@@ -4582,6 +4591,137 @@ function initMeetingForm() {
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════════════
+//  MANUAL ACTIVITY ENTRY (Officers & Admin)
+// ═══════════════════════════════════════════════════════════════════
+
+function initManualActivityCard() {
+  var card = document.getElementById('manualActivityCard');
+  if (!card) return;
+  var uid = state.currentUserId;
+  var me = (state.roster||[]).find(function(m){ return m.id===uid; });
+  var isOfficer = me && (me.appRole==='officer'||me.appRole==='admin');
+  card.style.display = isOfficer ? 'block' : 'none';
+  if (!isOfficer) return;
+
+  // Set logged-by display
+  var byEl = document.getElementById('manualEntryByName');
+  if (byEl) byEl.textContent = me ? me.last+', '+me.first+' · '+((me.ranks&&me.ranks.length?me.ranks[0]:me.rank)||me.appRole) : '—';
+
+  // Default date to today
+  var dateEl = document.getElementById('manualDate');
+  if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0,10);
+
+  // Populate member dropdown (active, non-admin members)
+  var sel = document.getElementById('manualMemberId');
+  if (sel && sel.options.length <= 1) {
+    (state.roster||[]).filter(function(m){ return m.active!==false; })
+      .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
+      .forEach(function(m){
+        var opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.last+', '+m.first+' ('+(m.ranks&&m.ranks.length?m.ranks[0]:(m.rank||m.appRole))+')';
+        sel.appendChild(opt);
+      });
+  }
+
+  renderManualRecentEntries();
+}
+
+function manualCategoryChanged() {
+  var cat = (document.getElementById('manualCategory')||{}).value||'';
+  var hint = document.getElementById('manualHoursHint');
+  var hintText = { meeting:'optional', boardmeeting:'optional',
+    duties:'required for pts (1pt per 4hrs)', training:'required',
+    drill:'optional', fundraiser:'optional', other:'optional' };
+  if (hint) hint.textContent = hintText[cat] || '';
+}
+
+function saveManualActivity() {
+  var memberId = (document.getElementById('manualMemberId')||{}).value||'';
+  var cat      = (document.getElementById('manualCategory')||{}).value||'';
+  var date     = (document.getElementById('manualDate')||{}).value||'';
+  var hours    = parseFloat((document.getElementById('manualHours')||{}).value||0) || null;
+  var desc     = ((document.getElementById('manualDesc')||{}).value||'').trim();
+  var enteredBy   = state.currentUserId;
+  var enteredByMe = (state.roster||[]).find(function(m){ return m.id===enteredBy; });
+  var enteredByName = enteredByMe ? enteredByMe.last+', '+enteredByMe.first : enteredBy;
+
+  if (!memberId) { showToast('\u26a0\ufe0f Select a member.'); return; }
+  if (!cat)      { showToast('\u26a0\ufe0f Select an activity type.'); return; }
+  if (!date)     { showToast('\u26a0\ufe0f Enter a date.'); return; }
+  if (!desc)     { showToast('\u26a0\ufe0f Enter a description.'); return; }
+  if (cat==='duties' && !hours) { showToast('\u26a0\ufe0f Hours are required for Standby/Collateral Duty.'); return; }
+
+  var cfg = CAT_CONFIG[cat];
+  var pts = cfg ? calcActivityPts(cat, hours) : 0;
+  if (cfg && cfg.maxPts) pts = Math.min(pts, cfg.maxPts);
+
+  var targetMember = (state.roster||[]).find(function(m){ return m.id===memberId; });
+
+  // Add directly to losapActivities (officer-entered = pre-approved)
+  if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
+  var actId = 'mact_'+Date.now();
+  state.losapActivities.unshift({
+    id:            actId,
+    memberId:      memberId,
+    date:          date,
+    category:      cat,
+    desc:          desc,
+    pts:           pts,
+    points:        pts,
+    hours:         hours || 0,
+    notes:         '',
+    approvedBy:    enteredBy,
+    approvedAt:    new Date().toISOString(),
+    enteredBy:     enteredBy,
+    enteredByName: enteredByName,
+    manualEntry:   true,
+    createdAt:     new Date().toISOString()
+  });
+
+  save();
+
+  // Clear form (keep member + date for quick multi-entry)
+  var catEl = document.getElementById('manualCategory'); if (catEl) catEl.value='';
+  var descEl = document.getElementById('manualDesc'); if (descEl) descEl.value='';
+  var hrsEl = document.getElementById('manualHours'); if (hrsEl) hrsEl.value='';
+  var hintEl = document.getElementById('manualHoursHint'); if (hintEl) hintEl.textContent='';
+
+  var mName = targetMember ? targetMember.last+', '+targetMember.first : 'Member';
+  showToast('\u2705 '+mName+': '+pts+' pts recorded for '+desc+'.');
+  renderManualRecentEntries();
+  try { renderCompanyLOSAP(); } catch(e){}
+}
+
+function renderManualRecentEntries() {
+  var container = document.getElementById('manualRecentEntries');
+  if (!container) return;
+  var recent = (state.losapActivities||[]).filter(function(a){ return a.manualEntry; })
+    .slice(0,8);
+  if (!recent.length) { container.innerHTML = ''; return; }
+  var h = '<div style="font-size:10px;font-weight:700;color:#666;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Recent Manual Entries</div>';
+  recent.forEach(function(a){
+    var m = (state.roster||[]).find(function(x){ return x.id===a.memberId; });
+    var mName = m ? m.last+', '+m.first : a.memberId;
+    var cfg = CAT_CONFIG[a.category];
+    var catLabel = cfg ? cfg.label : a.category;
+    var entBy = a.enteredByName || a.enteredBy || '—';
+    h += '<div style="background:#181818;border:1px solid #2A2A2A;border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;align-items:flex-start;gap:10px;">';
+    h += '<div style="flex:1;">';
+    h += '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">'+mName+'</div>';
+    h += '<div style="font-size:11px;color:#AAA;margin-top:1px;">'+catLabel+(a.hours?' &middot; '+a.hours+'h':'')+'  &middot;  '+a.date+'</div>';
+    h += '<div style="font-size:11px;color:#666;margin-top:2px;">'+a.desc+'</div>';
+    h += '<div style="font-size:10px;color:#444;margin-top:2px;">Entered by: '+entBy+'</div>';
+    h += '</div>';
+    h += '<div style="font-size:14px;font-weight:700;color:#F5A623;flex-shrink:0;">'+a.pts+' pts</div>';
+    h += '</div>';
+  });
+  container.innerHTML = h;
+}
+
+
 function initStaffingTab() {
   renderMemberAlertBanner();
   var uid = state.currentUserId;
@@ -4642,6 +4782,9 @@ function initStaffingTab() {
   // Show/hide Create Class button
   var tcBtn = document.getElementById('trainingClassesOfficerBtn');
   if (tcBtn) tcBtn.style.display = isOfficer ? 'block' : 'none';
+  // Init meeting form and manual entry card
+  try { initMeetingForm(); }          catch(e){}
+  try { initManualActivityCard(); }   catch(e){}
 }
 
 // ── DAY NAV ───────────────────────────────────────────────────
@@ -5618,10 +5761,41 @@ function clearStaleClockedInFlags() {
 }
 
 function _canClockInNow(shiftDate, shiftStartHHMM) {
-  // Only restriction: must be the shift date. Time restriction removed — handled by clock-in modal.
   var today = new Date().toISOString().slice(0, 10);
   if (shiftDate && shiftDate !== today) return false;
   return true;
+}
+
+// Strict shift-window check: returns { ok, reason }
+// Members cannot clock in before shift starts or after shift ends.
+function _checkShiftClockWindow(shift) {
+  if (!shift) return { ok: false, reason: 'Shift not found.' };
+  var now = new Date();
+  var today = now.toISOString().slice(0,10);
+  if (shift.date !== today) return { ok: false, reason: 'This shift is not scheduled for today.' };
+
+  var sh = parseInt((shift.shiftStart||'0700').slice(0,2));
+  var sm = parseInt((shift.shiftStart||'0700').slice(2,4)||'0');
+  var shiftStartMs = new Date(today+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00').getTime();
+  var shiftHours   = parseFloat(shift.shiftHours || shift.hours || 24);
+  var shiftEndMs   = shiftStartMs + shiftHours * 3600000;
+
+  var nowMs = now.getTime();
+  // Cannot clock in BEFORE the shift starts
+  if (nowMs < shiftStartMs) {
+    var minsUntil = Math.round((shiftStartMs - nowMs) / 60000);
+    var hUntil = sh % 12 || 12, mUntil = sm, ampm = sh >= 12 ? 'PM' : 'AM';
+    var startStr = hUntil+':'+(mUntil<10?'0':'')+mUntil+' '+ampm;
+    return { ok: false, reason: 'Shift does not start until '+startStr+' ('+minsUntil+' min from now).' };
+  }
+  // Cannot clock in AFTER the shift has ended
+  if (nowMs >= shiftEndMs) {
+    var endDate  = new Date(shiftEndMs);
+    var eH = endDate.getHours(), eM = endDate.getMinutes();
+    var endStr = (eH%12||12)+':'+(eM<10?'0':'')+eM+' '+(eH>=12?'PM':'AM');
+    return { ok: false, reason: 'This shift ended at '+endStr+'. Use manual entry to record attendance.' };
+  }
+  return { ok: true, reason: '' };
 }
 
 function staffClockIn(elOrId) {
@@ -5631,9 +5805,9 @@ function staffClockIn(elOrId) {
   var shiftId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
   if (!shift) return;
-  if (!_canClockInNow(shift.date, null)) {
-    var _shName = (UNIT_LABELS[shift.unitId]||shift.unitId)+(shift.position?' – '+shift.position:'');
-    showToast('\u26a0\ufe0f Cannot clock in: shift for '+_shName+' is on '+shift.date+' (not today).');
+  var _win = _checkShiftClockWindow(shift);
+  if (!_win.ok) {
+    showToast('\u26a0\ufe0f ' + _win.reason);
     return;
   }
   // Can't clock into a shift while already clocked into an overlapping one
@@ -5890,16 +6064,30 @@ function confirmStaffClockIn() {
   shift.clockedIn=true; shift.clockedInAt=startTime.toISOString(); shift.status='active';
   var shiftMemberId = shift.memberId || state.currentUserId;
   var isClockingForSelf = shiftMemberId === state.currentUserId;
-  // Create session for the shift's member (may be different from current user)
-  if (isClockingForSelf && !state.currentSession) {
-    var desc = (UNIT_LABELS[shift.unitId]||shift.unitId)+(shift.position?' \u00b7 '+shift.position:'');
-    state.currentSession = { id:'sess_'+Date.now(), userId:shiftMemberId, start:startTime.toISOString(),
-      activity:'duty', desc:desc, shiftId:shift.id, end:null, duration:null };
-    if (typeof _clockTimerInterval!=='undefined') {
-      if (_clockTimerInterval) clearInterval(_clockTimerInterval);
-      _clockTimerInterval = setInterval(tickClockTimer, 1000);
+  // Create a session record for the shift member (whether self or another member)
+  var desc2 = (UNIT_LABELS[shift.unitId]||shift.unitId)+(shift.position?' \u00b7 '+shift.position:'');
+  var newSession = {
+    id: 'sess_'+Date.now(), userId: shiftMemberId, start: startTime.toISOString(),
+    activity: 'duty', desc: desc2, shiftId: shift.id, end: null, duration: null,
+    clockedBy: isClockingForSelf ? null : state.currentUserId  // track who clocked them in
+  };
+  if (isClockingForSelf) {
+    if (!state.currentSession) {
+      state.currentSession = newSession;
+      if (typeof _clockTimerInterval!=='undefined') {
+        if (_clockTimerInterval) clearInterval(_clockTimerInterval);
+        _clockTimerInterval = setInterval(tickClockTimer, 1000);
+      }
+      try{updateClockUI(true);}catch(e){} try{updateClockStats();}catch(e){} try{updateStats();}catch(e){}
     }
-    try{updateClockUI(true);}catch(e){} try{updateClockStats();}catch(e){} try{updateStats();}catch(e){}
+  } else {
+    // Officer clocking in another member — add their session directly
+    if (!Array.isArray(state.sessions)) state.sessions = [];
+    // Check they don't already have an open session for this shift
+    var existingOpen = state.sessions.find(function(ss){ return ss.userId===shiftMemberId && ss.shiftId===shift.id && !ss.end; });
+    if (!existingOpen) {
+      state.sessions.push(newSession);
+    }
   }
   save();
   var mo = document.getElementById('clockInConfirmModal'); if (mo) mo.remove();
@@ -12357,6 +12545,62 @@ function applyBulkEdit() {
       
 
       <!-- Daily Staffing Board -->
+
+      <!-- Officer Manual Activity Entry -->
+      <div class="card" id="manualActivityCard" style="display:none;">
+        <div class="card-header" onclick="toggleAdminCardById('manualActivityBody')" style="cursor:pointer;user-select:none;">
+          <div class="icon">✏️</div>
+          <h2>Manual Activity Entry</h2>
+          <span style="font-size:11px;color:#555;margin-left:8px;">Officers &amp; Admin</span>
+          <span id="manualActivityChevron" style="margin-left:auto;font-size:13px;color:#555;transition:transform .2s;display:inline-block;">&#9660;</span>
+        </div>
+        <div id="manualActivityBody">
+          <!-- Logged By Banner -->
+          <div style="display:flex;align-items:center;gap:10px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+            <span style="font-size:18px;">🔒</span>
+            <div>
+              <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Entry Recorded By</div>
+              <div id="manualEntryByName" style="font-size:14px;font-weight:700;color:#27AE60;"></div>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1;">
+              <label>Member *</label>
+              <select id="manualMemberId" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+                <option value="">— Select member —</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Activity Type *</label>
+              <select id="manualCategory" onchange="manualCategoryChanged()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+                <option value="">— Select type —</option>
+                <option value="meeting">Company Meeting</option>
+                <option value="boardmeeting">Board Meeting</option>
+                <option value="duties">Standby / Collateral Duty</option>
+                <option value="training">Training</option>
+                <option value="drill">Drill / In-House Training</option>
+                <option value="fundraiser">Fundraiser / Special Event</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Date *</label>
+              <input type="date" id="manualDate">
+            </div>
+            <div class="form-group" id="manualHoursGroup">
+              <label>Hours <span id="manualHoursHint" style="color:#666;font-size:10px;"></span></label>
+              <input type="number" id="manualHours" min="0.5" step="0.5" placeholder="e.g. 2">
+            </div>
+            <div class="form-group" style="grid-column:1/-1;">
+              <label>Description / Notes *</label>
+              <input type="text" id="manualDesc" placeholder="e.g. Monthly Company Meeting, Station coverage 1800-0600…">
+            </div>
+          </div>
+          <button class="btn btn-primary btn-full" onclick="saveManualActivity()" style="margin-top:4px;">✅ Record Activity</button>
+          <!-- Recent manual entries -->
+          <div id="manualRecentEntries" style="margin-top:14px;"></div>
+        </div>
+      </div>
 
       <!-- Special Events Member View -->
       <div class="card" id="specialEventsMemberCard" style="display:none;">
