@@ -4507,169 +4507,178 @@ function renderStaffingBoard() {
     // ── Position rows helper (shared for primary and linked units) ──
     function renderUnitPositions(uId, uShifts, uPositions) {
       uPositions.forEach(function(posName, posIdx) {
-        var shift          = uShifts.find(function(s){ return s.positionIndex===posIdx; });
-        var assignedMember = shift && shift.memberId ? (state.roster||[]).find(function(m){ return m.id===shift.memberId; }) : null;
-        var isMe    = shift && shift.memberId === uid;
-        var isEmpty = !shift || !shift.memberId;
-        var clockedIn = shift && shift.clockedIn;
 
+        // All shifts at this position (may be multiple partial-time slots)
+        var posShifts = uShifts.filter(function(s){ return s.positionIndex === posIdx && s.memberId; })
+          .sort(function(a,b){ return (a.shiftStart||a.start||'0700').localeCompare(b.shiftStart||b.start||'0700'); });
+
+        // ── Coverage gap calculator ────────────────────────────────────────
+        // Builds a list of uncovered minute-windows in the 0700→0700 (1440-min) day
+        function coveredMinutes() {
+          var covered = [];
+          posShifts.filter(function(s){ return !s.clockedOutAt; }).forEach(function(s){
+            var st  = s.shiftStart||s.start||'0700';
+            var hrs = parseFloat(s.shiftHours||s.hours||24);
+            var sH  = parseInt(st.slice(0,2)), sM = parseInt(st.slice(2,4)||'0');
+            var startMin = sH*60+sM;
+            var endMin   = startMin + Math.round(hrs*60);
+            covered.push([startMin, endMin]);
+          });
+          return covered;
+        }
+
+        function totalCoveredMins() {
+          var cv = coveredMinutes();
+          var total = 0;
+          cv.forEach(function(r){ total += r[1]-r[0]; });
+          return Math.min(total, 1440);
+        }
+
+        function nextOpenStart() {
+          // After all covered windows, what's the first uncovered minute >= 420 (0700)?
+          var cv = coveredMinutes().sort(function(a,b){ return a[0]-b[0]; });
+          var cursor = 7*60; // 0700
+          for (var i=0; i<cv.length; i++) {
+            if (cv[i][0] <= cursor && cv[i][1] > cursor) cursor = cv[i][1];
+          }
+          if (cursor >= 7*60+1440) return null; // full 24h covered
+          var h = Math.floor(cursor/60)%24, m = cursor%60;
+          return (h<10?'0':'')+h+(m<10?'0':'')+m;
+        }
+
+        function remainingHours() {
+          var used = totalCoveredMins();
+          return Math.max(0, (1440 - used) / 60);
+        }
+
+        function fmt(hhmm) {
+          var h = parseInt((hhmm||'0700').slice(0,2));
+          var m = parseInt((hhmm||'0700').slice(2,4)||'0');
+          return (h%12||12)+':'+(m<10?'0':'')+m+' '+(h>=12?'PM':'AM');
+        }
+
+        var isFullyCovered  = totalCoveredMins() >= 1440;
+        var isPartial       = posShifts.length > 0 && !isFullyCovered;
+        var isOpen          = posShifts.length === 0;
+        var alreadyHaveSlot = posShifts.some(function(s){ return s.memberId === uid; });
+
+        // ── Eligibility checks ─────────────────────────────────────────────
+        var EMS_IDS = ['a139','Mu13'];
+        var uIdIsEMS = EMS_IDS.indexOf(uId) >= 0;
+        var myShiftsOnDate = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.memberId===uid; });
+        var hasConflict = myShiftsOnDate.some(function(s){
+          if (s.unitId===uId) return false;
+          if (areUnitsLinked(uId, s.unitId, date)) return false;
+          var shiftIsEMS = EMS_IDS.indexOf(s.unitId) >= 0;
+          if (uIdIsEMS !== shiftIsEMS) return false;
+          return true;
+        });
+        var adminRestricted = isAdminMember(member) && uId !== 'U13';
+        var isPastDate = date < new Date().toISOString().slice(0,10);
+        var isPastTime = date === new Date().toISOString().slice(0,10) && new Date().getHours() >= 20;
+        var _elig = member ? checkStaffingEligibility(member, uId, posName) : { eligible:false, code:'NO_MEMBER', reason:'' };
+        var canSignUp = !hasConflict && !adminRestricted && !isPastDate && !isPastTime && _elig.eligible && !alreadyHaveSlot && !isFullyCovered;
+
+        // Pre-fill values for the Sign Up modal
+        var _nextStart = nextOpenStart() || '0700';
+        var _remHours  = remainingHours();
+
+        // ── Position row ───────────────────────────────────────────────────
         html += '<div style="padding:10px 0;border-bottom:1px solid #1E1E1E;">';
-        html += '<div style="font-size:11px;color:#666;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">'+posName+'</div>';
-        html += '<div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;">';
+        // Position label + coverage badge
+        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+        html += '<div style="font-size:11px;color:#666;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;">'+posName+'</div>';
+        if (isFullyCovered)  html += '<span style="font-size:9px;font-weight:700;color:#27AE60;background:#0A1F0A;border:1px solid #1A4A1A;border-radius:4px;padding:1px 6px;letter-spacing:1px;">&#10003; FULL</span>';
+        else if (isPartial)  html += '<span style="font-size:9px;font-weight:700;color:#F5A623;background:#1A1200;border:1px solid #3A2800;border-radius:4px;padding:1px 6px;letter-spacing:1px;">&#9711; PARTIAL &mdash; '+Math.round(_remHours)+'h open</span>';
+        else                 html += '<span style="font-size:9px;font-weight:700;color:#27AE60;background:#0A1F0A;border:1px solid #1A4A1A;border-radius:4px;padding:1px 6px;letter-spacing:1px;">&#11044; OPEN &mdash; 24h</span>';
+        html += '</div>';
 
-        if (isEmpty) {
-          // Find all partial-coverage shifts for this position slot
-          var _covShifts = (state.staffingShifts||[]).filter(function(s){
-            return s.date===date && s.unitId===uId && s.positionIndex===posIdx && s.memberId && !s.clockedOutAt;
-          }).sort(function(a,b){
-            return (a.shiftStart||a.start||'0700').localeCompare(b.shiftStart||b.start||'0700');
-          });
+        html += '<div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">';
 
-          if (!_covShifts.length) {
-            // Fully open — show open badge + direct Sign Up
-            html += '<div style="flex:1;display:flex;align-items:center;gap:8px;">';
-            html += '<div style="display:inline-flex;align-items:center;gap:8px;background:#0A2A0A;border:2px solid #27AE60;border-radius:8px;padding:6px 14px;">';
-            html += '<div style="width:9px;height:9px;border-radius:50%;background:#27AE60;box-shadow:0 0 6px #27AE60;"></div>';
-            html += '<div style="font-size:15px;color:#27AE60;font-weight:700;letter-spacing:1px;">OPEN &mdash; Full 24h Available</div>';
+        // ── Show all assigned members ──────────────────────────────────────
+        if (posShifts.length) {
+          html += '<div style="flex:1;min-width:160px;">';
+          posShifts.forEach(function(s){
+            var _m     = (state.roster||[]).find(function(x){ return x.id===s.memberId; });
+            var _name  = _m ? _m.last+', '+_m.first : 'Unknown';
+            var _isMe  = s.memberId === uid;
+            var _ci    = s.clockedIn && !s.clockedOutAt;
+            var _label = shiftLabel(s);
+            var _namec = _isMe ? '#27AE60' : '#F0F0F0';
+            html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;'
+                  + 'background:#141414;border-left:3px solid '+(_ci?'#27AE60':(_isMe?'#27AE60':'#333'))+';'
+                  + 'border-radius:0 6px 6px 0;padding:6px 10px;">';
+            html += '<div style="flex:1;min-width:0;">';
+            html += '<div style="font-size:13px;font-weight:700;color:'+_namec+';">'+_name+(_isMe?' (You)':'')+'</div>';
+            html += '<div style="font-size:11px;color:#555;margin-top:1px;">'+_label+'</div>';
             html += '</div>';
-            html += '</div>';
-          } else {
-            // Partially covered — show each window + highlight open gap
-            html += '<div style="flex:1;">';
-            // Coverage summary line
-            html += '<div style="display:flex;align-items:center;gap:5px;margin-bottom:6px;">';
-            html += '<div style="font-size:11px;font-weight:700;color:#F5A623;letter-spacing:1px;text-transform:uppercase;">\u26A0 Partially Covered</div>';
-            html += '</div>';
-            // Each covered window as a pill
-            _covShifts.forEach(function(_cs){
-              var _cm = (state.roster||[]).find(function(r){ return r.id===_cs.memberId; });
-              var _st = _cs.shiftStart||_cs.start||'0700';
-              var _sh = parseFloat(_cs.shiftHours||_cs.hours||24);
-              var _sH = parseInt(_st.slice(0,2)), _sM = parseInt(_st.slice(2,4)||'0');
-              var _eMin = (_sH*60+_sM+Math.round(_sh*60))%(24*60);
-              var _eH = Math.floor(_eMin/60), _eM = _eMin%60;
-              var _eStr = (_eH<10?'0':'')+_eH+(_eM<10?'0':'')+_eM;
-              var _stFmt = (parseInt(_st.slice(0,2))%12||12)+':'+(parseInt(_st.slice(2,4)||'0')<10?'0':'')+parseInt(_st.slice(2,4)||'0')+' '+(parseInt(_st.slice(0,2))>=12?'PM':'AM');
-              var _eFmt  = (_eH%12||12)+':'+(_eM<10?'0':'')+_eM+' '+(_eH>=12?'PM':'AM');
-              var _ci = _cs.clockedIn;
-              html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;background:#1A1A0A;border:1px solid #3A3A1A;border-radius:6px;padding:5px 10px;">';
-              html += '<div style="width:6px;height:6px;border-radius:50%;background:'+(_ci?'#27AE60':'#F5A623')+';flex-shrink:0;"></div>';
-              html += '<div style="flex:1;">';
-              html += '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">'+(_cm?_cm.last+', '+_cm.first:'?')+'</div>';
-              html += '<div style="font-size:11px;color:#888;">'+_stFmt+' &ndash; '+_eFmt+'</div>';
-              html += '</div>';
-              if (_ci) html += '<div style="font-size:10px;font-weight:700;color:#27AE60;letter-spacing:1px;">IN</div>';
-              html += '</div>';
-            });
-            // Show open gap notice
-            html += '<div style="display:flex;align-items:center;gap:6px;margin-top:4px;background:#0D1A1A;border:1px dashed #1A3A3A;border-radius:6px;padding:5px 10px;">';
-            html += '<div style="width:6px;height:6px;border-radius:50%;background:#3498DB;flex-shrink:0;"></div>';
-            html += '<div style="font-size:12px;color:#3498DB;font-weight:700;letter-spacing:1px;">Other windows open &ndash; Sign Up below</div>';
-            html += '</div>';
-            html += '</div>';
-          }
-          // Determine if member can sign up here
-          var myShiftsOnDate  = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.memberId===uid; });
-          // EMS units (a139, Mu13) are compatible with fire units — no conflict cross-type
-          var EMS_IDS = ['a139', 'Mu13'];
-          var uIdIsEMS = EMS_IDS.indexOf(uId) >= 0;
-          var hasConflict = myShiftsOnDate.some(function(s) {
-            if (s.unitId === uId) return false;               // same unit handled by alreadyThisUnit
-            if (areUnitsLinked(uId, s.unitId, date)) return false;  // linked units allowed (unless independent day)
-            var shiftIsEMS = EMS_IDS.indexOf(s.unitId) >= 0;
-            // No conflict between fire and EMS — members can do both
-            if (uIdIsEMS !== shiftIsEMS) return false;
-            return true;  // same category, not linked → conflict
-          });
-          // Per-position blocking: only block if THIS SPECIFIC POSITION already has a 24h member
-          // Members can staff multiple positions on the same unit (e.g. Chauffeur + Nozzle)
-          var positionFullyCovered = (state.staffingShifts||[]).some(function(s){
-            if (s.date !== date || s.unitId !== uId || s.positionIndex !== posIdx || !s.memberId) return false;
-            // Check if this shift covers the full 24h or the full remaining window
-            var _sh = parseFloat(s.shiftHours||s.hours||24);
-            return _sh >= 24;
-          });
-          var alreadyInThisPosition = (state.staffingShifts||[]).some(function(s){
-            return s.date===date && s.unitId===uId && s.positionIndex===posIdx && s.memberId===uid;
-          });
-          var blocked = hasConflict || positionFullyCovered || alreadyInThisPosition;
-          var adminRestricted = isAdminMember(member) && uId !== 'U13';
-          var isPastDate      = date < new Date().toISOString().slice(0,10);
-          var isPastTime      = false;
-          if (date === new Date().toISOString().slice(0,10)) {
-            isPastTime = new Date().getHours() >= 20;
-          }
-          // Full 4-tier eligibility check
-          var _elig = member ? checkStaffingEligibility(member, uId, posName) : { eligible: false, code: 'NO_MEMBER', reason: '' };
-          if (!blocked && !adminRestricted && !isPastDate && !isPastTime && _elig.eligible) {
-            html += '<button onclick="openSignUpModal(\''+date+'\',\''+uId+'\',' +posIdx+ ',\''+posName.replace(/\'/g,"\\\\\'")+'\')\"'                  + ' style="background:#0D2200;border:2px solid #27AE60;color:#27AE60;border-radius:8px;'                  + 'padding:7px 18px;cursor:pointer;font-weight:700;font-size:14px;white-space:nowrap;letter-spacing:0.5px;">\u270b Sign Up</button>';
-          } else if (!blocked && !adminRestricted && !isPastDate && !isPastTime && !_elig.eligible) {
-            var _bIco = {'BANNED_RANK':'\u26d4','RIDE_REPORT':'\ud83d\udecb','MIN_RANK':'\ud83c\udfc5','REQ_CERT':'\ud83d\udcc4'}[_elig.code]||'\u26a0\ufe0f';
-            html += '<div style="display:inline-flex;align-items:center;gap:6px;background:#1A0A0A;border:1px solid #3A1A1A;border-radius:6px;padding:5px 10px;">'                  + '<span style="font-size:13px;">'+_bIco+'</span>'                  + '<div style="font-size:11px;color:#AA4444;line-height:1.3;">'+_elig.reason+'</div>'                  + '</div>';
-          } else if (!blocked && adminRestricted && !isPastDate) {
-            html += '<span style="font-size:10px;color:#444;padding:4px 6px;">Admin only</span>';
-          } else if (!meetsRankForPos && !isPastDate) {
-            html += '<span style="font-size:10px;color:#444;padding:2px 4px;" title="Not cleared for this position">🔒 Not cleared</span>';
-          } else if (hasConflict && !isPastDate) {
-            html += '<span style="font-size:10px;color:#555;padding:2px 4px;" title="You have a conflicting shift">\uD83D\uDD12 Conflict</span>';
-          }
-        } else {
-          var nameStr  = assignedMember ? assignedMember.last+', '+assignedMember.first+(isProbationary(assignedMember)?' [PROB]':'') : 'Unknown';
-          var rankStr  = assignedMember ? (assignedMember.ranks&&assignedMember.ranks.length?assignedMember.ranks.join(' / '):(assignedMember.rank||'')) : '';
-          var rankOk   = assignedMember ? memberMeetsRank(assignedMember, posName) : true;
-          var nameColor= isMe ? '#27AE60' : (!rankOk ? '#F5A623' : '#F0F0F0');
-          html += '<div style="flex:1;">';
-          html += '<div style="font-size:14px;font-weight:700;color:'+nameColor+';">'+nameStr+(isMe?' (You)':'')+(!rankOk?' \u26A0':'')+'</div>';
-          if (rankStr) html += '<div style="font-size:11px;color:#666;">'+rankStr+'</div>';
-          if (shift) html += '<div style="font-size:11px;color:#555;">'+shiftLabel(shift)+'</div>';
-          html += '</div>';
-          if (isMe) {
-            if (!clockedIn) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+shift.id+'">&#128336; Clock In</button>';
-            else {
-              html += '<span style="font-size:11px;color:#27AE60;font-weight:700;">\u2713 In</span>';
-              if (isOfficer) html += '<button onclick="openAdjustClockIn(\'' + shift.id + '\')" style="margin-left:5px;background:#1A2A00;border:1px solid #F5A623;color:#F5A623;border-radius:5px;padding:2px 6px;cursor:pointer;font-size:10px;">&#9998;</button>';
+            if (_ci) html += '<span style="font-size:10px;font-weight:700;color:#27AE60;letter-spacing:1px;">IN</span>';
+            // Controls for own shift
+            if (_isMe) {
+              if (!_ci) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+s.id+'">&#128336; Clock In</button>';
+              else {
+                html += '<span style="font-size:11px;color:#27AE60;font-weight:700;">&#10003; In</span>';
+                if (isOfficer) html += '<button onclick="openAdjustClockIn(\''+s.id+'\')" style="margin-left:5px;background:#1A2A00;border:1px solid #F5A623;color:#F5A623;border-radius:5px;padding:2px 6px;cursor:pointer;font-size:10px;">&#9998;</button>';
+              }
+              if (!_ci) html += '<button class="btn btn-sm btn-secondary" onclick="editShift(this)" data-id="'+s.id+'" style="margin-left:4px;font-size:10px;">Edit</button>';
+              html += '<button class="btn btn-sm btn-danger" onclick="cancelShift(this)" data-id="'+s.id+'" style="margin-left:4px;">&#10005;</button>';
+            } else if (isOfficer) {
+              if (!_ci) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+s.id+'">Clock In</button>';
+              else html += '<span style="font-size:11px;color:#27AE60;">&#10003; In</span>';
+              html += '<button class="btn btn-sm btn-danger" onclick="removeFromShift(this)" data-id="'+s.id+'" style="margin-left:4px;font-size:10px;">Remove</button>';
             }
-            if (!clockedIn) html += '<button class="btn btn-sm btn-secondary" onclick="editShift(this)" data-id="'+shift.id+'" style="margin-left:4px;font-size:10px;">Edit</button>';
-            html += '<button class="btn btn-sm btn-danger" onclick="cancelShift(this)" data-id="'+shift.id+'" style="margin-left:4px;">&#10005;</button>';
-          } else if (isOfficer) {
-            if (!clockedIn) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+shift.id+'">Clock In</button>';
-            else html += '<span style="font-size:11px;color:#27AE60;">\u2713 In</span><button onclick="openAdjustClockIn(\'' + shift.id + '\')" style="margin-left:5px;background:#1A2A00;border:1px solid #F5A623;color:#F5A623;border-radius:5px;padding:2px 6px;cursor:pointer;font-size:10px;">&#9998;</button>';
-            html += '<button class="btn btn-sm btn-secondary" onclick="editShift(this)" data-id="'+shift.id+'" style="margin-left:4px;font-size:10px;">Edit</button>';
-            html += '<button class="btn btn-sm btn-danger" onclick="removeFromShift(this)" data-id="'+shift.id+'" style="margin-left:4px;font-size:10px;">Remove</button>';
+            html += '</div>';
+          });
+          html += '</div>';
+        }
+
+        // ── Open / Gap section with Sign Up ───────────────────────────────
+        if (isOpen) {
+          // Completely open
+          html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:1;">';
+          html += '<div style="display:inline-flex;align-items:center;gap:8px;background:#0A2A0A;border:2px solid #27AE60;border-radius:8px;padding:6px 14px;">';
+          html += '<div style="width:9px;height:9px;border-radius:50%;background:#27AE60;box-shadow:0 0 6px #27AE60;"></div>';
+          html += '<div style="font-size:14px;color:#27AE60;font-weight:700;letter-spacing:1px;">OPEN &mdash; Full 24h Available</div>';
+          html += '</div>';
+          html += '</div>';
+        } else if (isPartial && !alreadyHaveSlot) {
+          // Show the open gap window clearly
+          html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0;">';
+          var _gapStart = fmt(_nextStart);
+          var _gapEnd   = '7:00 AM';  // always ends at next 0700
+          html += '<div style="background:#0D1A1A;border:2px dashed #3498DB;border-radius:8px;padding:6px 14px;">';
+          html += '<div style="font-size:11px;color:#3498DB;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:1px;">Gap Available</div>';
+          html += '<div style="font-size:13px;color:#88BBDD;font-weight:700;">'+_gapStart+' &rarr; next 0700</div>';
+          html += '<div style="font-size:11px;color:#3498DB;">'+Math.round(_remHours)+'h remaining</div>';
+          html += '</div>';
+          html += '</div>';
+        } else if (alreadyHaveSlot && isPartial) {
+          html += '<div style="font-size:11px;color:#666;font-style:italic;padding:4px 0;">You have a window on this position.</div>';
+        }
+
+        // ── Sign Up button ────────────────────────────────────────────────
+        if (canSignUp) {
+          var _btnLabel = isOpen ? '&#9996; Sign Up' : '&#9996; Fill Gap';
+          html += '<button onclick="callSignUpFromBtn(this)" data-date="'+date+'" data-unit="'+uId+'" data-pos="'+posIdx+'" data-posname="'+posName.replace(/'/g,"\'")+"'" + '" data-start="'+_nextStart+'" data-hours="'+_remHours+'"'
+               + ' style="background:#0D2200;border:2px solid #27AE60;color:#27AE60;border-radius:8px;'
+               + 'padding:7px 18px;cursor:pointer;font-weight:700;font-size:14px;white-space:nowrap;'
+               + 'letter-spacing:0.5px;flex-shrink:0;">'+_btnLabel+'</button>';
+        } else if (!canSignUp && !isFullyCovered && !alreadyHaveSlot) {
+          // Show why blocked
+          var _bIco = {'BANNED_RANK':'\u26d4','RIDE_REPORT':'\ud83d\udecb','MIN_RANK':'\ud83c\udfc5','REQ_CERT':'\ud83d\udcc4'}[_elig.code]||'\u26a0\ufe0f';
+          if (!_elig.eligible) {
+            html += '<div style="display:inline-flex;align-items:center;gap:6px;background:#1A0A0A;border:1px solid #3A1A1A;border-radius:6px;padding:5px 10px;">'
+                  + '<span style="font-size:13px;">'+_bIco+'</span>'
+                  + '<div style="font-size:11px;color:#AA4444;line-height:1.3;">'+_elig.reason+'</div>'
+                  + '</div>';
+          } else if (hasConflict) {
+            html += '<span style="font-size:10px;color:#555;padding:2px 4px;" title="You have a conflicting shift">&#128274; Conflict</span>';
           }
         }
-        html += '</div>';
-        html += '</div>'; // end inner flex
-      });
 
-      // Student slots (positionIndex 999) shown after named positions
-      var _ss = uShifts.filter(function(s){ return s.positionIndex===999 && s.memberId; });
-      if (_ss.length) {
-        html += '<div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1.5px;padding:6px 0 2px;border-top:1px dashed #222;">Students</div>';
-        _ss.forEach(function(_sh) {
-          var _sm = (state.roster||[]).find(function(m){ return m.id===_sh.memberId; });
-          var _me = _sh.memberId===uid, _ci=_sh.clockedIn;
-          var _nm = _sm ? _sm.last+', '+_sm.first+(isProbationary(_sm)?' [PROB]':'') : 'Unknown';
-          var _rk = _sm ? (_sm.ranks&&_sm.ranks.length?_sm.ranks.join(' / '):(_sm.rank||'')) : '';
-          html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;flex-wrap:wrap;">';
-          html += '<div style="min-width:130px;"><div style="font-size:12px;color:#888;font-weight:600;">Student</div></div>';
-          html += '<div style="flex:1;">';
-          html += '<div style="font-size:14px;font-weight:700;color:'+(_me?'#27AE60':'#F0F0F0')+';">'+_nm+(_me?' (You)':'')+'</div>';
-          if (_rk) html += '<div style="font-size:11px;color:#666;">'+_rk+'</div>';
-          html += '<div style="font-size:11px;color:#555;">'+shiftLabel(_sh)+'</div>';
-          html += '</div>';
-          if (_me) {
-            if (!_ci) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+_sh.id+'">Clock In</button>';
-            else html += '<span style="font-size:11px;color:#27AE60;font-weight:700;">\u2713 In</span>';
-            html += '<button class="btn btn-sm btn-danger" onclick="cancelShift(this)" data-id="'+_sh.id+'" style="margin-left:4px;">&#10005;</button>';
-          } else if (isOfficer) {
-            if (!_ci) html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+_sh.id+'">Clock In</button>';
-            else html += '<span style="font-size:11px;color:#27AE60;">\u2713 In</span>';
-            html += '<button class="btn btn-sm btn-danger" onclick="removeFromShift(this)" data-id="'+_sh.id+'" style="margin-left:4px;font-size:10px;">Remove</button>';
-          }
-          html += '</div>';
-        });
-      }
+        html += '</div>';  // end flex row
+        html += '</div>';  // end position row
+      });
     }
 
     // ── Render primary unit positions ──
@@ -4750,7 +4759,7 @@ function shiftLabel(shift) {
 }
 
 // ── SIGN UP MODAL ─────────────────────────────────────────────
-function openSignUpModal(date, unitId, posIdx, posName) {
+function openSignUpModal(date, unitId, posIdx, posName, suggestStart, suggestHours) {
   var modal = document.getElementById('signUpModal');
   if (!modal) return;
   document.getElementById('suModalUnit').textContent = UNIT_LABELS[unitId] + ' — ' + posName;
@@ -4761,7 +4770,7 @@ function openSignUpModal(date, unitId, posIdx, posName) {
   document.getElementById('suPosName').value = posName;
 
   // Smart default: find next uncovered time window on this unit
-  var existingShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===unitId && s.memberId; });
+  var existingShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===unitId && s.positionIndex===posIdx && s.memberId; });
   var suggestedStart = '07:00', suggestedHours = 24;
 
   if (existingShifts.length) {
@@ -4799,12 +4808,25 @@ function openSignUpModal(date, unitId, posIdx, posName) {
     if (hintEl2) hintEl2.style.display = 'none';
   }
 
+  // Use caller-provided suggestion (from board's gap calculator) if available
+  if (suggestStart) suggestedStart = suggestStart.slice(0,2)+':'+suggestStart.slice(2,4);
+  if (suggestHours) suggestedHours = suggestHours;
   document.getElementById('suStart').value = suggestedStart;
-  document.getElementById('suHours').value = suggestedHours;
+  document.getElementById('suHours').value  = suggestedHours;
   var minRank = POSITION_MIN_RANK[posName];
   var rankEl = document.getElementById('suRankReq');
   if (rankEl) rankEl.textContent = minRank ? 'Recommended: ' + minRank + ' or above' : '';
   modal.style.display = 'flex';
+}
+
+function callSignUpFromBtn(btn) {
+  var date    = btn.dataset.date;
+  var unitId  = btn.dataset.unit;
+  var posIdx  = parseInt(btn.dataset.pos);
+  var posName = btn.dataset.posname;
+  var start   = btn.dataset.start || '0700';
+  var hours   = parseFloat(btn.dataset.hours) || 24;
+  openSignUpModal(date, unitId, posIdx, posName, start, hours);
 }
 
 function closeSignUpModal() {
@@ -5042,12 +5064,11 @@ function officerAssign(date, unitId) {
       return;
     }
   }
-  // Check position isn't already taken
-  var taken = posIdx !== 999 && (state.staffingShifts||[]).some(function(s){
-    return s.date===date && s.unitId===unitId && s.positionIndex===posIdx && s.memberId;
+  // Check if THIS MEMBER already has a slot on this specific position (per-position, not per-unit)
+  var memberAlreadyOnPos = (state.staffingShifts||[]).some(function(s){
+    return s.date===date && s.unitId===unitId && s.positionIndex===posIdx && s.memberId===memberId;
   });
-  if (taken) { showToast('\u26a0\ufe0f ' + posName + ' is already filled. Choose a different position.'); return; }
-
+  if (memberAlreadyOnPos) { showToast('\u26a0\ufe0f ' + assigningMember.last + ' already has a slot for ' + posName + ' on this date.'); return; }
   // Check for time-overlap conflict before assigning
   var overlapShift = _memberHasOverlappingShift(memberId, date, start, hours);
   if (overlapShift) {
