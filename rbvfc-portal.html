@@ -4411,7 +4411,17 @@ function renderStaffingBoard() {
       }
       if (isOfficer) {
         var _tA = allUnitsInGroup[0], _tB = allUnitsInGroup[1];
-        html += '<button onclick="toggleIndependentStaffing(\''+_tA+'\',\''+_tB+'\',\''+date+'\')" style="margin-left:6px;background:'+ (_isIndep?'#1A2A00':'#1A0A0A') +';border:1px solid '+ (_isIndep?'#27AE60':'#F5A623') +';color:'+ (_isIndep?'#27AE60':'#F5A623') +';border-radius:5px;padding:2px 8px;cursor:pointer;font-size:10px;font-weight:700;white-space:nowrap;">'+ (_isIndep?'\u21c4 Combined':'\u2194 Independent') +'</button>';
+        var _btnBg    = _isIndep ? '#0D2200' : '#1A0800';
+        var _btnBorder = _isIndep ? '#27AE60' : '#F5A623';
+        var _btnColor  = _isIndep ? '#27AE60' : '#F5A623';
+        var _btnLabel  = _isIndep ? '\u2714 INDEPENDENT' : '\u26D4 COMBINED CREW';
+        var _btnShadow = _isIndep ? 'box-shadow:inset 0 2px 4px rgba(0,0,0,.6),0 0 6px rgba(39,174,96,.3);'
+                                   : 'box-shadow:inset 0 2px 4px rgba(0,0,0,.6),0 0 6px rgba(245,166,35,.2);';
+        html += '<button onclick="toggleIndependentStaffing(\''+_tA+'\',\''+_tB+'\',\''+date+'\')" '
+             + 'title="'+ (_isIndep ? 'Click to switch back to Combined Crew' : 'Click to staff independently') +'" '
+             + 'style="margin-left:8px;background:'+_btnBg+';border:2px solid '+_btnBorder+';color:'+_btnColor+';'
+             + 'border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;font-weight:700;'
+             + 'white-space:nowrap;letter-spacing:0.5px;'+_btnShadow+'">'+_btnLabel+'</button>';
       }
       html += '</div>';
     } else {
@@ -4444,9 +4454,9 @@ function renderStaffingBoard() {
           if (!_covShifts.length) {
             // Fully open — show open badge + direct Sign Up
             html += '<div style="flex:1;display:flex;align-items:center;gap:8px;">';
-            html += '<div style="display:inline-flex;align-items:center;gap:5px;background:#0D1A0D;border:1px solid #1A4A1A;border-radius:6px;padding:4px 10px;">';
-            html += '<div style="width:7px;height:7px;border-radius:50%;background:#27AE60;"></div>';
-            html += '<div style="font-size:13px;color:#27AE60;font-weight:700;letter-spacing:1px;">OPEN &ndash; Full Shift (0700&ndash;0700)</div>';
+            html += '<div style="display:inline-flex;align-items:center;gap:8px;background:#0A2A0A;border:2px solid #27AE60;border-radius:8px;padding:6px 14px;">';
+            html += '<div style="width:9px;height:9px;border-radius:50%;background:#27AE60;box-shadow:0 0 6px #27AE60;"></div>';
+            html += '<div style="font-size:15px;color:#27AE60;font-weight:700;letter-spacing:1px;">OPEN &mdash; Full 24h Available</div>';
             html += '</div>';
             html += '</div>';
           } else {
@@ -4497,8 +4507,18 @@ function renderStaffingBoard() {
             if (uIdIsEMS !== shiftIsEMS) return false;
             return true;  // same category, not linked → conflict
           });
-          var alreadyThisUnit = myShiftsOnDate.some(function(s){ return s.unitId === uId; });
-          var blocked         = hasConflict || alreadyThisUnit;
+          // Per-position blocking: only block if THIS SPECIFIC POSITION already has a 24h member
+          // Members can staff multiple positions on the same unit (e.g. Chauffeur + Nozzle)
+          var positionFullyCovered = (state.staffingShifts||[]).some(function(s){
+            if (s.date !== date || s.unitId !== uId || s.positionIndex !== posIdx || !s.memberId) return false;
+            // Check if this shift covers the full 24h or the full remaining window
+            var _sh = parseFloat(s.shiftHours||s.hours||24);
+            return _sh >= 24;
+          });
+          var alreadyInThisPosition = (state.staffingShifts||[]).some(function(s){
+            return s.date===date && s.unitId===uId && s.positionIndex===posIdx && s.memberId===uid;
+          });
+          var blocked = hasConflict || positionFullyCovered || alreadyInThisPosition;
           var adminRestricted = isAdminMember(member) && uId !== 'U13';
           var isPastDate      = date < new Date().toISOString().slice(0,10);
           var isPastTime      = false;
@@ -4814,14 +4834,15 @@ function confirmSignUp() {
   // Block sign-up for past dates
   var today = new Date().toISOString().slice(0,10);
   if (date < today) { showToast('\u26A0\uFE0F Cannot sign up for a past date.'); return; }
-  // Time-overlap check — can't be on two shifts at the same time
+  // Check if already in THIS specific position slot
+  var _alreadyInPos = (state.staffingShifts||[]).find(function(s){
+    return s.date===date && s.unitId===unitId && s.positionIndex===posIdx && s.memberId===uid;
+  });
+  if (_alreadyInPos) { showToast('\u26a0\ufe0f You are already signed up for the '+posName+' position.'); return; }
+  // Time-overlap check — only block if on a DIFFERENT unit (same unit = different position = OK)
   var _overlapSh = _memberHasOverlappingShift(uid, date, start, hours);
-  if (_overlapSh) {
-    if (_overlapSh.unitId === unitId) {
-      showToast('\u26a0\ufe0f Already signed up for a position on '+UNIT_LABELS[unitId]+'.');
-    } else {
-      showToast('\u26a0\ufe0f Conflict: already on '+(UNIT_LABELS[_overlapSh.unitId]||_overlapSh.unitId)+' at that time.');
-    }
+  if (_overlapSh && _overlapSh.unitId !== unitId) {
+    showToast('\u26a0\ufe0f Conflict: already on '+(UNIT_LABELS[_overlapSh.unitId]||_overlapSh.unitId)+' at that time.');
     return;
   }
   if (!Array.isArray(state.staffingShifts)) state.staffingShifts = [];
