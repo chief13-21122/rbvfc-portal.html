@@ -9493,145 +9493,268 @@ function checkPublicViewMode() {
 function renderPublicView() {
   var sa = document.getElementById('scrollArea');
   if (!sa) return;
-  var yr   = new Date().getFullYear();
-  var now  = new Date();
-  var pad  = function(n){ return String(n).padStart(2,'0'); };
+  var yr  = new Date().getFullYear();
+  var now = new Date();
+  var pad = function(n){ return String(n).padStart(2,'0'); };
   var todayStr = yr+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
   var compName = state.companyName || 'RIVIERA BEACH VOL. FIRE CO. 13';
-  var QUALIFY_PTS  = 50;
+  var QUALIFY_PTS = 50;
 
-  // Build per-member LOSAP totals for current year
+  // ── Build LOSAP totals ──────────────────────────────────────────
   var yearStart = yr+'-01-01', yearEnd = yr+'-12-31';
   var totals = {};
   (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).forEach(function(m){
-    totals[m.id] = { member:m, pts:0, responses:0, hours:0 };
+    totals[m.id] = { member:m, pts:0, responses:0, dutyHrs:0, cats:{} };
   });
   (state.losapActivities||[]).forEach(function(a){
     if (a.date>=yearStart && a.date<=yearEnd && totals[a.memberId]) {
-      totals[a.memberId].pts   += (a.pts||0);
-      totals[a.memberId].hours += (a.hours||0);
+      totals[a.memberId].pts += (a.pts||0);
+      if (!totals[a.memberId].cats[a.category]) totals[a.memberId].cats[a.category]=0;
+      totals[a.memberId].cats[a.category] += (a.pts||0);
     }
   });
   (state.emergencyResponses||[]).forEach(function(r){
     if (r.date>=yearStart && r.date<=yearEnd) {
       (r.memberIds||[]).forEach(function(id){
-        if (totals[id]) { totals[id].responses++; totals[id].pts += 0.5; }
+        if (totals[id]) { totals[id].responses++; totals[id].pts+=0.5; }
       });
     }
   });
-  (state.staffingShifts||[]).filter(function(s){ return s.date>=yearStart && s.date<=yearEnd && s.clockedOutAt; }).forEach(function(s){
+  (state.staffingShifts||[]).filter(function(s){ return s.date>=yearStart&&s.date<=yearEnd&&s.clockedOutAt; }).forEach(function(s){
     if (!totals[s.memberId]) return;
     var hrs = parseFloat(s.shiftHours||s.hours||0);
-    var dutyPts = Math.floor(hrs/4);
-    totals[s.memberId].pts   += dutyPts;
-    totals[s.memberId].hours += hrs;
+    totals[s.memberId].pts += Math.floor(hrs/4);
+    totals[s.memberId].dutyHrs += hrs;
   });
 
-  var rows = Object.values(totals)
-    .sort(function(a,b){ return b.pts - a.pts || (a.member.last||'').localeCompare(b.member.last||''); });
+  var rows = Object.values(totals).filter(function(r){ return r.member && r.member.id; })
+    .sort(function(a,b){ return b.pts-a.pts || (a.member.last||'').localeCompare(b.member.last||''); });
 
-  var qualCount   = rows.filter(function(r){ return r.pts >= QUALIFY_PTS; }).length;
+  var qualified = rows.filter(function(r){ return r.pts>=QUALIFY_PTS; });
   var totalActive = rows.length;
+
+  // ── Build On-Duty list ──────────────────────────────────────────
+  var openSessions = {};
+  (state.sessions||[]).filter(function(s){ return !s.end&&s.userId; }).forEach(function(s){
+    openSessions[s.userId]={ activity:s.activity||'duty', desc:s.desc||'' };
+  });
+  if (state.currentSession&&state.currentSession.userId&&!state.currentSession.end) {
+    openSessions[state.currentSession.userId]={
+      activity:state.currentSession.activity||'duty', desc:state.currentSession.desc||''
+    };
+  }
+  (state.staffingShifts||[]).filter(function(s){ return s.date===todayStr&&s.clockedIn&&!s.clockedOutAt; }).forEach(function(s){
+    if (!openSessions[s.memberId]) openSessions[s.memberId]={
+      activity:'duty',
+      desc:(UNIT_LABELS[s.unitId]||s.unitId)+(s.position?' \u00b7 '+s.position:'')
+    };
+  });
+
+  var onDuty = Object.keys(openSessions).map(function(uid){
+    var m=(state.roster||[]).find(function(x){ return x.id===uid; });
+    if (!m||m.active===false) return null;
+    var shift=(state.staffingShifts||[]).find(function(s){ return s.date===todayStr&&s.memberId===uid&&s.clockedIn; });
+    return { member:m, info:openSessions[uid], shift:shift||null };
+  }).filter(Boolean).sort(function(a,b){ return (a.member.last||'').localeCompare(b.member.last||''); });
 
   var logoSrc = getLogoData();
 
-  // Build leaderboard HTML for large horizontal display
-  var html_str = '<div style="display:flex;flex-direction:column;height:100vh;overflow:hidden;background:#080808;font-family:Barlow Condensed,sans-serif;box-sizing:border-box;">';
+  // ── Build HTML ──────────────────────────────────────────────────
+  var h = '<div style="display:flex;flex-direction:column;height:100vh;overflow:hidden;background:#080808;'
+        + 'font-family:\'Barlow Condensed\',sans-serif;box-sizing:border-box;">';
 
-  // Header bar
-  html_str += '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 32px;background:#0F0F0F;border-bottom:3px solid #C8102E;flex-shrink:0;">';
-  html_str += (logoSrc ? '<img src="'+logoSrc+'" style="height:50px;width:auto;object-fit:contain;">' : '<div style="width:60px;"></div>');
-  html_str += '<div style="text-align:center;">'
-    + '<div style="font-family:Bebas Neue,sans-serif;font-size:30px;letter-spacing:5px;color:#F0F0F0;line-height:1;">'+compName+'</div>'
-    + '<div style="font-size:15px;color:#888;letter-spacing:3px;text-transform:uppercase;">'+yr+' LOSAP STANDINGS</div>'
-    + '</div>';
-  html_str += '<div style="text-align:right;">'
-    + '<div id="tvClock" style="font-family:Bebas Neue,sans-serif;font-size:46px;color:#C8102E;line-height:1;letter-spacing:2px;"></div>'
-    + '<div style="font-size:12px;color:#555;letter-spacing:1px;">'+qualCount+'/'+totalActive+' QUALIFIED</div>'
-    + '</div>';
-  html_str += '</div>';
-
-  // Stats bar
-  html_str += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:#0C0C0C;border-bottom:1px solid #1E1E1E;flex-shrink:0;">';
-  var statItems = [
-    { label:'QUALIFYING THRESHOLD', value: QUALIFY_PTS+' PTS', color:'#F5A623' },
-    { label:'MEMBERS QUALIFIED',    value: qualCount, color:'#27AE60' },
-    { label:'ACTIVE MEMBERS',       value: totalActive, color:'#3498DB' },
-    { label:'YEAR',                 value: yr, color:'#C8102E' }
-  ];
-  statItems.forEach(function(s){
-    html_str += '<div style="padding:10px 24px;border-right:1px solid #1A1A1A;">'
-      + '<div style="font-size:11px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-bottom:2px;">'+s.label+'</div>'
-      + '<div style="font-family:Bebas Neue,sans-serif;font-size:28px;color:'+s.color+';letter-spacing:1px;line-height:1;">'+s.value+'</div>'
-      + '</div>';
+  // TOP HEADER
+  h += '<div style="display:flex;align-items:center;gap:24px;padding:8px 28px;background:#0C0C0C;border-bottom:3px solid #C8102E;flex-shrink:0;">';
+  if (logoSrc) h += '<img src="'+logoSrc+'" style="height:46px;width:auto;object-fit:contain;">';
+  h += '<div style="flex:1;">'
+     + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:26px;letter-spacing:4px;color:#F0F0F0;line-height:1;">'+compName+'</div>'
+     + '<div style="font-size:12px;color:#555;letter-spacing:2px;text-transform:uppercase;">'+yr+' LOSAP &nbsp;\u00b7&nbsp; '+qualified.length+'/'+totalActive+' QUALIFIED</div>'
+     + '</div>';
+  // Stats mini row
+  h += '<div style="display:flex;gap:28px;align-items:center;">';
+  [
+    { v:qualified.length,  l:'QUALIFIED',    c:'#27AE60' },
+    { v:onDuty.length,     l:'ON DUTY NOW',  c:'#C8102E' },
+    { v:totalActive,       l:'ACTIVE MBR',   c:'#3498DB' },
+  ].forEach(function(s){
+    h += '<div style="text-align:center;">'
+       + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:30px;color:'+s.c+';line-height:1;letter-spacing:1px;">'+s.v+'</div>'
+       + '<div style="font-size:9px;color:#444;letter-spacing:2px;text-transform:uppercase;">'+s.l+'</div>'
+       + '</div>';
   });
-  html_str += '</div>';
+  h += '</div>';
+  h += '<div style="text-align:right;min-width:120px;">'
+     + '<div id="tvClock" style="font-family:\'Bebas Neue\',sans-serif;font-size:40px;color:#C8102E;line-height:1;letter-spacing:2px;"></div>'
+     + '<div id="tvDate" style="font-size:10px;color:#444;letter-spacing:1px;"></div>'
+     + '</div>';
+  h += '</div>';
 
-  // Leaderboard table header
-  html_str += '<div style="display:grid;grid-template-columns:60px 1fr 120px 120px 120px 140px;padding:8px 32px;background:#111;border-bottom:1px solid #1E1E1E;flex-shrink:0;">';
-  ['RANK','MEMBER','RESPONSES','DUTY HRS','POINTS','STATUS'].forEach(function(h){
-    html_str += '<div style="font-size:10px;font-weight:700;color:#555;letter-spacing:2px;text-transform:uppercase;">'+h+'</div>';
+  // MAIN BODY: left leaderboard + right on-duty
+  h += '<div style="display:flex;flex:1;overflow:hidden;gap:0;">';
+
+  // ── LEFT: LEADERBOARD ─────────────────────────────────────────
+  h += '<div style="flex:1;display:flex;flex-direction:column;border-right:2px solid #1A1A1A;overflow:hidden;">';
+  // Leaderboard header
+  h += '<div style="display:grid;grid-template-columns:48px 1fr 80px 80px 100px;gap:0;'
+     + 'padding:7px 16px;background:#111;border-bottom:1px solid #1E1E1E;flex-shrink:0;">';
+  ['#','MEMBER','RESP','DUTY','PTS'].forEach(function(label,i){
+    var align = i>=2 ? 'right' : 'left';
+    h += '<div style="font-size:9px;font-weight:700;color:#444;letter-spacing:2px;text-align:'+align+';">'+label+'</div>';
   });
-  html_str += '</div>';
+  h += '</div>';
 
-  // Leaderboard rows
-  html_str += '<div style="flex:1;overflow-y:auto;">';
-  rows.forEach(function(r, i){
-    var qualified = r.pts >= QUALIFY_PTS;
-    var pct       = Math.min(100, Math.round((r.pts / QUALIFY_PTS) * 100));
-    var rankColor = i===0 ? '#F5A623' : i===1 ? '#AAAAAA' : i===2 ? '#CD7F32' : '#555';
-    var rowBg     = i % 2 === 0 ? '#0D0D0D' : '#0A0A0A';
-    var m         = r.member;
-    var name      = m.last.toUpperCase() + ', ' + m.first;
-    var rankLabel = m.ranks && m.ranks.length ? m.ranks.join('/') : (m.rank||'');
-    var statusColor = qualified ? '#27AE60' : '#F5A623';
-    var statusText  = qualified ? '\u2713 QUALIFIED' : pct+'% ('+Math.round(r.pts)+'/'+QUALIFY_PTS+')';
+  // Scrollable rows — auto-scroll every 8s if too many to fit
+  h += '<div id="tvLeaderScroll" style="flex:1;overflow:hidden;position:relative;">';
+  h += '<div id="tvLeaderRows" style="position:absolute;top:0;left:0;right:0;transition:top 0.8s ease;">';
 
-    html_str += '<div style="display:grid;grid-template-columns:60px 1fr 120px 120px 120px 140px;padding:10px 32px;background:'+rowBg+';border-bottom:1px solid #111;align-items:center;">';
-    // Rank
-    html_str += '<div style="font-family:Bebas Neue,sans-serif;font-size:24px;color:'+rankColor+';letter-spacing:1px;">'+(i+1)+'</div>';
-    // Member name + rank
-    html_str += '<div>'
-      + '<div style="font-size:18px;font-weight:700;color:#F0F0F0;line-height:1.1;">'+name+'</div>'
-      + (rankLabel ? '<div style="font-size:11px;color:#555;letter-spacing:1px;text-transform:uppercase;">'+rankLabel+'</div>' : '')
-      + '</div>';
+  rows.forEach(function(r, i) {
+    var q    = r.pts >= QUALIFY_PTS;
+    var pct  = Math.min(100, Math.round((r.pts/QUALIFY_PTS)*100));
+    var rankC = i===0?'#F5A623':i===1?'#B0B0B0':i===2?'#CD7F32':'#3A3A3A';
+    var rowBg = q ? (i%2===0?'#0D0D0D':'#0B0B0B') : (i%2===0?'#0A0808':'#090707');
+    var leftBorder = q ? 'border-left:3px solid #27AE60;' : 'border-left:3px solid #2A1A1A;';
+    var m = r.member;
+    var isNowOnDuty = !!openSessions[m.id];
+    var name = m.last.toUpperCase()+', '+m.first;
+    var rk = m.ranks&&m.ranks.length ? m.ranks[0] : (m.rank||'');
+
+    h += '<div style="display:grid;grid-template-columns:48px 1fr 80px 80px 100px;gap:0;'
+       + 'padding:6px 16px;background:'+rowBg+';border-bottom:1px solid #111;align-items:center;'+leftBorder+'">';
+    // Rank number
+    h += '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:20px;color:'+rankC+';line-height:1;">'+(i+1)+'</div>';
+    // Name + rank
+    h += '<div style="min-width:0;">'
+       + '<div style="display:flex;align-items:center;gap:6px;">'
+       + '<div style="font-size:15px;font-weight:700;color:'+(q?'#F0F0F0':'#666')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1;">'+name+'</div>'
+       + (isNowOnDuty ? '<div style="font-size:9px;font-weight:700;color:#27AE60;padding:1px 5px;background:#0A1A0A;border:1px solid #1A3A1A;border-radius:3px;white-space:nowrap;flex-shrink:0;">\u2022 ON DUTY</div>' : '')
+       + '</div>'
+       + (rk ? '<div style="font-size:9px;color:#3A3A3A;letter-spacing:1px;text-transform:uppercase;line-height:1;">'+rk+'</div>' : '')
+       + '</div>';
     // Responses
-    html_str += '<div style="font-size:20px;font-weight:700;color:#3498DB;">'+r.responses+'</div>';
-    // Hours
-    html_str += '<div style="font-size:20px;font-weight:700;color:#888;">'+Math.round(r.hours)+'h</div>';
-    // Points with progress bar
-    html_str += '<div>'
-      + '<div style="font-family:Bebas Neue,sans-serif;font-size:26px;color:'+statusColor+';line-height:1;letter-spacing:1px;">'+Math.round(r.pts)+'</div>'
-      + '<div style="height:3px;background:#1A1A1A;border-radius:2px;margin-top:3px;">'
-      +   '<div style="height:3px;background:'+statusColor+';border-radius:2px;width:'+pct+'%;"></div>'
-      + '</div>'
-      + '</div>';
-    // Status
-    html_str += '<div style="font-size:13px;font-weight:700;color:'+statusColor+';letter-spacing:1px;">'+statusText+'</div>';
-    html_str += '</div>';
+    h += '<div style="font-size:15px;font-weight:700;color:#3498DB;text-align:right;line-height:1;">'+r.responses+'</div>';
+    // Duty hrs
+    h += '<div style="font-size:15px;font-weight:700;color:#555;text-align:right;line-height:1;">'+Math.round(r.dutyHrs)+'h</div>';
+    // Points + bar
+    h += '<div style="text-align:right;">'
+       + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:22px;color:'+(q?'#27AE60':'#F5A623')+';line-height:1;letter-spacing:1px;">'+Math.round(r.pts)+'</div>'
+       + '<div style="height:2px;background:#1A1A1A;border-radius:1px;margin-top:2px;">'
+       +   '<div style="height:2px;background:'+(q?'#27AE60':'#F5A623')+';border-radius:1px;width:'+pct+'%;"></div>'
+       + '</div>'
+       + '</div>';
+    h += '</div>';
   });
-  html_str += '</div>';
-  html_str += '</div>';
 
-  sa.innerHTML = html_str;
+  h += '</div></div></div>'; // end leaderRows, leaderScroll, left panel
+
+  // ── RIGHT: ON DUTY NOW ────────────────────────────────────────
+  var rightW = onDuty.length > 15 ? '320px' : '280px';
+  h += '<div style="width:'+rightW+';flex-shrink:0;display:flex;flex-direction:column;background:#090909;overflow:hidden;">';
+  h += '<div style="padding:10px 16px;background:#0F0F0F;border-bottom:2px solid #C8102E;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;">'
+     + '<div style="font-size:13px;font-weight:700;color:#C8102E;letter-spacing:3px;text-transform:uppercase;">ON DUTY NOW</div>'
+     + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:24px;color:#C8102E;letter-spacing:1px;">'+onDuty.length+'</div>'
+     + '</div>';
+  h += '<div style="flex:1;overflow-y:auto;padding:8px 0;">';
+
+  if (!onDuty.length) {
+    h += '<div style="color:#333;font-size:14px;text-align:center;padding:32px 16px;letter-spacing:1px;">No members currently on duty</div>';
+  } else {
+    // Group by unit
+    var byUnit = {};
+    var noUnit = [];
+    onDuty.forEach(function(od){
+      if (od.shift && od.shift.unitId) {
+        var u = od.shift.unitId;
+        if (!byUnit[u]) byUnit[u]=[];
+        byUnit[u].push(od);
+      } else { noUnit.push(od); }
+    });
+
+    Object.keys(byUnit).sort().forEach(function(unitId){
+      var label = (UNIT_LABELS&&UNIT_LABELS[unitId]) ? UNIT_LABELS[unitId].toUpperCase() : unitId.toUpperCase();
+      h += '<div style="padding:6px 16px 2px;font-size:9px;font-weight:700;color:#C8102E;letter-spacing:3px;text-transform:uppercase;border-top:1px solid #181818;">'+label+'</div>';
+      byUnit[unitId].forEach(function(od){
+        var m=od.member;
+        var r = totals[m.id];
+        var pts = r ? Math.round(r.pts) : 0;
+        var q = pts >= QUALIFY_PTS;
+        h += '<div style="display:flex;align-items:center;gap:8px;padding:7px 16px;border-bottom:1px solid #0F0F0F;">'
+           + '<div style="width:8px;height:8px;border-radius:50%;background:#27AE60;flex-shrink:0;box-shadow:0 0 5px #27AE60;"></div>'
+           + '<div style="flex:1;min-width:0;">'
+           + '<div style="font-size:15px;font-weight:700;color:#F0F0F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+m.last.toUpperCase()+', '+m.first+'</div>'
+           + (od.shift&&od.shift.position ? '<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;line-height:1;">'+od.shift.position+'</div>' : '')
+           + '</div>'
+           + '<div style="text-align:right;flex-shrink:0;">'
+           + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:18px;color:'+(q?'#27AE60':'#F5A623')+';line-height:1;">'+pts+'</div>'
+           + '<div style="font-size:8px;color:#333;letter-spacing:1px;">PTS</div>'
+           + '</div>'
+           + '</div>';
+      });
+    });
+
+    if (noUnit.length) {
+      h += '<div style="padding:6px 16px 2px;font-size:9px;font-weight:700;color:#555;letter-spacing:3px;border-top:1px solid #181818;">OTHER</div>';
+      noUnit.forEach(function(od){
+        var m=od.member;
+        var pts = totals[m.id] ? Math.round(totals[m.id].pts) : 0;
+        var q = pts>=QUALIFY_PTS;
+        h += '<div style="display:flex;align-items:center;gap:8px;padding:7px 16px;border-bottom:1px solid #0F0F0F;">'
+           + '<div style="width:8px;height:8px;border-radius:50%;background:#27AE60;box-shadow:0 0 5px #27AE60;"></div>'
+           + '<div style="flex:1;font-size:15px;font-weight:700;color:#F0F0F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+m.last.toUpperCase()+', '+m.first+'</div>'
+           + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:18px;color:'+(q?'#27AE60':'#F5A623')+';margin-left:4px;">'+pts+'</div>'
+           + '</div>';
+      });
+    }
+  }
+  h += '</div></div>'; // end on-duty panel
+
+  h += '</div></div>'; // end main body, tvBoard
+
+  sa.innerHTML = h;
   document.body.style.overflow = 'hidden';
 
-  // Live clock
+  // ── Live clock ───────────────────────────────────────────────
   function tickClock() {
     var el = document.getElementById('tvClock');
     if (!el) return;
-    var t = new Date(), h = t.getHours(), m2 = t.getMinutes(), s = t.getSeconds();
-    var ampm = h>=12?'PM':'AM'; h = h%12||12;
-    el.textContent = h+':'+String(m2).padStart(2,'0')+':'+String(s).padStart(2,'0')+' '+ampm;
+    var t=new Date(), hh=t.getHours(), mm=t.getMinutes(), ss=t.getSeconds();
+    var ap=hh>=12?'PM':'AM'; hh=hh%12||12;
+    el.textContent = hh+':'+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0')+' '+ap;
+    var de=document.getElementById('tvDate');
+    if (de) de.textContent=t.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
   }
   tickClock();
   if (window._tvClockInterval) clearInterval(window._tvClockInterval);
   window._tvClockInterval = setInterval(tickClock, 1000);
 
-  // Auto-refresh leaderboard every 5 minutes
+  // ── Auto-scroll leaderboard for 70 members ───────────────────
+  (function() {
+    var scrollEl = document.getElementById('tvLeaderScroll');
+    var rowsEl   = document.getElementById('tvLeaderRows');
+    if (!scrollEl || !rowsEl) return;
+
+    var scrollPos   = 0;
+    var rowHeight   = 36; // approx px per row
+    var visibleRows = Math.floor(scrollEl.offsetHeight / rowHeight);
+    var totalRows   = rows.length;
+    var maxScroll   = Math.max(0, (totalRows - visibleRows) * rowHeight);
+
+    if (maxScroll <= 0) return; // all fit on screen
+
+    var scrollStep = Math.floor(visibleRows * 0.8) * rowHeight; // scroll 80% of visible area
+
+    if (window._tvScrollInterval) clearInterval(window._tvScrollInterval);
+    window._tvScrollInterval = setInterval(function() {
+      scrollPos += scrollStep;
+      if (scrollPos > maxScroll) scrollPos = 0; // loop back to top
+      rowsEl.style.top = (-scrollPos) + 'px';
+    }, 8000); // advance every 8 seconds
+  })();
+
+  // ── Auto-refresh every 3 minutes ────────────────────────────
   if (window._pubRefreshInterval) clearInterval(window._pubRefreshInterval);
-  window._pubRefreshInterval = setInterval(function(){ renderPublicView(); }, 300000);
+  window._pubRefreshInterval = setInterval(renderPublicView, 180000);
 }
+
 
 // ═══════════════════════════════════════════════════
 //  SHARED HELPERS
