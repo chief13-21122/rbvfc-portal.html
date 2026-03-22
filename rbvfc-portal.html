@@ -3854,6 +3854,87 @@ var RANK_ORDER = [
 // Ranks that qualify for any "Driver" or "Chauffeur" position
 var DRIVER_RANKS = ['FADO','ATDA','Tiller','Lieutenant','Captain','Assistant Chief','Fire Chief'];
 
+// Ranks that are NEVER allowed to staff any apparatus position
+var STAFFING_BANNED_RANKS = ['Administrative Member', 'Auxiliary Member'];
+
+// All available additional certifications
+var AVAILABLE_CERTS = ['FADO','ATDA','Tiller','AT','MVO','BRS','Mate I','Mate II'];
+
+// Helper: get the effective rank+cert requirements for a unit+position
+function getPosRequirement(unitId, posName) {
+  var req = { minRank: null, reqCert: null };
+  // Check admin-customized requirements first (per-unit overrides)
+  var unitReqs = (state.rankRequirements || {})[unitId] || {};
+  var posReq   = unitReqs[posName];
+  if (posReq) {
+    if (typeof posReq === 'object') {
+      req.minRank = posReq.minRank || null;
+      req.reqCert = posReq.reqCert || null;
+    } else {
+      req.minRank = posReq; // backwards compat: plain string = minRank
+    }
+  }
+  // Fall back to hardcoded defaults if no admin override
+  if (!req.minRank && POSITION_MIN_RANK[posName]) req.minRank = POSITION_MIN_RANK[posName];
+  return req;
+}
+
+// Comprehensive 4-tier staffing eligibility check
+// Returns { eligible: bool, code: string, reason: string }
+function checkStaffingEligibility(member, unitId, posName) {
+  if (!member) return { eligible: false, code: 'NO_MEMBER', reason: 'Not logged in' };
+
+  var ranks = member.ranks && member.ranks.length ? member.ranks : (member.rank ? [member.rank] : []);
+  var certs  = member.additionalCerts || [];
+
+  // ── TIER 1: RANK — Administrative & Auxiliary blocked entirely ──────────
+  var hasBannedRank = ranks.some(function(r){ return STAFFING_BANNED_RANKS.indexOf(r) >= 0; });
+  if (hasBannedRank && posName !== 'Student') {
+    return { eligible: false, code: 'BANNED_RANK',
+      reason: (ranks[0]||'Your rank') + ' members are not permitted to staff apparatus positions.' };
+  }
+
+  // ── TIER 2: ELIGIBLE RIDE REPORT ────────────────────────────────────────
+  if (member.rideReport === 'ineligible' && posName !== 'Student') {
+    return { eligible: false, code: 'RIDE_REPORT',
+      reason: 'Your ride report status is Ineligible. Contact the Chief.' };
+  }
+
+  // ── TIER 3: UNIT POSITION RANK REQUIREMENT ──────────────────────────────
+  var pReq = getPosRequirement(unitId, posName);
+  if (pReq.minRank) {
+    var minRankIdx = rankIndex(pReq.minRank);
+    // Special driver/chauffeur cert check
+    var isDriverPos = posName === 'Driver' || posName === 'Chauffeur';
+    var passesDriver = isDriverPos && ranks.some(function(r){ return DRIVER_RANKS.indexOf(r) >= 0; });
+    // Officers implicitly have FFI/FFII
+    var OFFICER_RANKS = ['Lieutenant','Captain','Assistant Chief','Deputy Chief','Fire Chief'];
+    var isOfficer = ranks.some(function(r){ return OFFICER_RANKS.indexOf(r) >= 0; });
+    var passesOfficer = isOfficer && (pReq.minRank === 'FFI' || pReq.minRank === 'FFII');
+    // Mate position cert check
+    var isMatePos = ['Mate','Mate I','Mate II','2nd Mate'].indexOf(posName) >= 0;
+    var passesMate = isMatePos && certs.indexOf('MVO') >= 0;
+
+    var passesRank = passesDriver || passesOfficer || passesMate ||
+      ranks.some(function(r){ return rankIndex(r) >= minRankIdx; });
+
+    if (!passesRank) {
+      return { eligible: false, code: 'MIN_RANK',
+        reason: 'Requires ' + pReq.minRank + ' or higher. Your rank: ' + (ranks[0]||'None') };
+    }
+  }
+
+  // ── TIER 4: UNIT POSITION ADDITIONAL CERT REQUIRED ─────────────────────
+  if (pReq.reqCert) {
+    if (certs.indexOf(pReq.reqCert) < 0) {
+      return { eligible: false, code: 'REQ_CERT',
+        reason: 'Requires ' + pReq.reqCert + ' certification. You are not certified.' };
+    }
+  }
+
+  return { eligible: true, code: 'OK', reason: '' };
+}
+
 
 // ── PROBATIONARY BADGE ───────────────────────────────────────
 function isProbationary(member) {
@@ -3937,30 +4018,23 @@ function rankIndex(rank) {
   return i === -1 ? 0 : i;
 }
 
-function memberMeetsRank(member, positionName) {
-  // Check admin-configured rank requirements first (overrides hardcoded defaults)
-  var unitReqsAll = state.rankRequirements || {};
-  var customMin = null;
-  Object.keys(unitReqsAll).forEach(function(uid) {
-    if (unitReqsAll[uid] && unitReqsAll[uid][positionName] !== undefined) {
-      customMin = unitReqsAll[uid][positionName];
-    }
-  });
-  var minRank = (customMin !== null && customMin !== undefined) ? customMin : POSITION_MIN_RANK[positionName];
+function memberMeetsRank(member, positionName, unitId) {
+  // Use the full 4-tier check if unitId provided; otherwise use per-pos default
+  if (unitId) {
+    var chk = checkStaffingEligibility(member, unitId, positionName);
+    return chk.eligible;
+  }
+  // Legacy path: just check rank against POSITION_MIN_RANK (no cert check)
+  var minRank = POSITION_MIN_RANK[positionName];
   if (!minRank) return true;
   var ranks = member.ranks && member.ranks.length ? member.ranks : (member.rank ? [member.rank] : []);
   var certs = member.additionalCerts || [];
-  // FADO, ATDA, Tiller count as Driver/Chauffeur qualified
   var isDriverPos = positionName === 'Driver' || positionName === 'Chauffeur';
   if (isDriverPos && ranks.some(function(r){ return DRIVER_RANKS.indexOf(r) > -1; })) return true;
-  // MVO cert already implies Mate I and Mate II competency
-  var isMatePos = (positionName === 'Mate' || positionName === 'Mate I' ||
-                   positionName === 'Mate II' || positionName === '2nd Mate');
+  var isMatePos = ['Mate','Mate I','Mate II','2nd Mate'].indexOf(positionName) >= 0;
   if (isMatePos && certs.indexOf('MVO') >= 0) return true;
-  // Lieutenants/Captains/Chiefs already progressed through FFI and FFII
   var OFFICER_RANKS = ['Lieutenant','Captain','Assistant Chief','Deputy Chief','Fire Chief'];
-  if ((minRank === 'FFI' || minRank === 'FFII') &&
-      ranks.some(function(r){ return OFFICER_RANKS.indexOf(r) >= 0; })) return true;
+  if ((minRank==='FFI'||minRank==='FFII') && ranks.some(function(r){ return OFFICER_RANKS.indexOf(r)>=0; })) return true;
   return ranks.some(function(r){ return rankIndex(r) >= rankIndex(minRank); });
 }
 
@@ -4525,9 +4599,13 @@ function renderStaffingBoard() {
           if (date === new Date().toISOString().slice(0,10)) {
             isPastTime = new Date().getHours() >= 20;
           }
-          var meetsRankForPos = member ? memberMeetsRank(member, posName) : true;
-          if (!blocked && !adminRestricted && !isPastDate && !isPastTime && meetsRankForPos) {
-            html += '<button class="btn btn-sm btn-success" onclick="openSignUpModal(\''+date+'\',\''+uId+'\',' +posIdx+ ',\''+posName.replace(/'/g,"\\\'")+'\')">\u270B Sign Up</button>';
+          // Full 4-tier eligibility check
+          var _elig = member ? checkStaffingEligibility(member, uId, posName) : { eligible: false, code: 'NO_MEMBER', reason: '' };
+          if (!blocked && !adminRestricted && !isPastDate && !isPastTime && _elig.eligible) {
+            html += '<button onclick="openSignUpModal(\''+date+'\',\''+uId+'\',' +posIdx+ ',\''+posName.replace(/\'/g,"\\\\\'")+'\')\"'                  + ' style="background:#0D2200;border:2px solid #27AE60;color:#27AE60;border-radius:8px;'                  + 'padding:7px 18px;cursor:pointer;font-weight:700;font-size:14px;white-space:nowrap;letter-spacing:0.5px;">\u270b Sign Up</button>';
+          } else if (!blocked && !adminRestricted && !isPastDate && !isPastTime && !_elig.eligible) {
+            var _bIco = {'BANNED_RANK':'\u26d4','RIDE_REPORT':'\ud83d\udecb','MIN_RANK':'\ud83c\udfc5','REQ_CERT':'\ud83d\udcc4'}[_elig.code]||'\u26a0\ufe0f';
+            html += '<div style="display:inline-flex;align-items:center;gap:6px;background:#1A0A0A;border:1px solid #3A1A1A;border-radius:6px;padding:5px 10px;">'                  + '<span style="font-size:13px;">'+_bIco+'</span>'                  + '<div style="font-size:11px;color:#AA4444;line-height:1.3;">'+_elig.reason+'</div>'                  + '</div>';
           } else if (!blocked && adminRestricted && !isPastDate) {
             html += '<span style="font-size:10px;color:#444;padding:4px 6px;">Admin only</span>';
           } else if (!meetsRankForPos && !isPastDate) {
@@ -4819,14 +4897,11 @@ function confirmSignUp() {
   var uid = state.currentUserId;
   var me = (state.roster||[]).find(function(m){ return m.id===uid; });
 
-  // Position-cleared check — member must be cleared for the position
+  // 4-tier eligibility check
   if (me && posName && posName !== 'Student') {
-    if (!memberMeetsRank(me, posName)) {
-      showToast('\u26a0\ufe0f You are not cleared for the ' + posName + ' position.');
-      return;
-    }
-    if (me.rideReport === 'ineligible') {
-      showToast('\u26a0\ufe0f Your ride status is Ineligible. You may only sign up as Student.');
+    var _chk = checkStaffingEligibility(me, unitId, posName);
+    if (!_chk.eligible) {
+      showToast('\u26a0\ufe0f ' + _chk.reason);
       return;
     }
   }
@@ -8935,8 +9010,9 @@ function renderRankEditor() {
   if (!state.rankRequirements) state.rankRequirements = {};
 
   var html = '<div style="font-size:12px;color:#888;margin-bottom:14px;line-height:1.5;">'
-    + 'Set the <strong style="color:#CCC;">minimum rank</strong> required for each position on each apparatus. '
-    + 'Members below the minimum rank cannot be signed in to that slot.'
+    + 'Set the <strong style="color:#CCC;">minimum rank</strong> and/or '
+    + '<strong style="color:#CCC;">required certification</strong> for each position. '
+    + 'Members must satisfy ALL tiers: rank is not banned, ride report eligible, min rank met, and required cert held.'
     + '</div>';
 
   Object.keys(UNIT_POSITIONS).forEach(function(unitId) {
@@ -8954,20 +9030,18 @@ function renderRankEditor() {
 
     positions.forEach(function(pos) {
       var currentReq = unitReqs[pos] || '';
-      // Build rank options
-      var opts = '<option value="">No minimum</option>'
-        + RANK_ORDER.map(function(r) {
+      // Build rank options and cert options
+      var opts = '<option value="">No minimum</option>'        + RANK_ORDER.map(function(r) {
             return '<option value="' + r + '"' + (currentReq === r ? ' selected' : '') + '>' + r + '</option>';
           }).join('');
+      var certOpts = '<option value="">None</option>'        + AVAILABLE_CERTS.map(function(c){
+            return '<option value="'+c+'"'+(currentCert===c?' selected':'')+'>'+c+'</option>';
+          }).join('');
 
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #1E1E1E;gap:10px;">'
-        + '<div style="font-size:13px;font-weight:600;color:#CCC;min-width:120px;">' + pos + '</div>'
-        + '<select data-unit="' + unitId + '" data-pos="' + pos + '" '
-        +   'onchange="saveRankRequirement(this)" '
+      html += '<div style="padding:7px 0;border-bottom:1px solid #1E1E1E;">'        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;">'        + '<div style="font-size:13px;font-weight:600;color:#CCC;min-width:120px;">' + pos + '</div>'        + (defaultRank ? '<div style="font-size:10px;color:#444;">(default: '+defaultRank+')</div>' : '')        + '</div>'        + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'        + '<div style="display:flex;flex-direction:column;gap:3px;">'        + '<label style="font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase;">Min Rank</label>'        + '<select data-unit="' + unitId + '" data-pos="' + pos + '" data-field="rank" '        +   'onchange="saveRankRequirement(this)" '
         +   'style="flex:1;max-width:220px;background:#111;border:1px solid #333;border-radius:6px;padding:5px 8px;color:#F0F0F0;font-size:12px;">'
         + opts
-        + '</select>'
-        + '</div>';
+        + '</select>'        + '</div>'        + '<div style="display:flex;flex-direction:column;gap:3px;">'        + '<label style="font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase;">Req Cert</label>'        + '<select data-unit="' + unitId + '" data-pos="' + pos + '" data-field="cert" '        +   'onchange="saveRankRequirement(this)" '        +   'style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 6px;font-size:12px;min-width:120px;">'        + certOpts        + '</select>'        + '</div>'        + '</div>'        + '</div>';
     });
 
     html += '</div></div>';
@@ -8983,11 +9057,22 @@ function renderRankEditor() {
 function saveRankRequirement(selectEl) {
   var unitId = selectEl.getAttribute('data-unit');
   var pos    = selectEl.getAttribute('data-pos');
-  var rank   = selectEl.value;
+  var field  = selectEl.dataset.field || 'rank';
+  var rank   = field === 'rank' ? selectEl.value : null;
+  var cert   = field === 'cert' ? selectEl.value : null;
   if (!state.rankRequirements) state.rankRequirements = {};
   if (!state.rankRequirements[unitId]) state.rankRequirements[unitId] = {};
-  if (rank) {
-    state.rankRequirements[unitId][pos] = rank;
+  // Merge into existing requirement object
+  var existing = state.rankRequirements[unitId][pos] || {};
+  if (typeof existing === 'string') existing = { minRank: existing }; // migrate legacy
+  if (field === 'rank') {
+    existing.minRank = rank || '';
+  } else {
+    existing.reqCert = cert || '';
+  }
+  // Save if anything is set; delete if both empty
+  if (existing.minRank || existing.reqCert) {
+    state.rankRequirements[unitId][pos] = existing;
   } else {
     delete state.rankRequirements[unitId][pos];
   }
