@@ -3929,7 +3929,7 @@ function getUnitPositions(unitId) {
   if (state.customUnitPositions && state.customUnitPositions[unitId]) {
     return state.customUnitPositions[unitId];
   }
-  return getUnitPositions(unitId);
+  return UNIT_POSITIONS[unitId] || [];
 }
 
 function rankIndex(rank) {
@@ -6646,45 +6646,6 @@ function renderSpecialEventAdmin() {
   var formEl = document.getElementById('seCreateForm');
   // Form is now always in HTML — just ensure positions row is initialized
   if (formEl) {
-    var formDiv = document.createElement('div');
-    formDiv.id = 'seCreateForm';
-    formDiv.style.cssText = 'background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;';
-    formDiv.innerHTML =
-      '<div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">&#127920; Create New Event</div>'+
-      '<div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>'+
-      '<input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'+
-        '<div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>'+
-        '<input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>'+
-        '<div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>'+
-        '<input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>'+
-      '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'+
-        '<div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time</label>'+
-        '<input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>'+
-        '<div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time</label>'+
-        '<input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>'+
-      '</div>'+
-      '<div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location</label>'+
-      '<input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>'+
-      '<div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>'+
-      '<textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'+
-        '<div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Total Members Needed <span style="color:#555;">(for full staffing)</span></label>'+
-        '<input id="seTotalNeeded" type="number" min="0" max="999" placeholder="e.g. 10" '+
-        'style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>'+
-        '<div style="display:flex;flex-direction:column;justify-content:flex-end;">'+
-        '<div style="font-size:10px;color:#555;line-height:1.5;padding-bottom:8px;">Set this to show a staffing progress bar on the event card. Position slot counts will also count toward this total.</div></div>'+
-      '</div>'+
-      '<div style="margin-bottom:12px;">'+
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'+
-          '<label style="font-size:11px;color:#888;">Positions / Roles Needed</label>'+
-          '<button onclick="addEventPosition()" style="background:#1A3A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">+ Add Position</button>'+
-        '</div>'+
-        '<div style="font-size:10px;color:#555;margin-bottom:6px;">Each position can have a slot count (how many members you need for that role).</div>'+
-        '<div id="sePositionsContainer">'+sePositionRow()+'</div>'+
-      '</div>'+
-      '<button class="btn btn-primary" onclick="saveSpecialEvent()" style="width:100%;">&#10003; Create Event</button>';
     // Init positions row if empty
     var posC = document.getElementById('sePositionsContainer');
     if (posC && !posC.children.length) posC.innerHTML = sePositionRow();
@@ -9515,75 +9476,161 @@ function checkPublicViewMode() {
   app.style.flexDirection = 'column';
   var nav = document.getElementById('bottomNav');
   if (nav) nav.style.display = 'none';
-  renderPublicView();
+  // Connect Firestore for live data (no auth needed for anonymous read)
+  if (_fbConfigured()) {
+    initFirebase(function() {
+      loadFromFirestore(function() {
+        renderPublicView();
+        _startFbSync(); // keep live
+      });
+    });
+  } else {
+    renderPublicView();
+  }
   return true;
 }
 
 function renderPublicView() {
   var sa = document.getElementById('scrollArea');
   if (!sa) return;
-  var yr  = new Date().getFullYear();
-  var now = new Date();
-  var pad = function(n){ return String(n).padStart(2,'0'); };
-  var todayStr    = now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
-  var tomorrowObj = new Date(now); tomorrowObj.setDate(now.getDate()+1);
-  var tomorrowStr = tomorrowObj.getFullYear()+'-'+pad(tomorrowObj.getMonth()+1)+'-'+pad(tomorrowObj.getDate());
+  var yr   = new Date().getFullYear();
+  var now  = new Date();
+  var pad  = function(n){ return String(n).padStart(2,'0'); };
+  var todayStr = yr+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
+  var compName = state.companyName || 'RIVIERA BEACH VOL. FIRE CO. 13';
+  var QUALIFY_PTS  = 50;
 
-  // Open sessions lookup: userId -> {activity, shiftInfo}
-  var openSessions = {};
-  (state.sessions||[]).filter(function(s){ return !s.end && s.userId; }).forEach(function(s){
-    openSessions[s.userId] = { activity: s.activity||'duty', desc: s.desc||'' };
+  // Build per-member LOSAP totals for current year
+  var yearStart = yr+'-01-01', yearEnd = yr+'-12-31';
+  var totals = {};
+  (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).forEach(function(m){
+    totals[m.id] = { member:m, pts:0, responses:0, hours:0 };
   });
-  if (state.currentSession && state.currentSession.userId && !state.currentSession.end) {
-    openSessions[state.currentSession.userId] = {
-      activity: state.currentSession.activity||'duty',
-      desc: state.currentSession.desc||''
-    };
-  }
-  // Also include staffing clockedIn for today
-  (state.staffingShifts||[]).filter(function(s){ return s.date===todayStr && s.clockedIn && !s.clockedOut; }).forEach(function(s){
-    if (!openSessions[s.memberId]) {
-      openSessions[s.memberId] = {
-        activity: 'duty',
-        desc: (UNIT_LABELS[s.unitId]||s.unitId) + (s.position ? ' \u00b7 '+s.position : '')
-      };
+  (state.losapActivities||[]).forEach(function(a){
+    if (a.date>=yearStart && a.date<=yearEnd && totals[a.memberId]) {
+      totals[a.memberId].pts   += (a.pts||0);
+      totals[a.memberId].hours += (a.hours||0);
     }
   });
+  (state.emergencyResponses||[]).forEach(function(r){
+    if (r.date>=yearStart && r.date<=yearEnd) {
+      (r.memberIds||[]).forEach(function(id){
+        if (totals[id]) { totals[id].responses++; totals[id].pts += 0.5; }
+      });
+    }
+  });
+  (state.staffingShifts||[]).filter(function(s){ return s.date>=yearStart && s.date<=yearEnd && s.clockedOutAt; }).forEach(function(s){
+    if (!totals[s.memberId]) return;
+    var hrs = parseFloat(s.shiftHours||s.hours||0);
+    var dutyPts = Math.floor(hrs/4);
+    totals[s.memberId].pts   += dutyPts;
+    totals[s.memberId].hours += hrs;
+  });
+
+  var rows = Object.values(totals)
+    .sort(function(a,b){ return b.pts - a.pts || (a.member.last||'').localeCompare(b.member.last||''); });
+
+  var qualCount   = rows.filter(function(r){ return r.pts >= QUALIFY_PTS; }).length;
+  var totalActive = rows.length;
 
   var logoSrc = getLogoData();
 
-  var html = '<div id="tvBoard" style="display:flex;flex-direction:column;height:100vh;overflow:hidden;background:#0A0A0A;font-family:Barlow Condensed,sans-serif;box-sizing:border-box;">'
+  // Build leaderboard HTML for large horizontal display
+  var html_str = '<div style="display:flex;flex-direction:column;height:100vh;overflow:hidden;background:#080808;font-family:Barlow Condensed,sans-serif;box-sizing:border-box;">';
 
-
-    // ── 6-column grid ──
-    // -- TV HORIZONTAL 5-column layout --
-    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 28px;background:#0F0F0F;border-bottom:3px solid #C8102E;flex-shrink:0;">'
-    +   '<div style="font-family:Bebas Neue,sans-serif;font-size:24px;letter-spacing:4px;color:#F0F0F0;">'+(state.companyName||'RIVIERA BEACH VOL. FIRE CO. 13')+'</div>'
-    +   '<div id="tvClock" style="font-family:Bebas Neue,sans-serif;font-size:52px;color:#C8102E;line-height:1;letter-spacing:3px;"></div>'
-    + '</div>'
-    + '<div style="display:grid;grid-template-columns:1.1fr 1.1fr 1.6fr 1fr 1fr;gap:0;flex:1;overflow:hidden;">'
-    + buildPublicStaffingCol(todayStr, now,         openSessions, "TODAY'S STAFFING",    '#C8102E', true)
-    + buildPublicStaffingCol(tomorrowStr, tomorrowObj, openSessions, "TOMORROW'S STAFFING", '#F5A623', false)
-    + buildPublicCombinedRespondersCol(yr, todayStr)
-    + buildPublicOnDutyCol(openSessions, todayStr)
-    + buildPublicEventsCol(todayStr, tomorrowStr)
-    + '</div>'
+  // Header bar
+  html_str += '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 32px;background:#0F0F0F;border-bottom:3px solid #C8102E;flex-shrink:0;">';
+  html_str += (logoSrc ? '<img src="'+logoSrc+'" style="height:50px;width:auto;object-fit:contain;">' : '<div style="width:60px;"></div>');
+  html_str += '<div style="text-align:center;">'
+    + '<div style="font-family:Bebas Neue,sans-serif;font-size:30px;letter-spacing:5px;color:#F0F0F0;line-height:1;">'+compName+'</div>'
+    + '<div style="font-size:15px;color:#888;letter-spacing:3px;text-transform:uppercase;">'+yr+' LOSAP STANDINGS</div>'
     + '</div>';
+  html_str += '<div style="text-align:right;">'
+    + '<div id="tvClock" style="font-family:Bebas Neue,sans-serif;font-size:46px;color:#C8102E;line-height:1;letter-spacing:2px;"></div>'
+    + '<div style="font-size:12px;color:#555;letter-spacing:1px;">'+qualCount+'/'+totalActive+' QUALIFIED</div>'
+    + '</div>';
+  html_str += '</div>';
 
-  sa.innerHTML = html;
+  // Stats bar
+  html_str += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:#0C0C0C;border-bottom:1px solid #1E1E1E;flex-shrink:0;">';
+  var statItems = [
+    { label:'QUALIFYING THRESHOLD', value: QUALIFY_PTS+' PTS', color:'#F5A623' },
+    { label:'MEMBERS QUALIFIED',    value: qualCount, color:'#27AE60' },
+    { label:'ACTIVE MEMBERS',       value: totalActive, color:'#3498DB' },
+    { label:'YEAR',                 value: yr, color:'#C8102E' }
+  ];
+  statItems.forEach(function(s){
+    html_str += '<div style="padding:10px 24px;border-right:1px solid #1A1A1A;">'
+      + '<div style="font-size:11px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-bottom:2px;">'+s.label+'</div>'
+      + '<div style="font-family:Bebas Neue,sans-serif;font-size:28px;color:'+s.color+';letter-spacing:1px;line-height:1;">'+s.value+'</div>'
+      + '</div>';
+  });
+  html_str += '</div>';
 
+  // Leaderboard table header
+  html_str += '<div style="display:grid;grid-template-columns:60px 1fr 120px 120px 120px 140px;padding:8px 32px;background:#111;border-bottom:1px solid #1E1E1E;flex-shrink:0;">';
+  ['RANK','MEMBER','RESPONSES','DUTY HRS','POINTS','STATUS'].forEach(function(h){
+    html_str += '<div style="font-size:10px;font-weight:700;color:#555;letter-spacing:2px;text-transform:uppercase;">'+h+'</div>';
+  });
+  html_str += '</div>';
+
+  // Leaderboard rows
+  html_str += '<div style="flex:1;overflow-y:auto;">';
+  rows.forEach(function(r, i){
+    var qualified = r.pts >= QUALIFY_PTS;
+    var pct       = Math.min(100, Math.round((r.pts / QUALIFY_PTS) * 100));
+    var rankColor = i===0 ? '#F5A623' : i===1 ? '#AAAAAA' : i===2 ? '#CD7F32' : '#555';
+    var rowBg     = i % 2 === 0 ? '#0D0D0D' : '#0A0A0A';
+    var m         = r.member;
+    var name      = m.last.toUpperCase() + ', ' + m.first;
+    var rankLabel = m.ranks && m.ranks.length ? m.ranks.join('/') : (m.rank||'');
+    var statusColor = qualified ? '#27AE60' : '#F5A623';
+    var statusText  = qualified ? '\u2713 QUALIFIED' : pct+'% ('+Math.round(r.pts)+'/'+QUALIFY_PTS+')';
+
+    html_str += '<div style="display:grid;grid-template-columns:60px 1fr 120px 120px 120px 140px;padding:10px 32px;background:'+rowBg+';border-bottom:1px solid #111;align-items:center;">';
+    // Rank
+    html_str += '<div style="font-family:Bebas Neue,sans-serif;font-size:24px;color:'+rankColor+';letter-spacing:1px;">'+(i+1)+'</div>';
+    // Member name + rank
+    html_str += '<div>'
+      + '<div style="font-size:18px;font-weight:700;color:#F0F0F0;line-height:1.1;">'+name+'</div>'
+      + (rankLabel ? '<div style="font-size:11px;color:#555;letter-spacing:1px;text-transform:uppercase;">'+rankLabel+'</div>' : '')
+      + '</div>';
+    // Responses
+    html_str += '<div style="font-size:20px;font-weight:700;color:#3498DB;">'+r.responses+'</div>';
+    // Hours
+    html_str += '<div style="font-size:20px;font-weight:700;color:#888;">'+Math.round(r.hours)+'h</div>';
+    // Points with progress bar
+    html_str += '<div>'
+      + '<div style="font-family:Bebas Neue,sans-serif;font-size:26px;color:'+statusColor+';line-height:1;letter-spacing:1px;">'+Math.round(r.pts)+'</div>'
+      + '<div style="height:3px;background:#1A1A1A;border-radius:2px;margin-top:3px;">'
+      +   '<div style="height:3px;background:'+statusColor+';border-radius:2px;width:'+pct+'%;"></div>'
+      + '</div>'
+      + '</div>';
+    // Status
+    html_str += '<div style="font-size:13px;font-weight:700;color:'+statusColor+';letter-spacing:1px;">'+statusText+'</div>';
+    html_str += '</div>';
+  });
+  html_str += '</div>';
+  html_str += '</div>';
+
+  sa.innerHTML = html_str;
+  document.body.style.overflow = 'hidden';
+
+  // Live clock
   function tickClock() {
     var el = document.getElementById('tvClock');
     if (!el) return;
-    var t = new Date();
-    var h = t.getHours(), m = t.getMinutes(), s = t.getSeconds();
-    var ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12 || 12;
-    el.textContent = h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + ' ' + ampm;
+    var t = new Date(), h = t.getHours(), m2 = t.getMinutes(), s = t.getSeconds();
+    var ampm = h>=12?'PM':'AM'; h = h%12||12;
+    el.textContent = h+':'+String(m2).padStart(2,'0')+':'+String(s).padStart(2,'0')+' '+ampm;
   }
   tickClock();
   if (window._tvClockInterval) clearInterval(window._tvClockInterval);
   window._tvClockInterval = setInterval(tickClock, 1000);
+
+  // Auto-refresh leaderboard every 5 minutes
+  if (window._pubRefreshInterval) clearInterval(window._pubRefreshInterval);
+  window._pubRefreshInterval = setInterval(function(){ renderPublicView(); }, 300000);
 }
 
 // ═══════════════════════════════════════════════════
