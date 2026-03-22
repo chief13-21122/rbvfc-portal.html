@@ -1132,7 +1132,9 @@ function calcMemberLOSAP(uid, year) {
   var rPts = responses.length * 0.5;
   pts += rPts;
   // Add other category points with caps
+  // Skip 'emergency' category — those pts come from emergencyResponses above
   Object.keys(catPts).forEach(function(cat) {
+    if (cat === 'emergency') return; // already counted via emergencyResponses
     var cfg = CAT_CONFIG[cat];
     if (!cfg) return;
     var p = catPts[cat];
@@ -5563,7 +5565,8 @@ function staffClockIn(elOrId) {
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
   if (!shift) return;
   if (!_canClockInNow(shift.date, null)) {
-    showToast('\u26a0\ufe0f You can only clock in on the day of your shift.');
+    var _shName = (UNIT_LABELS[shift.unitId]||shift.unitId)+(shift.position?' – '+shift.position:'');
+    showToast('\u26a0\ufe0f Cannot clock in: shift for '+_shName+' is on '+shift.date+' (not today).');
     return;
   }
   // Can't clock into a shift while already clocked into an overlapping one
@@ -7185,7 +7188,11 @@ function saveSpecialEvent() {
   var endTime  = ((document.getElementById('seEndTime')||{}).value||'').trim();
   var location = ((document.getElementById('seLocation')||{}).value||'').trim();
   var desc     = ((document.getElementById('seDesc')||{}).value||'').trim();
-  if (!title||!startDate) { showToast('⚠️ Title and start date are required.'); return; }
+  if (!title)     { showToast('\u26a0\ufe0f Event title is required.'); return; }
+  if (!startDate) { showToast('\u26a0\ufe0f Start date is required.'); return; }
+  if (!startTime) { showToast('\u26a0\ufe0f Start time is required.'); return; }
+  if (!endTime)   { showToast('\u26a0\ufe0f End time is required.'); return; }
+  if (!location)  { showToast('\u26a0\ufe0f Location is required.'); return; }
   var totalNeeded = parseInt(((document.getElementById('seTotalNeeded')||{}).value||'0')) || 0;
   var positions = [];
   var pc = document.getElementById('sePositionsContainer');
@@ -8759,8 +8766,9 @@ function renderCompanyLOSAP() {
   };
   var todayStr = new Date().toISOString().slice(0,10);
 
-  // 1. All members with an open clock session (end===null)
-  (state.sessions||[]).filter(function(s){ return !s.end; }).forEach(function(s){
+  // 1. Members with an open clock session started TODAY
+  var _todayStr = new Date().toISOString().slice(0,10);
+  (state.sessions||[]).filter(function(s){ return !s.end && s.start && s.start.slice(0,10)===_todayStr; }).forEach(function(s){
     if (!s.userId) return;
     // Check if this member also has a staffing assignment today — if so, show unit+position
     var staffShift = (state.staffingShifts||[]).find(function(sh){
@@ -9944,7 +9952,12 @@ function renderPublicView() {
   // Open sessions
   var openSessions = {};
   (state.sessions||[]).filter(function(s){ return !s.end && s.userId; }).forEach(function(s){
-    openSessions[s.userId] = { activity: s.activity||'duty', desc: s.desc||'' };
+    var _actLabels = { duty:'Station Duty', meeting:'Meeting', training:'Training',
+      collateral:'Collateral Duty', fundraiser:'Event/Fundraiser', drill:'Drill', other:'On Duty' };
+    openSessions[s.userId] = {
+      activity: _actLabels[s.activity] || s.activity || 'On Duty',
+      desc: s.desc || ''
+    };
   });
   if (state.currentSession && state.currentSession.userId && !state.currentSession.end) {
     openSessions[state.currentSession.userId] = {
@@ -10303,7 +10316,9 @@ function buildPublicOnDutyColTV(openSessions, todayStr, positionClockedIn) {
                   + '<div style="width:9px;height:9px;border-radius:50%;background:#27AE60;box-shadow:0 0 6px #27AE60;flex-shrink:0;"></div>'
                   + '<div style="flex:1;min-width:0;">'
                   + '<div style="font-size:20px;font-weight:700;color:#F0F0F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+m.last.toUpperCase()+', '+m.first+'</div>'
-                  + (info.desc ? '<div style="font-size:12px;color:#555;letter-spacing:1px;text-transform:uppercase;">'+info.desc+'</div>' : '')
+                  + (info.desc || info.activity ? '<div style="font-size:12px;color:#888;letter-spacing:1px;">'
+                    + (info.desc ? info.desc : (info.activity||'').replace(/_/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();}))
+                    + '</div>' : '')
                   + '</div></div>';
       });
     }
@@ -10789,14 +10804,24 @@ function downloadLosapReport() {
     catMap[a.category].pts   += (a.points||0);
     catMap[a.category].count += 1;
   });
-  var rPts = responses.length;
+  var rPts = Math.round(responses.length * 0.5 * 10) / 10;  // 0.5 pts each per AACVFA
 
-  // Position points
+  // Position points — same logic as calcMemberLOSAP (AACVFA §3d)
   var positionPts = 0;
-  if (member.losapPositions && member.losapPositions.length > 0)
-    positionPts = Math.min(25, member.losapPositions.length * 25);
-  else if (member.losapPosition)
-    positionPts = 25;
+  (function() {
+    var positions = member.losapPositions && member.losapPositions.length
+      ? member.losapPositions : (member.losapPosition ? [member.losapPosition] : []);
+    if (!positions.length) return;
+    var OFFICER_TITLES = ['Chief','Assistant Chief','Deputy Chief','Captain','Lieutenant',
+      'EMS Coordinator','President','Vice President','Secretary','Treasurer',
+      'Board of Director','Board of Trustee','County Association','State Association',
+      'National Association','Fire Chief','Coordinator'];
+    var hasOfficer = positions.some(function(p){
+      return OFFICER_TITLES.some(function(t){ return p.toLowerCase().indexOf(t.toLowerCase())>=0; });
+    });
+    positionPts = hasOfficer ? 25 : positions.length > 0 ? 15 : 0;
+    positionPts = Math.min(25, positionPts);
+  })();
 
   // Helper
   function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -10810,9 +10835,16 @@ function downloadLosapReport() {
   var summaryRows = '';
   if (rPts > 0)
     summaryRows += '<tr><td>Emergency Responses</td><td style="text-align:center;">' + responses.length + '</td><td style="text-align:right;">' + rPts + '</td></tr>';
-  if (positionPts > 0)
-    summaryRows += '<tr><td>Elected Position(s)</td><td style="text-align:center;">—</td><td style="text-align:right;">' + positionPts + '</td></tr>';
+  if (positionPts > 0) {
+    var _posNames = member.losapPositions && member.losapPositions.length
+      ? member.losapPositions.join(', ')
+      : (member.losapPosition || 'Elected/Appointed Officer');
+    summaryRows += '<tr><td>Elected/Appointed Position<br><small style="color:#888;">' + esc(_posNames) + '</small></td>'
+      + '<td style="text-align:center;">—</td>'
+      + '<td style="text-align:right;">' + positionPts + '</td></tr>';
+  }
   Object.keys(catMap).forEach(function(cat){
+    if (cat === 'emergency') return; // ER counted separately via emergencyResponses
     var cfg = CAT_CONFIG[cat];
     if (!cfg) return;
     var rawPts = catMap[cat].pts;
@@ -12017,7 +12049,20 @@ function applyBulkEdit() {
         <div id="myShiftsContainer"><p style="color:#666;font-size:13px;text-align:center;padding:20px;">No upcoming shifts or events.</p></div>
       </div>
 
-      <!-- Staffing Alerts — visible to all members -->
+      <div class="card">
+        <div class="card-header">
+          <div class="icon">🚒</div>
+          <h2>Today's Staffing</h2>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+            <button class="btn btn-sm btn-secondary" onclick="staffingDatePrev()">◀</button>
+            <input type="date" id="staffingDate" onchange="renderStaffingBoard()" style="background:#111;border:1px solid #333;color:#F0F0F0;border-radius:6px;padding:4px 8px;font-size:12px;">
+            <button class="btn btn-sm btn-secondary" onclick="staffingDateNext()">▶</button>
+          </div>
+        </div>
+        <div id="staffingBoardContainer"></div>
+      </div>
+
+            <!-- Staffing Alerts — visible to all members -->
       <div class="card" id="staffingAlertCard" style="display:none;">
         <div class="card-header" onclick="toggleStaffCard('staffingAlertBody','staffingAlertChevron')" style="cursor:pointer;user-select:none;">
           <div class="icon">🚨</div><h2>Staffing Alerts</h2>
@@ -12120,21 +12165,21 @@ function applyBulkEdit() {
             <div id="seCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
               <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">&#127920; Create New Event</div>
               <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>
-              <input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <input id="seTitle" type="text" required placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
                 <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>
-                <input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <input id="seStartDate" type="date" required style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
                 <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>
                 <input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
                 <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time</label>
-                <input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <input id="seStartTime" type="time" required style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
                 <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time</label>
-                <input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <input id="seEndTime" type="time" required style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
               </div>
               <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location</label>
-              <input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <input id="seLocation" required type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
               <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>
               <textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
@@ -12209,18 +12254,6 @@ function applyBulkEdit() {
       
 
       <!-- Daily Staffing Board -->
-      <div class="card">
-        <div class="card-header">
-          <div class="icon">🚒</div>
-          <h2>Today's Staffing</h2>
-          <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-            <button class="btn btn-sm btn-secondary" onclick="staffingDatePrev()">◀</button>
-            <input type="date" id="staffingDate" onchange="renderStaffingBoard()" style="background:#111;border:1px solid #333;color:#F0F0F0;border-radius:6px;padding:4px 8px;font-size:12px;">
-            <button class="btn btn-sm btn-secondary" onclick="staffingDateNext()">▶</button>
-          </div>
-        </div>
-        <div id="staffingBoardContainer"></div>
-      </div>
 
       <!-- Special Events Member View -->
       <div class="card" id="specialEventsMemberCard" style="display:none;">
