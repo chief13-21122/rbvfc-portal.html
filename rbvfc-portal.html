@@ -9777,23 +9777,31 @@ function fixCollapseIcons() {}
 var _clockTimerInterval = null;
 
 function onClockActivityChange() {
-  var sel = document.getElementById('clockActivity');
-  var row = document.getElementById('clockDescRow');
-  var inp = document.getElementById('clockDesc');
+  var sel  = document.getElementById('clockActivity');
+  var row  = document.getElementById('clockDescRow');
+  var inp  = document.getElementById('clockDesc');
   var hint = document.getElementById('clockDescHint');
+  var lbl  = document.getElementById('clockDescLabel');
   if (!sel || !row) return;
   var v = sel.value;
-  var needsDesc = (v === 'meeting' || v === 'collateral');
+  // These types need a description; others (duty, drill, fundraiser) do not require one
+  var needsDesc = (v === 'meeting' || v === 'collateral' || v === 'other');
   row.style.display = needsDesc ? 'block' : 'none';
-  if (!inp || !hint) return;
+  if (!inp) return;
   inp.value = '';
-  if (v === 'meeting') {
-    inp.placeholder = 'e.g. Bylaws Committee Meeting, etc.';
-    hint.textContent = 'Other examples: Officers Meeting · Board Meeting · Training Meeting · Budget Meeting';
-  } else if (v === 'collateral') {
-    inp.placeholder = 'e.g. Apparatus Check';
-    hint.textContent = 'Other examples: Station Cleaning · Fundraiser · Training Prep · Equipment Inventory · Grant Writing';
-  }
+  var placeholders = {
+    meeting:   'e.g. Monthly Company Meeting, Officers Meeting…',
+    collateral:'e.g. Apparatus Check, Station Cleaning, Grant Writing…',
+    other:     'e.g. Describe the activity…',
+  };
+  var hints = {
+    meeting:   'Other examples: Board Meeting · Training Meeting · Budget Meeting',
+    collateral:'Other examples: Fundraiser Prep · Equipment Inventory · Training Prep',
+  };
+  inp.placeholder = placeholders[v] || '';
+  if (hint) hint.textContent = hints[v] || '';
+  // Update label: required indicator
+  if (lbl) lbl.textContent = needsDesc ? 'REQUIRED' : 'OPTIONAL';
 }
 
 function clockIn() {
@@ -9816,10 +9824,17 @@ function clockIn() {
   // Note: general clock-in (meetings, duties, collateral) has no time restriction
   var activity = (document.getElementById('clockActivity')||{}).value || 'meeting';
   var desc     = ((document.getElementById('clockDesc')||{}).value||'').trim();
-  if ((activity === 'meeting' || activity === 'collateral') && !desc) {
+  var _needsDesc = (activity === 'meeting' || activity === 'collateral' || activity === 'other');
+  if (_needsDesc && !desc) {
     var inp = document.getElementById('clockDesc');
-    if (inp) { inp.focus(); inp.style.borderColor='#E74C3C'; inp.style.boxShadow='0 0 0 2px rgba(231,76,60,0.3)'; setTimeout(function(){ inp.style.boxShadow=''; }, 2000); }
-    showToast('⚠️ Please enter a description for this ' + (activity==='meeting'?'meeting':'collateral duty') + '.');
+    if (inp) {
+      inp.focus();
+      inp.style.borderColor='#E74C3C';
+      inp.style.boxShadow='0 0 0 2px rgba(231,76,60,0.3)';
+      setTimeout(function(){ inp.style.borderColor=''; inp.style.boxShadow=''; }, 2000);
+    }
+    var _typeLabel = {meeting:'meeting', collateral:'collateral duty', other:'activity'}[activity]||'activity';
+    showToast('\u26a0\ufe0f Please enter a description for this '+_typeLabel+'.');
     return;
   }
   var now      = new Date();
@@ -11950,17 +11965,20 @@ function applyBulkEdit() {
           <!-- Duty type selector -->
           <div style="margin-bottom:16px;">
             <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#666;text-align:center;margin-bottom:8px;">DUTY TYPE</div>
-            <select id="clockActivity" data-onchange="onClockActivityChange()" style="width:100%;background:#1A1A1A;border:1px solid #2A2A2A;color:#F0F0F0;border-radius:10px;padding:12px 14px;font-size:15px;font-family:'Barlow Condensed',sans-serif;letter-spacing:1px;appearance:none;-webkit-appearance:none;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%228%22 viewBox=%220 0 12 8%22><path d=%22M1 1l5 5 5-5%22 stroke=%22%23555%22 stroke-width=%221.5%22 fill=%22none%22/></svg>');background-repeat:no-repeat;background-position:right 14px center;">
+            <select id="clockActivity" onchange="onClockActivityChange()" data-onchange="onClockActivityChange()" style="width:100%;background:#1A1A1A;border:1px solid #2A2A2A;color:#F0F0F0;border-radius:10px;padding:12px 14px;font-size:15px;font-family:'Barlow Condensed',sans-serif;letter-spacing:1px;appearance:none;-webkit-appearance:none;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%228%22 viewBox=%220 0 12 8%22><path d=%22M1 1l5 5 5-5%22 stroke=%22%23555%22 stroke-width=%221.5%22 fill=%22none%22/></svg>');background-repeat:no-repeat;background-position:right 14px center;">
+              <option value="duty">Station Duty</option>
               <option value="meeting">Meeting</option>
               <option value="collateral">Collateral Duty</option>
+              <option value="drill">Drill / In-House Training</option>
+              <option value="fundraiser">Fundraiser / Special Event</option>
               <option value="other">Other</option>
             </select>
           </div>
 
           <!-- Description (required for meeting / collateral) -->
-          <div id="clockDescRow" style="margin-bottom:16px;transition:all .2s;">
+          <div id="clockDescRow" style="margin-bottom:16px;transition:all .2s;display:none;">
             <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#C8102E;text-align:center;margin-bottom:8px;">
-              DESCRIPTION <span style="color:#888;font-size:9px;letter-spacing:1px;">REQUIRED</span>
+              DESCRIPTION <span id="clockDescLabel" style="color:#888;font-size:9px;letter-spacing:1px;">REQUIRED</span>
             </div>
             <input type="text" id="clockDesc"
               placeholder="e.g. Bylaws Committee Meeting, etc."
