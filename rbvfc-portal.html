@@ -4185,7 +4185,8 @@ var UNIT_MIN_STAFF = {
 
 // Units that share the same crew and are staffed/displayed together
 var LINKED_UNIT_GROUPS = [
-  ['e131', 'Tk13']   // Engine 131 / Truck 13 share crew
+  ['Tk13']           // Truck 13 — combined crew toggle shown on its card
+                     // Engine 131 is always independently signable
 ];
 function getLinkedGroup(unitId) {
   for (var _g=0; _g<LINKED_UNIT_GROUPS.length; _g++) {
@@ -5122,6 +5123,13 @@ function renderStaffingBoard() {
           if (areUnitsLinked(uId, s.unitId, date)) return false;
           var shiftIsEMS = EMS_IDS.indexOf(s.unitId) >= 0;
           if (uIdIsEMS !== shiftIsEMS) return false;
+          // If clocked in for an overlapping shift, hard-block regardless of unit
+          if (s.clockedIn && !s.clockedOutAt) {
+            // Check time overlap with the proposed new shift
+            var _ps = posShifts.length > 0 ? (_nextStart||'0700') : '0700';
+            var _ph = posShifts.length > 0 ? (_remHours||24) : 24;
+            if (_shiftsOverlap(s.shiftStart||s.start||'0700', s.shiftHours||s.hours||24, _ps, _ph)) return true;
+          }
           return true;
         });
         var adminRestricted = isAdminMember(member) && uId !== 'U13';
@@ -5300,6 +5308,29 @@ function renderStaffingBoard() {
     }
 
     html += '</div>'; // end unit card
+
+    // ── Engine 131 Additional Crew card (shown when combined with Tk13) ──────
+    // When E131/Tk13 are combined, render a separate E131 card so members who
+    // can only staff Engine 131 can still sign up independently.
+    if (unitId === 'e131' && linkedPartners.indexOf('Tk13') >= 0) {
+      var e131St = unitStatus('e131');
+      var e131Color = e131St.isFull ? '#27AE60' : (e131St.isMin ? '#F5A623' : '#E74C3C');
+      var e131Status = e131St.isFull ? '&#9989; FULLY STAFFED' : (e131St.isMin ? '&#9888; MIN MET' : '&#9888; UNDERSTAFFED');
+      html += '<div style="background:#181818;border:1px solid #2A2A2A;border-left:4px solid '+e131Color+';border-radius:10px;padding:14px 16px;margin-bottom:12px;">';
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
+      html += '<span style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:2px;color:#F0F0F0;">Engine 131</span>';
+      html += '<span style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#888;background:#1A1A1A;border:1px solid #2A2A2A;border-radius:4px;padding:2px 8px;">ADDITIONAL CREW</span>';
+      html += '<span style="font-size:10px;font-weight:700;color:'+e131Color+';margin-left:auto;">'+e131Status+'</span>';
+      html += '</div>';
+      html += '<div style="font-size:11px;color:#555;margin-bottom:10px;">Sign up here to staff Engine 131 only, independent of the combined crew.</div>';
+      renderUnitPositions('e131', e131St.shifts, e131St.positions);
+      // Note: officer assignment for E131 is done via the Combined Crew card above
+      if (isOfficer) {
+        html += '<div style="margin-top:8px;font-size:11px;color:#555;">&#9432; To assign members via officer assign, use the Engine 131 / Truck 13 combined crew card above.</div>';
+      }
+      html += '</div>'; // end additional E131 card
+    }
+
   });
 
   container.innerHTML = html;
@@ -5586,6 +5617,15 @@ function updateAssignMemberDropdown(unitId, date) {
     .forEach(function(m) {
       // Exclude: overlapping shift exists for this member on this date
       if (_memberHasOverlappingShift(m.id, date, propStart, propHours)) return;
+      // Exclude: currently clocked in for a shift on a different unit (hard conflict)
+      var _clockedInElsewhere = (state.staffingShifts||[]).some(function(s){
+        if (s.memberId !== m.id || s.date !== date) return false;
+        if (!s.clockedIn || s.clockedOutAt) return false;
+        if (s.unitId === unitId) return false; // same unit is OK (different position)
+        // Check time overlap
+        return _shiftsOverlap(s.shiftStart||s.start||'0700', s.shiftHours||s.hours||24, propStart, propHours);
+      });
+      if (_clockedInElsewhere) return;
       // Exclude: doesn't meet rank requirement for this position
       if (posName !== 'Student' && !memberMeetsRank(m, posName)) return;
       // Exclude: ineligible ride report (can only be Student)
