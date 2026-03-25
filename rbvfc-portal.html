@@ -599,6 +599,12 @@ function _fbSplitState() {
       var c = Object.assign({}, s); delete c.certBase64; return c;
     });
   }
+  // NEVER write device-local fields to Firestore — each device manages its own login
+  delete full.currentUserId;
+  delete full.currentSession;
+  delete full._classRemindedToday;
+  delete full.adminPin;
+
   var acts  = { losapActivities: full.losapActivities || [] };
   var train = { trainingSubmissions: full.trainingSubmissions || [] };
   delete full.losapActivities;
@@ -635,10 +641,15 @@ function _mergeAndRender(remote) {
   var _savedCfg = { fbApiKey: state.fbApiKey, fbProjectId: state.fbProjectId,
     fbAuthDomain: state.fbAuthDomain, fbStorageBucket: state.fbStorageBucket,
     fbMessagingSenderId: state.fbMessagingSenderId, fbAppId: state.fbAppId };
-  // Preserve current user's active session — Firestore may have null or another user's session
+  // Preserve device-local fields — Firestore must never overwrite who is logged in on this device
+  var _savedUserId  = state.currentUserId;
+  var _savedPin     = state.adminPin;
   var _savedSession = (state.currentSession && state.currentSession.userId === state.currentUserId)
     ? state.currentSession : null;
   Object.assign(state, remote);
+  // Always restore device-local fields after merge
+  if (_savedUserId)  state.currentUserId = _savedUserId;
+  if (_savedPin)     state.adminPin      = _savedPin;
   // Restore config (baked-in values always take priority over synced placeholders)
   Object.keys(_savedCfg).forEach(function(k){
     if (!state[k] || state[k].indexOf('YOUR_') === 0) state[k] = _savedCfg[k];
@@ -7435,7 +7446,7 @@ function renderSpecialEventAdmin() {
       +'<div style="flex:1;">'
         +'<div style="font-size:13px;font-weight:700;color:'+(isPast?'#888':'#F0F0F0')+';">'
           +(isToday?'<span style="font-size:10px;background:#C8102E;color:#FFF;border-radius:4px;padding:1px 5px;margin-right:5px;">TODAY</span>':'')+ev.title+'</div>'
-        +'<div style="font-size:11px;color:#666;margin-top:2px;">'+evDate+(ev.endDate&&ev.endDate!==ev.startDate?' – '+new Date(ev.endDate+'T12:00:00').toLocaleDateString([],{month:'short',day:'numeric'}):'')+(ev.startTime?' · '+ev.startTime+(ev.endTime?' – '+ev.endTime:''):ev.time?' · '+ev.time:'')+(ev.location?' · '+ev.location:'')+'</div>'
+        +'<div style="font-size:11px;color:#666;margin-top:2px;">'+evDate+(ev.endDate&&ev.endDate!==ev.startDate?' – '+new Date(ev.endDate+'T12:00:00').toLocaleDateString([],{month:'short',day:'numeric'}):'')+(ev.startTime?' · '+ev.startTime+(ev.endTime?' – '+ev.endTime:''):ev.time?' · '+ev.time:'')+(ev.location?' · '+ev.location:'')+(ev.createdByName?'<div style="font-size:10px;color:#444;margin-top:2px;">&#128100; Created by: '+ev.createdByName+'</div>':'')+'</div>'
         +(function(){
           var cnt = (ev.signups||[]).length;
           var total = ev.totalNeeded || 0;
@@ -7551,6 +7562,7 @@ function saveSpecialEvent() {
     }
   }
 
+  var _evCreator = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
   var ev = {
     id: 'ev_'+Date.now(),
     title: title,
@@ -7564,7 +7576,10 @@ function saveSpecialEvent() {
     desc: desc,
     positions: positions,
     totalNeeded: totalNeeded,
-    signups: []
+    signups: [],
+    createdBy: state.currentUserId,
+    createdByName: _evCreator ? _evCreator.last+', '+_evCreator.first : state.currentUserId,
+    createdAt: new Date().toISOString()
   };
   if (!Array.isArray(state.specialEvents)) state.specialEvents = [];
   state.specialEvents.push(ev);
