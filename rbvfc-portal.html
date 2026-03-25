@@ -641,15 +641,19 @@ function _mergeAndRender(remote) {
   var _savedCfg = { fbApiKey: state.fbApiKey, fbProjectId: state.fbProjectId,
     fbAuthDomain: state.fbAuthDomain, fbStorageBucket: state.fbStorageBucket,
     fbMessagingSenderId: state.fbMessagingSenderId, fbAppId: state.fbAppId };
-  // Preserve device-local fields — Firestore must never overwrite who is logged in on this device
+  // Strip device-local fields from remote BEFORE merging — these must never cross devices
+  delete remote.currentUserId;
+  delete remote.currentSession;
+  delete remote._classRemindedToday;
+  // Preserve local values so they survive the merge
   var _savedUserId  = state.currentUserId;
   var _savedPin     = state.adminPin;
   var _savedSession = (state.currentSession && state.currentSession.userId === state.currentUserId)
     ? state.currentSession : null;
   Object.assign(state, remote);
-  // Always restore device-local fields after merge
-  if (_savedUserId)  state.currentUserId = _savedUserId;
-  if (_savedPin)     state.adminPin      = _savedPin;
+  // Unconditionally restore — remote can never legitimately set these
+  state.currentUserId = _savedUserId;
+  state.adminPin      = _savedPin;
   // Restore config (baked-in values always take priority over synced placeholders)
   Object.keys(_savedCfg).forEach(function(k){
     if (!state[k] || state[k].indexOf('YOUR_') === 0) state[k] = _savedCfg[k];
@@ -5953,8 +5957,9 @@ function _checkShiftClockWindow(shift) {
     var startStr = hUntil+':'+(mUntil<10?'0':'')+mUntil+' '+ampm;
     return { ok: false, reason: 'Shift does not start until '+startStr+' ('+minsUntil+' min from now).' };
   }
-  // Cannot clock in AFTER the shift has ended
-  if (nowMs >= shiftEndMs) {
+  // Cannot clock in more than 2 hours after the shift has ended
+  var graceMs = 2 * 3600000; // 2-hour grace period
+  if (nowMs >= shiftEndMs + graceMs) {
     var endDate  = new Date(shiftEndMs);
     var eH = endDate.getHours(), eM = endDate.getMinutes();
     var endStr = (eH%12||12)+':'+(eM<10?'0':'')+eM+' '+(eH>=12?'PM':'AM');
@@ -6623,7 +6628,43 @@ function showStaffingReminder(shift) {
     ]
   );
 }
-function staffClockInFromBanner(shiftId) { staffClockIn(shiftId); dismissReminder(); }
+function staffClockInFromBanner(shiftId) {
+  // Clock in directly — no modal. Clamped to shift start, max = now
+  var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
+  if (!shift) { dismissReminder(); return; }
+  var win = _checkShiftClockWindow(shift);
+  if (!win.ok) { showToast('\u26a0\ufe0f ' + win.reason); dismissReminder(); return; }
+  // Use shift start time (don't go before it)
+  var now = new Date();
+  var today = now.toISOString().slice(0,10);
+  var sh = parseInt((shift.shiftStart||'0700').slice(0,2));
+  var sm = parseInt((shift.shiftStart||'0700').slice(2,4)||'0');
+  var schedStart = new Date(today+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00');
+  var clockStart = now < schedStart ? schedStart : now;
+  // Set shift as clocked in
+  shift.clockedIn    = true;
+  shift.clockedInAt  = clockStart.toISOString();
+  shift.status       = 'active';
+  // Create session for this member
+  var shiftMemberId = shift.memberId || state.currentUserId;
+  if (shiftMemberId === state.currentUserId && !state.currentSession) {
+    var desc = (UNIT_LABELS[shift.unitId]||shift.unitId)+(shift.position?' \u00b7 '+shift.position:'');
+    state.currentSession = {
+      id:'sess_'+Date.now(), userId:shiftMemberId, start:clockStart.toISOString(),
+      activity:'duty', desc:desc, shiftId:shift.id, end:null, duration:null
+    };
+    if (typeof _clockTimerInterval!=='undefined') {
+      if (_clockTimerInterval) clearInterval(_clockTimerInterval);
+      _clockTimerInterval = setInterval(tickClockTimer, 1000);
+    }
+    try{updateClockUI(true);}catch(e){}
+  }
+  save();
+  dismissReminder();
+  try{renderStaffingBoard();}catch(e){}
+  try{renderMyShifts();}catch(e){}
+  showToast('\u2705 Clocked in for '+(UNIT_LABELS[shift.unitId]||shift.unitId)+'!');
+}
 function dismissReminder() { _hideTopBanner('staffingReminderBanner'); }
 
 // ── ALERTS ────────────────────────────────────────────────────
@@ -7492,11 +7533,26 @@ function openEditSpecialEvent(evId) {
 
 function renderSpecialEventAdmin() {
   var formEl = document.getElementById('seCreateForm');
-  // Form is now always in HTML — just ensure positions row is initialized
   if (formEl) {
-    // Init positions row if empty
     var posC = document.getElementById('sePositionsContainer');
     if (posC && !posC.children.length) posC.innerHTML = sePositionRow();
+    // Populate Created By display
+    var uid = state.currentUserId;
+    var me = (state.roster||[]).find(function(m){ return m.id===uid; });
+    var cDisp = document.getElementById('seCreatedByDisplay');
+    if (cDisp) cDisp.textContent = me ? me.last+', '+me.first+' · '+((me.ranks&&me.ranks.length?me.ranks[0]:me.rank)||me.appRole) : '—';
+    // Populate In Charge dropdown (officers + admin)
+    var icSel = document.getElementById('seInCharge');
+    if (icSel && icSel.options.length <= 1) {
+      (state.roster||[]).filter(function(m){ return m.active!==false && (m.appRole==='officer'||m.appRole==='admin'); })
+        .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
+        .forEach(function(m){
+          var opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.last+', '+m.first+' ('+((m.ranks&&m.ranks.length?m.ranks[0]:m.rank)||m.appRole)+')';
+          icSel.appendChild(opt);
+        });
+    }
   }
   var container = document.getElementById('specialEventsManagerContainer');
   if (!container) return;
@@ -7532,7 +7588,7 @@ function renderSpecialEventAdmin() {
       +'<div style="flex:1;">'
         +'<div style="font-size:13px;font-weight:700;color:'+(isPast?'#888':'#F0F0F0')+';">'
           +(isToday?'<span style="font-size:10px;background:#C8102E;color:#FFF;border-radius:4px;padding:1px 5px;margin-right:5px;">TODAY</span>':'')+ev.title+'</div>'
-        +'<div style="font-size:11px;color:#666;margin-top:2px;">'+evDate+(ev.endDate&&ev.endDate!==ev.startDate?' – '+new Date(ev.endDate+'T12:00:00').toLocaleDateString([],{month:'short',day:'numeric'}):'')+(ev.startTime?' · '+ev.startTime+(ev.endTime?' – '+ev.endTime:''):ev.time?' · '+ev.time:'')+(ev.location?' · '+ev.location:'')+(ev.createdByName?'<div style="font-size:10px;color:#444;margin-top:2px;">&#128100; Created by: '+ev.createdByName+'</div>':'')+'</div>'
+        +'<div style="font-size:11px;color:#666;margin-top:2px;">'+evDate+(ev.endDate&&ev.endDate!==ev.startDate?' – '+new Date(ev.endDate+'T12:00:00').toLocaleDateString([],{month:'short',day:'numeric'}):'')+(ev.startTime?' · '+ev.startTime+(ev.endTime?' – '+ev.endTime:''):ev.time?' · '+ev.time:'')+(ev.location?' · '+ev.location:'')+(ev.inChargeName?'<div style="font-size:11px;color:#F5A623;margin-top:3px;">&#128100; In Charge: '+ev.inChargeName+'</div>':'')+(ev.createdByName?'<div style="font-size:10px;color:#444;margin-top:2px;">Created by: '+ev.createdByName+'</div>':'')+'</div>'
         +(function(){
           var cnt = (ev.signups||[]).length;
           var total = ev.totalNeeded || 0;
@@ -7591,11 +7647,13 @@ function renderBothSpecialEventViews() {
 
 function canManageSpecialEvents() {
   var uid = state.currentUserId;
+  if (!uid) return false;
   var m = (state.roster||[]).find(function(x){ return x.id===uid; });
   if (!m) return false;
   if (m.appRole==='officer'||m.appRole==='admin') return true;
   var positions = m.losapPositions||[];
-  return positions.indexOf('Chair – Community Relations') > -1;
+  return positions.indexOf('Chair – Community Relations') > -1 ||
+         positions.indexOf('Community Relations Chair') > -1;
 }
 
 function saveSpecialEvent() {
@@ -7612,7 +7670,7 @@ function saveSpecialEvent() {
   if (!startDate) { showToast('\u26a0\ufe0f Start date is required.'); return; }
   if (!startTime) { showToast('\u26a0\ufe0f Start time is required.'); return; }
   if (!endTime)   { showToast('\u26a0\ufe0f End time is required.'); return; }
-  if (!location)  { showToast('\u26a0\ufe0f Location is required.'); return; }
+  // location is optional
   var totalNeeded = parseInt(((document.getElementById('seTotalNeeded')||{}).value||'0')) || 0;
   var positions = [];
   var pc = document.getElementById('sePositionsContainer');
@@ -7635,11 +7693,15 @@ function saveSpecialEvent() {
   if (editId) {
     var existing = (state.specialEvents||[]).find(function(e){ return e.id===editId; });
     if (existing) {
+      var _eiId   = state.currentUserId;
+      var _icId   = ((document.getElementById('seInCharge')||{}).value||'').trim();
+      var _icMbr  = _icId ? (state.roster||[]).find(function(m){ return m.id===_icId; }) : null;
       existing.title=title; existing.date=startDate; existing.startDate=startDate;
       existing.endDate=endDate; existing.startTime=startTime; existing.endTime=endTime;
       existing.time=startTime; existing.location=location; existing.desc=desc; existing.description=desc; existing.totalNeeded=totalNeeded;
       existing.positions=positions; existing.updatedAt=new Date().toISOString();
-      existing.updatedBy=state.currentUserId;
+      existing.updatedBy=_eiId;
+      if (_icId) { existing.inCharge=_icId; existing.inChargeName=_icMbr?_icMbr.last+', '+_icMbr.first:''; }
       save();
       cancelEditSpecialEvent();
       renderBothSpecialEventViews();
@@ -7663,7 +7725,11 @@ function saveSpecialEvent() {
     positions: positions,
     totalNeeded: totalNeeded,
     signups: [],
+    inCharge: ((document.getElementById('seInCharge')||{}).value||''),
+    inChargeName: (function(){ var _ic=((document.getElementById('seInCharge')||{}).value||''); var _m=(state.roster||[]).find(function(m){return m.id===_ic;}); return _m?_m.last+', '+_m.first:''; })(),
     createdBy: state.currentUserId,
+    createdByName: (function(){ var _me=(state.roster||[]).find(function(m){return m.id===state.currentUserId;}); return _me?_me.last+', '+_me.first:''; })(),
+    createdAt: new Date().toISOString(),
     createdByName: _evCreator ? _evCreator.last+', '+_evCreator.first : state.currentUserId,
     createdAt: new Date().toISOString()
   };
@@ -12593,23 +12659,39 @@ function applyBulkEdit() {
           <div id="specialEventsManagerBody">
             <!-- Create New Event form — always in HTML for reliability -->
             <div id="seCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
-              <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">&#127920; Create New Event</div>
+              <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">&#127920; Create New Event</div>
+              <!-- Created By / In Charge row -->
+              <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:8px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:8px 12px;">
+                  <span style="font-size:16px;">&#128274;</span>
+                  <div>
+                    <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Created By</div>
+                    <div id="seCreatedByDisplay" style="font-size:13px;font-weight:700;color:#27AE60;"></div>
+                  </div>
+                </div>
+                <div style="flex:1;min-width:180px;">
+                  <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">&#128100; Person in Charge</label>
+                  <select id="seInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;">
+                    <option value="">&#8212; Select officer &#8212;</option>
+                  </select>
+                </div>
+              </div>
               <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>
-              <input id="seTitle" type="text" required placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
                 <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>
-                <input id="seStartDate" type="date" required style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
                 <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>
                 <input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time</label>
-                <input id="seStartTime" type="time" required style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time</label>
-                <input id="seEndTime" type="time" required style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time *</label>
+                <input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time *</label>
+                <input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
               </div>
-              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location</label>
-              <input id="seLocation" required type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location <span style="color:#555;font-size:10px;">(optional)</span></label>
+              <input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
               <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>
               <textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
