@@ -652,6 +652,7 @@ function _mergeAndRender(remote) {
   try { renderStaffingBoard(); } catch(e){}
   try { renderLOSAP(); }        catch(e){}
   try { renderCompanyLOSAP(); } catch(e){}
+  try { reprocessPendingCadCalls(); } catch(e){}
   try { restoreClockState(); }  catch(e){}  // rebuilds session from active shifts if needed
   console.log('[RBVFC] Synced from Firestore.');
 }
@@ -1647,6 +1648,7 @@ function renderEmergencyResponses() {
       return m ? m.last+', '+m.first : mid;
     }).join('; ');
     var incNum = r.incidentNum ? '<div style="font-size:10px;color:#555;margin-top:1px;">#'+r.incidentNum+'</div>' : '';
+    var needsBadge = r.needsReview ? '<span style="display:inline-block;background:rgba(245,166,35,.15);border:1px solid rgba(245,166,35,.4);color:#F5A623;border-radius:4px;padding:1px 5px;font-size:9px;font-weight:700;letter-spacing:1px;margin-left:4px;">NEEDS REVIEW</span>' : '';
     var editedBadge = r.editedAt ? '<span style="font-size:9px;color:#555;margin-left:4px;">(edited)</span>' : '';
     var loggedByMember = r.enteredBy ? (state.roster||[]).find(function(x){ return x.id===r.enteredBy; }) : null;
     var loggedByStr = loggedByMember ? loggedByMember.last+', '+loggedByMember.first : (r.enteredBy ? '—' : '—');
@@ -1665,7 +1667,7 @@ function renderEmergencyResponses() {
     var alarmStr = r.alarmTime ? '<div style="font-size:10px;color:#555;">'+r.alarmTime+'</div>' : '';
     tr.innerHTML =
       '<td style="padding:8px;color:#CCC;white-space:nowrap;">'+r.date+(alarmStr?'<br>'+alarmStr:'')+'</td>'+
-      '<td style="padding:8px;color:#CCC;">'+_formatCadAddress(r.address)+incNum+'</td>'+
+      '<td style="padding:8px;color:#CCC;">'+_formatCadAddress(r.address)+incNum+needsBadge+'</td>'+
       '<td style="padding:8px;">'+typeStr+'</td>'+
       '<td style="padding:8px;font-size:11px;">'+unitPills+'</td>'+
       '<td style="padding:8px;font-size:11px;color:#888;max-width:200px;">'+memberNames+'</td>'+
@@ -2258,17 +2260,26 @@ function initTrainingTab() {
   var uid = state.currentUserId;
   var m = (state.roster||[]).find(function(x){ return x.id===uid; });
   var isOfficer = m && (m.appRole==='officer'||m.appRole==='admin');
-  // Submit form: all members
+  // Training submission form: all members
   var sc = document.getElementById('trainingSubmitCard');
   if (sc) sc.style.display = 'block';
-  // Review card: officers see all, others see own
+  // Review / approval card
   var rc = document.getElementById('trainingSubmissionsCard');
   if (rc) rc.style.display = 'block';
-  // Training classes
+  // Drill report: officers and admin only
+  var dc = document.getElementById('drillSubmitCard');
+  if (dc) dc.style.display = isOfficer ? 'block' : 'none';
+  var dhCard = document.getElementById('drillHistoryCard');
+  if (dhCard) dhCard.style.display = isOfficer ? 'block' : 'none';
+  // Set drill date default to today
+  var ddEl = document.getElementById('drillDate');
+  if (ddEl && !ddEl.value) ddEl.value = new Date().toISOString().slice(0,10);
+  // Training classes button
   var tcBtn = document.getElementById('trainingClassesOfficerBtn');
   if (tcBtn) tcBtn.style.display = isOfficer ? 'block' : 'none';
   renderTrainingClasses();
   renderTrainingReview();
+  if (isOfficer) { try { renderDrillReportHistory(); } catch(e){} }
 }
 
 function renderTrainingReview() {
@@ -3913,6 +3924,40 @@ function drillTypeChanged() {
   if (!val) { codeEl.value = ''; return; }
   var code = val.split('|')[0];
   codeEl.value = code;
+}
+
+function renderDrillReportHistory() {
+  var container = document.getElementById('drillReportHistoryContainer');
+  if (!container) return;
+  var uid = state.currentUserId;
+  var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+  var isOfficer = m && (m.appRole==='officer'||m.appRole==='admin');
+  var drills = (state.drillReports||[]).slice(0,30);
+  if (!drills.length) {
+    container.innerHTML = '<p style="color:#555;font-size:13px;text-align:center;padding:16px;">No drill reports yet.</p>';
+    return;
+  }
+  var h = '';
+  drills.forEach(function(d){
+    var reporterM = (state.roster||[]).find(function(x){ return x.id===d.reportedBy; });
+    var rName = reporterM ? reporterM.last+', '+reporterM.first : (d.reportedBy||'—');
+    var memberNames = (d.members||[]).map(function(mid){
+      var mx=(state.roster||[]).find(function(x){ return x.id===mid; });
+      return mx ? mx.last+', '+mx.first : mid;
+    }).join('; ');
+    h += '<div style="background:#181818;border:1px solid #2A2A2A;border-radius:8px;padding:12px;margin-bottom:8px;">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">';
+    h += '<div>';
+    h += '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">'+(d.type||'Drill')+' &mdash; '+d.date+'</div>';
+    if (d.location) h += '<div style="font-size:11px;color:#888;">'+d.location+'</div>';
+    if (d.notes) h += '<div style="font-size:11px;color:#666;margin-top:3px;">'+d.notes+'</div>';
+    h += '<div style="font-size:11px;color:#555;margin-top:3px;">'+d.hours+'h &middot; Reported by: '+rName+'</div>';
+    if (memberNames) h += '<div style="font-size:11px;color:#666;margin-top:2px;">Members: '+memberNames+'</div>';
+    h += '</div>';
+    h += '<div style="font-size:13px;font-weight:700;color:#27AE60;white-space:nowrap;">'+d.hours+'h</div>';
+    h += '</div></div>';
+  });
+  container.innerHTML = h;
 }
 
 function saveDrillReport() {
@@ -9411,7 +9456,8 @@ function _formatCadAddress(raw) {
 function _autoLogCadCall(call) {
   // Auto-create an emergency response record from a synced CAD call
   // Members who are staffed on the call's units today are auto-logged
-  var today = call.date || new Date().toISOString().slice(0, 10);
+  // Normalize date — strip time component if full ISO string was provided
+  var today = (call.date||'').slice(0,10) || new Date().toISOString().slice(0,10);
   var callUnits = _parseCadUnits(call.units || call.apparatus || '');
 
   // Resolve unit IDs — robust matching (E-131, E131, Engine 131, e131 all work)
@@ -9441,7 +9487,8 @@ function _autoLogCadCall(call) {
     });
   });
 
-  if (!staffedMembers.length) return; // nobody staffed — leave in queue
+  // Even if nobody is staffed, log the response so officers can edit it
+  // Calls with no staffing show with a flag for officer review
 
   // Avoid duplicate auto-log for same incident
   var incKey = call.incidentNum || call.id || (call.address + '_' + today);
@@ -9464,17 +9511,35 @@ function _autoLogCadCall(call) {
     address:      formattedAddr,
     incidentNum:  call.incidentNum || '',
     boxArea:      call.boxArea || call.box || '',
-    type:         call.type || '',
+    type:         call.type || call.incidentType || '',
     units:        resolvedUnitIds.length ? resolvedUnitIds : callUnits,
     apparatus:    call.units || call.apparatus || '',
     members:      staffedMembers,
     autoStaffed:  staffedMembers,
     alarmTime:    call.alarmTime || '',
-    notes:        'Auto-logged from CAD sync.',
+    notes:        staffedMembers.length
+                    ? 'Auto-logged from CAD sync.'
+                    : 'Auto-logged from CAD sync. No staffing found — please add responding members.',
+    needsReview:  !staffedMembers.length,
     _cadKey:      incKey,
     enteredBy:    state.currentUserId || 'system',
     created:      new Date().toISOString()
   });
+  save();
+}
+
+
+// Re-check pending CAD calls against current staffing and log any that now have members
+function reprocessPendingCadCalls() {
+  var pending = (state.cadPendingCalls||[]);
+  var logged  = 0;
+  pending.forEach(function(c) { try { _autoLogCadCall(c); } catch(e){} });
+  // Remove from pending any that are now logged
+  state.cadPendingCalls = pending.filter(function(c) {
+    var key = c.incidentNum || c.id || ((c.address||'')+'_'+(c.date||'').slice(0,10));
+    return !(state.emergencyResponses||[]).some(function(r){ return r._cadKey===key || r.incidentNum===c.incidentNum; });
+  });
+  if (logged) save();
 }
 
 function _fetchCadCalls(url, fromAdmin) {
@@ -12855,6 +12920,13 @@ function applyBulkEdit() {
       </div>
 
       <!-- Drill History -->
+      <!-- Drill Report History -->
+      <div class="card" id="drillHistoryCard" style="display:none;">
+        <div class="card-header"><div class="icon">🔧</div><h2>Drill Report History</h2></div>
+        <div id="drillReportHistoryContainer"></div>
+      </div>
+
+
       <div class="card">
         <div class="card-header"><div class="icon">📋</div><h2>Drill History</h2></div>
         <div id="drillHistoryContainer">
