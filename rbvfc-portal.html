@@ -664,7 +664,22 @@ function _mergeAndRender(remote) {
   try { renderLOSAP(); }        catch(e){}
   try { renderCompanyLOSAP(); } catch(e){}
   try { reprocessPendingCadCalls(); } catch(e){}
-  try { restoreClockState(); }  catch(e){}  // rebuilds session from active shifts if needed
+  try { restoreClockState(); }  catch(e){}
+  // Re-check special events visibility after sync (currentUserId now correct)
+  try {
+    var _seCanManage = canManageSpecialEvents();
+    var _mgCard = document.getElementById('specialEventsManagerCard');
+    var _mbCard = document.getElementById('specialEventsMemberCard');
+    if (_mgCard && _mbCard) {
+      if (_seCanManage) {
+        _mgCard.style.display = 'block';
+        _mbCard.style.display = 'none';
+      } else {
+        _mgCard.style.display = 'none';
+        _mbCard.style.display = 'block';
+      }
+    }
+  } catch(e){}  // rebuilds session from active shifts if needed
   console.log('[RBVFC] Synced from Firestore.');
 }
 
@@ -2049,21 +2064,40 @@ function openClassModal(editId) {
   if (!modal) { buildClassModal(); modal = document.getElementById('classModal'); }
   if (!modal) return;
 
-  // Reset form
+  // Reset all form fields
   ['cmName','cmDesc','cmInstructor','cmStartDate','cmEndDate','cmStartTime','cmEndTime'].forEach(function(id){
-    var el = document.getElementById(id);
-    if (el) el.value = '';
+    var el = document.getElementById(id); if (el) el.value = '';
   });
-  document.getElementById('cmEditId').value = editId || '';
+  var editIdEl = document.getElementById('cmEditId'); if (editIdEl) editIdEl.value = editId || '';
+  // Uncheck all day boxes
+  for (var d=0; d<7; d++) { var cb = document.getElementById('cmDay'+d); if (cb) cb.checked = false; }
+
+  // Populate member checkboxes
+  var memList = document.getElementById('cmMemberList');
+  if (memList) {
+    var enrolled = [];
+    if (editId) {
+      var _ecls = (state.trainingClasses||[]).find(function(c){ return c.id===editId; });
+      if (_ecls) enrolled = _ecls.members || [];
+    }
+    var mHtml = '';
+    (state.roster||[]).filter(function(m){ return m.active!==false; })
+      .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
+      .forEach(function(m){
+        var checked = enrolled.indexOf(m.id) >= 0 ? 'checked' : '';
+        var rankStr = m.ranks&&m.ranks.length ? m.ranks[0] : (m.rank||'');
+        mHtml += '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;border-bottom:1px solid #111;">'
+          + '<input type="checkbox" value="'+m.id+'" id="cmMbr_'+m.id+'" class="cm-member-cb" '+checked+' style="accent-color:#27AE60;">'
+          + '<span style="font-size:13px;color:#CCC;">'+m.last+', '+m.first+'</span>'
+          + (rankStr?'<span style="font-size:11px;color:#555;margin-left:auto;">'+rankStr+'</span>':'')
+          + '</label>';
+      });
+    memList.innerHTML = mHtml || '<p style="color:#555;font-size:12px;padding:8px;">No active members.</p>';
+  }
 
   if (editId) {
     var cls = (state.trainingClasses||[]).find(function(c){ return c.id===editId; });
     if (cls) {
-      ['cmName','cmDesc','cmInstructor','cmStartDate','cmEndDate','cmStartTime','cmEndTime'].forEach(function(id){
-        var field = id.replace('cm','').toLowerCase();
-        var el = document.getElementById(id);
-        if (el && cls[field] !== undefined) el.value = cls[field];
-      });
       var nameEl = document.getElementById('cmName'); if (nameEl) nameEl.value = cls.name||'';
       var descEl = document.getElementById('cmDesc'); if (descEl) descEl.value = cls.description||'';
       var instrEl = document.getElementById('cmInstructor'); if (instrEl) instrEl.value = cls.instructor||'';
@@ -2071,6 +2105,9 @@ function openClassModal(editId) {
       var edEl = document.getElementById('cmEndDate'); if (edEl) edEl.value = cls.endDate||'';
       var stEl = document.getElementById('cmStartTime'); if (stEl) stEl.value = cls.startTime||'';
       var etEl = document.getElementById('cmEndTime'); if (etEl) etEl.value = cls.endTime||'';
+      // Restore day checkboxes
+      var days = cls.daysOfWeek || [];
+      days.forEach(function(d){ var cb=document.getElementById('cmDay'+d); if(cb) cb.checked=true; });
     }
   }
 
@@ -2093,6 +2130,11 @@ function saveTrainingClass() {
   var eDate  = ((document.getElementById('cmEndDate')||{}).value||'').trim();
   var sTime  = ((document.getElementById('cmStartTime')||{}).value||'').trim();
   var eTime  = ((document.getElementById('cmEndTime')||{}).value||'').trim();
+  // Read day-of-week checkboxes
+  var daysOfWeek = [];
+  for (var _d=0; _d<7; _d++) { var _cb=document.getElementById('cmDay'+_d); if(_cb&&_cb.checked) daysOfWeek.push(_d); }
+  // Read enrolled members
+  var enrolledMembers = Array.from(document.querySelectorAll('.cm-member-cb:checked')||[]).map(function(cb){ return cb.value; });
 
   if (!name || !sDate) { showToast('\u26a0\ufe0f Class name and start date are required.'); return; }
 
@@ -2103,14 +2145,17 @@ function saveTrainingClass() {
     if (existing) {
       existing.name=name; existing.description=desc; existing.instructor=instr;
       existing.startDate=sDate; existing.endDate=eDate||sDate;
+      existing.daysOfWeek=daysOfWeek;
       existing.startTime=sTime; existing.endTime=eTime;
+      existing.members=enrolledMembers;
       existing.updatedAt=new Date().toISOString();
     }
   } else {
     state.trainingClasses.push({
       id: 'cls_'+Date.now(), name:name, description:desc, instructor:instr,
-      startDate:sDate, endDate:eDate||sDate, startTime:sTime, endTime:eTime,
-      members:[], active:true, createdAt:new Date().toISOString(),
+      startDate:sDate, endDate:eDate||sDate, daysOfWeek:daysOfWeek,
+      startTime:sTime, endTime:eTime,
+      members:enrolledMembers, active:true, createdAt:new Date().toISOString(),
       createdBy:state.currentUserId
     });
   }
@@ -2282,9 +2327,13 @@ function initTrainingTab() {
   if (dc) dc.style.display = isOfficer ? 'block' : 'none';
   var dhCard = document.getElementById('drillHistoryCard');
   if (dhCard) dhCard.style.display = isOfficer ? 'block' : 'none';
-  // Set drill date default to today
+  // Set drill date default and populate drill form
   var ddEl = document.getElementById('drillDate');
   if (ddEl && !ddEl.value) ddEl.value = new Date().toISOString().slice(0,10);
+  if (isOfficer) {
+    try { populateDrillReportBy(); }    catch(e){}
+    try { populateDrillMemberList(); }  catch(e){}
+  }
   // Training classes button
   var tcBtn = document.getElementById('trainingClassesOfficerBtn');
   if (tcBtn) tcBtn.style.display = isOfficer ? 'block' : 'none';
@@ -4950,6 +4999,35 @@ function toggleStaffingUnit(unitId) {
 
 // ── SHIFT HOURS HELPER ────────────────────────────────────────
 // ── DAILY STAFFING BOARD ──────────────────────────────────────
+
+// Helper: build officer assign HTML for one unit
+function _buildOfficerAssignHtml(uId, date, uPos) {
+  var uShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===uId; });
+  var uLabel  = UNIT_LABELS[uId] || uId;
+  var h = '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #222;">';
+  h += '<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">&#128100; Assign Member to '+uLabel+'</div>';
+  h += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">';
+  h += '<select id="assignPos_'+uId+'" onchange="updateAssignMemberDropdown(\''+uId+'\',\''+date+'\')" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
+  h += '<option value="">\u2014 Position \u2014</option>';
+  (uPos||[]).forEach(function(pos, i) {
+    var taken = uShifts.some(function(s){ return s.positionIndex===i && s.memberId; });
+    h += '<option value="'+i+'"'+(taken?' disabled style="color:#444;"':'')+'>'+pos+(taken?' (filled)':'')+'</option>';
+  });
+  h += '<option value="999">\uD83D\uDCDA Student</option>';
+  h += '</select>';
+  h += '<select id="assignMember_'+uId+'" style="flex:1;min-width:130px;background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
+  h += '<option value="">\u2014 Select Position First \u2014</option>';
+  h += '</select></div>';
+  h += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">';
+  h += '<label style="font-size:11px;color:#666;">Start:</label>';
+  h += '<input type="time" id="assignStart_'+uId+'" value="07:00" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:100px;">';
+  h += '<label style="font-size:11px;color:#666;">Hours:</label>';
+  h += '<input type="number" id="assignHours_'+uId+'" value="24" min="1" max="72" step="0.5" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:70px;">';
+  h += '<button class="btn btn-sm btn-primary" onclick="officerAssign(\''+date+'\',\''+uId+'\')" style="flex-shrink:0;">Assign</button>';
+  h += '</div></div>';
+  return h;
+}
+
 function renderStaffingBoard() {
   var container = document.getElementById('staffingBoardContainer');
   if (!container) return;
@@ -5254,8 +5332,12 @@ function renderStaffingBoard() {
 
     // ── Render primary unit positions ──
     renderUnitPositions(unitId, primarySt.shifts, primarySt.positions);
+    // Officer assign for primary unit — right below its positions
+    if (isOfficer) {
+      html += _buildOfficerAssignHtml(unitId, date, getUnitPositions(unitId));
+    }
 
-    // ── Render linked partner unit positions with divider ──
+    // ── Render linked partner unit positions with divider + inline assign ──
     linkedPartners.forEach(function(partnerId) {
       var pSt = unitStatus(partnerId);
       var pLabel = UNIT_LABELS[partnerId] || partnerId;
@@ -5264,48 +5346,12 @@ function renderStaffingBoard() {
       html += '<div style="margin-top:10px;padding-top:8px;border-top:2px dashed #2A2A2A;">';
       html += '<div style="font-size:11px;font-weight:700;letter-spacing:2px;color:'+pColor+';text-transform:uppercase;margin-bottom:6px;">'+pLabel+' POSITIONS</div>';
       renderUnitPositions(partnerId, pSt.shifts, pSt.positions);
+      // Officer assign for partner unit — right below its positions
+      if (isOfficer) {
+        html += _buildOfficerAssignHtml(partnerId, date, getUnitPositions(partnerId));
+      }
       html += '</div>';
     });
-
-    // ── Officer assign controls ──
-    if (isOfficer) {
-      allUnitsInGroup.forEach(function(uId) {
-        var uPos = UNIT_POSITIONS[uId] || [];
-        var uShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===uId; });
-        var uLabel  = UNIT_LABELS[uId] || uId;
-        html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #222;">';
-        if (isLinked) html += '<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Assign to '+uLabel+'</div>';
-        var eligible = (state.roster||[]).filter(function(m){ return m.active!==false; })
-          .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); });
-        // Build a lookup of members already on ANY shift this date (one shift only)
-        var assignedToday = {};
-        (state.staffingShifts||[]).forEach(function(s){
-          if (s.date === date && s.memberId) assignedToday[s.memberId] = s.unitId;
-        });
-        html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">';
-        // ── Position dropdown (LEFT) ──
-        html += '<select id="assignPos_'+uId+'" onchange="updateAssignMemberDropdown(\''+uId+'\',\''+date+'\')" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
-        html += '<option value="">\u2014 Position \u2014</option>';
-        uPos.forEach(function(pos, i) {
-          var taken = uShifts.some(function(s){ return s.positionIndex===i && s.memberId; });
-          html += '<option value="'+i+'"'+(taken?' disabled style="color:#444;"':'')+'>'+pos+(taken?' (filled)':'')+'</option>';
-        });
-        html += '<option value="999">\uD83D\uDCDA Student</option>';
-        html += '</select>';
-        // ── Member dropdown (RIGHT) — filtered by position on change ──
-        html += '<select id="assignMember_'+uId+'" style="flex:1;min-width:130px;background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
-        html += '<option value="">\u2014 Select Position First \u2014</option>';
-        html += '</select>';
-        html += '</div>';
-        html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">';
-        html += '<label style="font-size:11px;color:#666;">Start:</label>';
-        html += '<input type="time" id="assignStart_'+uId+'" value="07:00" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:100px;">';
-        html += '<label style="font-size:11px;color:#666;">Hours:</label>';
-        html += '<input type="number" id="assignHours_'+uId+'" value="24" min="1" max="72" step="0.5" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:70px;">';
-        html += '<button class="btn btn-sm btn-primary" onclick="officerAssign(\''+date+'\',\''+uId+'\')">Assign</button>';
-        html += '</div></div>';
-      });
-    }
 
     html += '</div>'; // end unit card
 
@@ -13661,7 +13707,8 @@ function applyBulkEdit() {
 <div id="classModal" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;padding:16px;">
   <div style="background:#141414;border:1px solid #2A2A2A;border-radius:14px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.8);">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px 12px;border-bottom:1px solid #1E1E1E;">
-      <h2 id="cmTitle" style="margin:0;font-size:17px;color:#F0F0F0;">Create Training Class</h2>
+      <h2 id="cmModalTitle" style="margin:0;font-size:17px;color:#F0F0F0;">Create Training Class</h2>
+      <input type="hidden" id="cmEditId" value="">
       <button onclick="closeClassModal()" style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
     </div>
     <div style="padding:18px 20px;">
