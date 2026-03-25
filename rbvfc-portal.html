@@ -1011,7 +1011,7 @@ function updateClockUI(in_) {
   // Staffing assignment badge
   if (staffBadge) {
     if (in_) {
-      var todayStr = new Date().toISOString().slice(0,10);
+      var todayStr = localDateStr();
       var myShift = (state.staffingShifts||[]).find(function(s){
         return s.date === todayStr && s.memberId === state.currentUserId && s.unitId;
       });
@@ -1306,7 +1306,7 @@ function initLogEntryTab() {
   }
   // Set default date to today
   var dateEl = document.getElementById('entryDate');
-  if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0,10);
+  if (dateEl && !dateEl.value) dateEl.value = localDateStr();
   renderHoursLog();
 }
 
@@ -1428,7 +1428,7 @@ function clearActivityForm() {
   var cat = document.getElementById('entryCategory'); if(cat) cat.value='';
   var meet = document.getElementById('meetingType'); if(meet) meet.value='';
   var drill = document.getElementById('drillType'); if(drill) drill.value='';
-  document.getElementById('entryDate').value = new Date().toISOString().slice(0,10);
+  document.getElementById('entryDate').value = localDateStr();
   updateCategoryHelp();
   removeCert();
 }
@@ -1493,7 +1493,7 @@ function initEmergencyTab() {
 
   // Set today's date as default
   var erDateEl = document.getElementById('erDate');
-  if (erDateEl && !erDateEl.value) erDateEl.value = new Date().toISOString().slice(0,10);
+  if (erDateEl && !erDateEl.value) erDateEl.value = localDateStr();
 
   // Log form: drivers and officers only (not admin members)
   var logCard = document.getElementById('erLogCard');
@@ -1618,7 +1618,7 @@ function saveEmergencyResponse() {
   updateStats();
 
   // Clear form
-  var erDate = document.getElementById('erDate'); if(erDate) erDate.value = new Date().toISOString().slice(0,10);
+  var erDate = document.getElementById('erDate'); if(erDate) erDate.value = localDateStr();
   var erAddr = document.getElementById('erAddress'); if(erAddr) erAddr.value='';
   var erTypeSel = document.getElementById('erType'); if(erTypeSel) erTypeSel.value='';
   var erAlarm = document.getElementById('erAlarmTime'); if(erAlarm) erAlarm.value='';
@@ -1949,7 +1949,7 @@ function showTrainingConfirmation(info) {
   var _nowMs = Date.now();
   var _shH = parseInt((shift.shiftStart||'0700').slice(0,2));
   var _shM = parseInt((shift.shiftStart||'0700').slice(2,4)||'0');
-  var _shiftStartMs = new Date(new Date().toISOString().slice(0,10)+'T'+(_shH<10?'0':'')+_shH+':'+(_shM<10?'0':'')+_shM+':00').getTime();
+  var _shiftStartMs = new Date(localDateStr()+'T'+(_shH<10?'0':'')+_shH+':'+(_shM<10?'0':'')+_shM+':00').getTime();
   var _maxBackHrs   = Math.max(0, (_nowMs - _shiftStartMs) / 3600000);
   var _shiftEndMs   = _shiftStartMs + (parseFloat(shift.shiftHours||24)) * 3600000;
   var _remainHrs    = Math.max(0, (_shiftEndMs - _nowMs) / 3600000);
@@ -3578,7 +3578,7 @@ function getAppsScriptCode() {
     "  var testId = createCalendarInvite(",
     "    Session.getActiveUser().getEmail(),",
     "    'Test Member',",
-    "    { title:'Co.13 TEST — Duty Shift', date: new Date().toISOString().slice(0,10),",
+    "    { title:'Co.13 TEST — Duty Shift', date: localDateStr(),",
     "      startHH:'07', startMM:'00', hours:24,",
     "      location:'Riviera Beach VFC, Station 13',",
     "      description:'This is a test calendar invite from the Co.13 portal.' }",
@@ -3723,7 +3723,7 @@ function toCSV(rows) {
   }).join('\n');
 }
 function exportAllData() {
-  download('rbvfc-backup-'+new Date().toISOString().slice(0,10)+'.json','application/json',JSON.stringify(state,null,2));
+  download('rbvfc-backup-'+localDateStr()+'.json','application/json',JSON.stringify(state,null,2));
 }
 function clearAllData() {
   if (!confirm('Clear ALL portal data? Type YES to confirm.')) return;
@@ -3852,7 +3852,7 @@ function initDrillTab() {
   if (submitCard) submitCard.style.display = 'block';
   // Set drill date default to today
   var dd = document.getElementById('drillDate');
-  if (dd && !dd.value) dd.value = new Date().toISOString().slice(0,10);
+  if (dd && !dd.value) dd.value = localDateStr();
   // Populate report-by and member list
   populateDrillReportBy();
   populateDrillMemberList();
@@ -3956,7 +3956,7 @@ function saveDrillReport() {
     memberId: reportBy,       // primary filer
     members: members,         // all participants
     date: drillDate,
-    submittedDate: new Date().toISOString().slice(0,10),
+    submittedDate: localDateStr(),
     submittedAt: new Date().toISOString(),
     drillCode: drillCode,
     drillName: drillName,
@@ -3978,7 +3978,7 @@ function saveDrillReport() {
 
 function clearDrillForm() {
   var drillDate = document.getElementById('drillDate');
-  if (drillDate) drillDate.value = new Date().toISOString().slice(0,10);
+  if (drillDate) drillDate.value = localDateStr();
   var drillType = document.getElementById('drillType'); if(drillType) drillType.value='';
   var drillCode = document.getElementById('drillCodeDisplay'); if(drillCode) drillCode.value='';
   var drillHours = document.getElementById('drillHours'); if(drillHours) drillHours.value='';
@@ -4094,6 +4094,15 @@ var UNIT_LABELS = {
   'Br13': 'Brush 13',    'RB13': 'Rescue Boat 13', 'FB13': 'Fire Boat 13',
   'CH13': 'Chief 13'
 };
+// ── Local date helper — always returns YYYY-MM-DD in the browser's local timezone ──
+function localDateStr(d) {
+  var dt = d || new Date();
+  var y = dt.getFullYear();
+  var m = dt.getMonth() + 1;
+  var day = dt.getDate();
+  return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+}
+
 
 // Minimum staffing to be considered "operational" (for monthly view coloring)
 var UNIT_MIN_STAFF = {
@@ -4568,7 +4577,7 @@ function renderStaffingAlerts() {
 function initMeetingForm() {
   // Set date default to today
   var de = document.getElementById('mtgDate');
-  if (de && !de.value) de.value = new Date().toISOString().slice(0,10);
+  if (de && !de.value) de.value = localDateStr();
   // Populate Member In Charge dropdown with officers + admin
   var sel = document.getElementById('mtgInCharge');
   if (!sel) return;
@@ -4611,7 +4620,7 @@ function initManualActivityCard() {
 
   // Default date to today
   var dateEl = document.getElementById('manualDate');
-  if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0,10);
+  if (dateEl && !dateEl.value) dateEl.value = localDateStr();
 
   // Populate member dropdown (active, non-admin members)
   var sel = document.getElementById('manualMemberId');
@@ -4841,7 +4850,7 @@ function staffNextDay() {
 }
 function staffingGoToday() {
   var el = document.getElementById('staffingDate');
-  if (el) el.value = new Date().toISOString().slice(0,10);
+  if (el) el.value = localDateStr();
   renderStaffingBoard();
 }
 
@@ -5046,8 +5055,8 @@ function renderStaffingBoard() {
           return true;
         });
         var adminRestricted = isAdminMember(member) && uId !== 'U13';
-        var isPastDate = date < new Date().toISOString().slice(0,10);
-        var isPastTime = date === new Date().toISOString().slice(0,10) && new Date().getHours() >= 20;
+        var isPastDate = date < localDateStr();
+        var isPastTime = date === localDateStr() && new Date().getHours() >= 20;
         var _elig = member ? checkStaffingEligibility(member, uId, posName) : { eligible:false, code:'NO_MEMBER', reason:'' };
         var canSignUp = !hasConflict && !adminRestricted && !isPastDate && !isPastTime && _elig.eligible && !alreadyHaveSlot && !isFullyCovered;
 
@@ -5413,7 +5422,7 @@ function confirmSignUp() {
   }
 
   // Block sign-up for past dates
-  var today = new Date().toISOString().slice(0,10);
+  var today = localDateStr();
   if (date < today) { showToast('\u26A0\uFE0F Cannot sign up for a past date.'); return; }
   // Check if already in THIS specific position slot
   var _alreadyInPos = (state.staffingShifts||[]).find(function(s){
@@ -5645,7 +5654,7 @@ function renderMonthlyCalendar() {
   for (var day=1; day<=daysInMonth; day++) {
     var status = getDayStatus(day);
     var date = yr+'-'+(mo+1<10?'0':'')+(mo+1)+'-'+(day<10?'0':'')+day;
-    var isToday = date === new Date().toISOString().slice(0,10);
+    var isToday = date === localDateStr();
     html += '<div onclick="calendarDayClick(\''+date+'\')" style="cursor:pointer;border-radius:6px;border:1px solid '+(isToday?'#C8102E':'#222')+';background:#181818;padding:4px;min-height:52px;position:relative;transition:background .15s;" onmouseover="this.style.background=\'#222\'" onmouseout="this.style.background=\'#181818\'">';
     html += '<div style="font-size:11px;font-weight:700;color:'+(isToday?'#C8102E':'#888')+';margin-bottom:3px;">'+day+'</div>';
     // Color dots per unit — group linked units (E131/Tk13) into one dot
@@ -5745,7 +5754,7 @@ function notifyUnderstaffedDay(date) {
 function clearStaleClockedInFlags() {
   // If a shift has clockedIn=true but its date is in the past and has no clockedOutAt,
   // it was never properly clocked out. Mark it as complete.
-  var today = new Date().toISOString().slice(0,10);
+  var today = localDateStr();
   var hadStale = false;
   (state.staffingShifts||[]).forEach(function(s) {
     // Normalize legacy field names before checking
@@ -5761,7 +5770,7 @@ function clearStaleClockedInFlags() {
 }
 
 function _canClockInNow(shiftDate, shiftStartHHMM) {
-  var today = new Date().toISOString().slice(0, 10);
+  var today = localDateStr();
   if (shiftDate && shiftDate !== today) return false;
   return true;
 }
@@ -5771,7 +5780,7 @@ function _canClockInNow(shiftDate, shiftStartHHMM) {
 function _checkShiftClockWindow(shift) {
   if (!shift) return { ok: false, reason: 'Shift not found.' };
   var now = new Date();
-  var today = now.toISOString().slice(0,10);
+  var today = localDateStr(now);
   if (shift.date !== today) return { ok: false, reason: 'This shift is not scheduled for today.' };
 
   var sh = parseInt((shift.shiftStart||'0700').slice(0,2));
@@ -5813,7 +5822,7 @@ function staffClockIn(elOrId) {
   // Can't clock into a shift while already clocked into an overlapping one
   // Use shift.memberId — officer may be clocking in a different member
   var targetMemberId = shift.memberId || state.currentUserId;
-  var today2 = new Date().toISOString().slice(0,10);
+  var today2 = localDateStr();
   var nowShift = (state.staffingShifts||[]).find(function(s){
     // Only consider active (clocked-in but not out) shifts from today
     if (s.id === shift.id) return false;
@@ -6056,7 +6065,7 @@ function confirmStaffClockIn() {
   var startTime = new Date(startMs);
   // Clamp: don't go before the shift's scheduled start
   if (shift.shiftStart) {
-    var today = now.toISOString().slice(0,10);
+    var today = localDateStr(now);
     var sh = parseInt(shift.shiftStart.slice(0,2)), sm = parseInt(shift.shiftStart.slice(2)||'0');
     var sched = new Date(today+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00');
     if (startTime < sched) startTime = sched;
@@ -6158,7 +6167,7 @@ function renderMyShifts() {
   var container = document.getElementById('myShiftsContainer');
   if (!container) return;
   var uid   = state.currentUserId;
-  var today = new Date().toISOString().slice(0,10);
+  var today = localDateStr();
 
   var myShifts = (state.staffingShifts||[])
     .filter(function(s){ return s.memberId===uid && s.date >= today; })
@@ -6344,7 +6353,7 @@ function startStaffingReminders() {
 function checkStaffingReminders() {
   var uid = state.currentUserId;
   if (!uid) return;
-  var today = new Date().toISOString().slice(0,10);
+  var today = localDateStr();
   var hour  = new Date().getHours();
   (state.staffingShifts||[]).forEach(function(s) {
     if (s.memberId!==uid || s.date!==today || s.clockedIn || s.reminded) return;
@@ -6464,7 +6473,7 @@ function dismissReminder() { _hideTopBanner('staffingReminderBanner'); }
 // ── ALERTS ────────────────────────────────────────────────────
 function autoFillAlertMsg() {
   var dateEl = document.getElementById('staffingDate');
-  var date = dateEl ? dateEl.value : new Date().toISOString().slice(0,10);
+  var date = dateEl ? dateEl.value : localDateStr();
   notifyUnderstaffedDay(date);
 }
 function resolveAlertTargets(groupId, individualIds) {
@@ -6719,7 +6728,7 @@ function renderSpecialEvents(containerId) {
   var container = document.getElementById(containerId || 'specialEventsContainer');
   if (!container) return;
   var uid = state.currentUserId;
-  var today = new Date().toISOString().slice(0,10);
+  var today = localDateStr();
 
   // Sort: upcoming first (asc), then past (desc)
   var upcoming = (state.specialEvents||[]).filter(function(ev){ return ev.date >= today; })
@@ -6978,7 +6987,7 @@ function toggleMtgRecurrenceOpts() {
 }
 
 function generateMeetingOccurrences(mtg, fromDate, maxCount) {
-  var from = fromDate || new Date().toISOString().slice(0,10);
+  var from = fromDate || localDateStr();
   var max = maxCount || 52;
   var freq = mtg.recurrence && mtg.recurrence.freq;
   var until = (mtg.recurrence && mtg.recurrence.until) || null;
@@ -7005,7 +7014,7 @@ function generateMeetingOccurrences(mtg, fromDate, maxCount) {
 }
 
 function nextMeetingOccurrence(mtg) {
-  var today = new Date().toISOString().slice(0,10);
+  var today = localDateStr();
   var dates = generateMeetingOccurrences(mtg, today, 1);
   return dates.length ? dates[0] : null;
 }
@@ -7016,7 +7025,7 @@ function initMeetingsCard() {
   if (card) card.style.display = canManage ? 'block' : 'none';
   if (canManage) renderMeetingsList();
   var de = document.getElementById('mtgDate');
-  if (de && !de.value) de.value = new Date().toISOString().slice(0,10);
+  if (de && !de.value) de.value = localDateStr();
 }
 
 function saveMeeting() {
@@ -7055,7 +7064,7 @@ function saveMeeting() {
   var dr=document.getElementById('mtgDuration'); if(dr) dr.value='60';
   var re2=document.getElementById('mtgRecurrence'); if(re2) re2.value='';
   toggleMtgRecurrenceOpts();
-  var de=document.getElementById('mtgDate'); if(de) de.value=new Date().toISOString().slice(0,10);
+  var de=document.getElementById('mtgDate'); if(de) de.value=localDateStr();
   renderMeetingsList();
   try { renderMyShifts(); } catch(e){}
   showToast('\u2705 Meeting scheduled'+(recurrence?' (repeating)':'')+': '+title);
@@ -7070,7 +7079,7 @@ function cancelEditMeeting() {
   toggleMtgRecurrenceOpts();
   var sb=document.getElementById('mtgSubmitBtn'); if(sb) sb.textContent='\u2713 Schedule';
   var cb=document.getElementById('mtgCancelBtn'); if(cb) cb.style.display='none';
-  var de=document.getElementById('mtgDate'); if(de) de.value=new Date().toISOString().slice(0,10);
+  var de=document.getElementById('mtgDate'); if(de) de.value=localDateStr();
 }
 
 function openEditMeeting(mtgId) {
@@ -7335,7 +7344,7 @@ function renderSpecialEventAdmin() {
   }
   var container = document.getElementById('specialEventsManagerContainer');
   if (!container) return;
-  var today = new Date().toISOString().slice(0,10);
+  var today = localDateStr();
   var upcoming = (state.specialEvents||[]).filter(function(ev){ return ev.date >= today; })
     .sort(function(a,b){ return (a.date+a.time).localeCompare(b.date+b.time); });
   var past = (state.specialEvents||[]).filter(function(ev){ return ev.date < today; })
@@ -9019,10 +9028,10 @@ function renderCompanyLOSAP() {
     duty:'Station Duty', meeting:'Meeting', training:'Training',
     collateral:'Collateral Duty', fundraiser:'Fundraiser/Event', other:'Other'
   };
-  var todayStr = new Date().toISOString().slice(0,10);
+  var todayStr = localDateStr();
 
   // 1. Members with an open clock session started TODAY
-  var _todayStr = new Date().toISOString().slice(0,10);
+  var _todayStr = localDateStr();
   (state.sessions||[]).filter(function(s){ return !s.end && s.start && s.start.slice(0,10)===_todayStr; }).forEach(function(s){
     if (!s.userId) return;
     // Check if this member also has a staffing assignment today — if so, show unit+position
@@ -9256,7 +9265,7 @@ function confirmCsvImport() {
 function exportJSON() {
   var blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
   var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='rbvfc-data-'+new Date().toISOString().slice(0,10)+'.json'; a.click();
+  a.download='rbvfc-data-'+localDateStr()+'.json'; a.click();
 }
 function exportCSV() {
   var rows=[['Last','First','Badge','Rank','Role','Points','Hours']];
@@ -9267,7 +9276,7 @@ function exportCSV() {
   });
   var csv=rows.map(function(r){ return r.join(','); }).join('\n');
   var blob=new Blob([csv],{type:'text/csv'}); var a=document.createElement('a');
-  a.href=URL.createObjectURL(blob); a.download='rbvfc-members-'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+  a.href=URL.createObjectURL(blob); a.download='rbvfc-members-'+localDateStr()+'.csv'; a.click();
 }
 function importJSONBackup(file) {
   if (!file) return;
@@ -9693,7 +9702,7 @@ function restoreClockState() {
   }
   // If no open session but member has a clockedIn staffing shift today → restore it
   if (!state.currentSession && state.currentUserId) {
-    var todayStr = new Date().toISOString().slice(0,10);
+    var todayStr = localDateStr();
     var activeShift = (state.staffingShifts||[]).find(function(s){
       return s.memberId === state.currentUserId &&
              s.date === todayStr &&
@@ -9717,7 +9726,7 @@ function restoreClockState() {
   }
   // If still no open session, check for an open class attendance record today
   if (!state.currentSession && state.currentUserId) {
-    var todayStr2 = new Date().toISOString().slice(0,10);
+    var todayStr2 = localDateStr();
     var openAtt = (state.classAttendance||[]).find(function(a){
       return a.memberId === state.currentUserId &&
              a.sessionDate === todayStr2 &&
@@ -11257,7 +11266,7 @@ function erMarkAutoStaffed() {
     var cb = document.getElementById('unit_'+u); return cb && cb.checked;
   });
   var dateEl = document.getElementById('erDate');
-  var dateVal = dateEl ? dateEl.value : new Date().toISOString().slice(0,10);
+  var dateVal = dateEl ? dateEl.value : localDateStr();
 
   // Find all members staffed on those units today
   var autoIds = [];
