@@ -3201,11 +3201,25 @@ function onAdminTabShow() {
   var pinCard  = document.getElementById('adminPinCard');
   if (pinCard)  pinCard.style.display  = isAdmin2 ? '' : 'none';
 
-  // Position Rank Requirements — admin only
-  var rankRequirementsCard = document.getElementById('rankRequirementsCard');
-  if (rankRequirementsCard) rankRequirementsCard.style.display = isAdmin2 ? '' : 'none';
-  var unitPosMgmtCard = document.getElementById('unitPositionMgmtCard');
-  if (unitPosMgmtCard) unitPosMgmtCard.style.display = isAdmin2 ? '' : 'none';
+  // ── Admin-only cards ──────────────────────────────────────────────────────
+  var _adminOnly = [
+    'dataMgmtCard',           // Data Management
+    'unitPositionMgmtCard',   // Unit Position Management
+    'rankRequirementsCard',   // Position Rank Requirements
+    'memberMgmtCard',         // Member Management
+    'firestoreConfigCard',    // Cloud Sync (Firestore)
+    'logoMgmtCard',           // Company Logo
+    'publicLinkCard',         // Public View Link
+    'adminPinCard',           // Change PIN
+  ];
+  _adminOnly.forEach(function(cardId) {
+    var el = document.getElementById(cardId);
+    if (el) el.style.display = isAdmin2 ? '' : 'none';
+  });
+
+  // ── Officer-only cards (not admin-only) ───────────────────────────────────
+  // rawDataCard: visible to officers AND admins
+  if (rawCard) rawCard.style.display = isOfficer2 ? '' : 'none';
 }
 
 // ═══════════════════════════════════════════════════
