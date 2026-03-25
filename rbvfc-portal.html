@@ -8134,8 +8134,9 @@ function boot() {
       {id:'s_p25',userId:'mbr_015',start:_ago(45,6),activity:'duty',note:'',end:_ago(45,2),duration:4*3600}
     ];
 
-    state.currentUserId = 'rbvfc_admin_001';
-    state.currentSession = state.sessions[0];
+    // Do NOT auto-login — always show login screen on first load
+    state.currentUserId = null;
+    state.currentSession = null;
     state.adminPin = '0000';
 
     state.emergencyResponses = [
