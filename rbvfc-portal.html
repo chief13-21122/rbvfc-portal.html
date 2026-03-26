@@ -4362,8 +4362,7 @@ var UNIT_MIN_STAFF = {
 
 // Units that share the same crew and are staffed/displayed together
 var LINKED_UNIT_GROUPS = [
-  ['Tk13']           // Truck 13 — combined crew toggle shown on its card
-                     // Engine 131 is always independently signable
+  ['e131', 'Tk13']   // Engine 131 / Truck 13 share crew by default
 ];
 function getLinkedGroup(unitId) {
   for (var _g=0; _g<LINKED_UNIT_GROUPS.length; _g++) {
