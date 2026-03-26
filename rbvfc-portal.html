@@ -1392,7 +1392,7 @@ function saveActivity() {
     });
     save();
     clearActivityForm();
-    showToast('✅ Training submitted for Fire Chief approval.');
+    showToast('✅ Training submitted!'); showSubmitConfirmation('Your training submission is pending Fire Chief approval.', '🎖️');
     try { renderMyPendingTraining(); } catch(e) {}
     return;
   } else if (cat==='drill') {
@@ -2169,7 +2169,7 @@ function saveTrainingClass() {
   save();
   closeClassModal();
   renderTrainingClasses();
-  showToast('\u2705 Class '+(editId?'updated':'created')+': '+name);
+  showToast('\u2705 Class '+(editId?'updated':'created')+'!'); showSubmitConfirmation('Class \"'+name+'\" '+(editId?'updated':'created')+' successfully.', '📚');
 }
 
 function deleteTrainingClass(classId) {
@@ -3998,12 +3998,11 @@ function drillClearAll() {
 
 function drillTypeChanged() {
   var sel = document.getElementById('drillType');
+  if (!sel) return;
+  var val = sel.value;
   var codeEl = document.getElementById('drillCodeDisplay');
-  if (!sel || !codeEl) return;
-  var val = sel.value; // format: "CODE|Description"
-  if (!val) { codeEl.value = ''; return; }
-  var code = val.split('|')[0];
-  codeEl.value = code;
+  if (codeEl) codeEl.value = val ? val.split('|')[0] : '';
+  // No-op if drillCodeDisplay doesn't exist — field is optional display-only
 }
 
 function renderDrillReportHistory() {
@@ -4038,6 +4037,23 @@ function renderDrillReportHistory() {
     h += '</div></div>';
   });
   container.innerHTML = h;
+}
+
+
+// ── Submission confirmation banner ────────────────────────────────────────────
+function showSubmitConfirmation(msg, iconStr) {
+  var icon = iconStr || '✅';
+  var banner = document.createElement('div');
+  banner.style.cssText = 'position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:9999;'
+    + 'background:#0D1F0D;border:1.5px solid #27AE60;border-radius:12px;padding:14px 20px;'
+    + 'display:flex;align-items:center;gap:10px;max-width:340px;width:90%;'
+    + 'box-shadow:0 4px 20px rgba(39,174,96,0.3);animation:slideDown .25s ease;';
+  banner.innerHTML = '<span style="font-size:20px;">'+icon+'</span>'
+    + '<div><div style="font-size:13px;font-weight:700;color:#27AE60;">Submitted</div>'
+    + '<div style="font-size:12px;color:#AAA;margin-top:1px;">'+msg+'</div></div>';
+  document.body.appendChild(banner);
+  setTimeout(function(){ banner.style.opacity='0'; banner.style.transition='opacity .4s'; 
+    setTimeout(function(){ if(banner.parentNode) banner.parentNode.removeChild(banner); }, 400); }, 3000);
 }
 
 function saveDrillReport() {
@@ -4098,7 +4114,7 @@ function saveDrillReport() {
   var reporterName = '';
   var rep = (state.roster||[]).find(function(m){ return m.id===reportBy; });
   if (rep) reporterName = rep.first+' '+rep.last;
-  showToast('✅ Drill report submitted for '+members.length+' members — awaiting Fire Chief approval.');
+  showToast('✅ Drill report submitted!'); showSubmitConfirmation('Drill report for '+members.length+' member'+(members.length===1?'':'s')+' submitted. Awaiting approval.', '🔧');
 }
 
 function clearDrillForm() {
@@ -5010,8 +5026,36 @@ function toggleStaffingUnit(unitId) {
 function _buildOfficerAssignHtml(uId, date, uPos) {
   var uShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===uId; });
   var uLabel  = UNIT_LABELS[uId] || uId;
+
+  // Calculate next available window
+  var coveredMins = 0;
+  uShifts.forEach(function(s){ coveredMins += (s.shiftHours||24)*60; });
+  var totalMinutes = 24*60;
+  var remainingHrs = Math.max(0, (totalMinutes - coveredMins) / 60).toFixed(1);
+  // Find the latest shift end to suggest a start time
+  var suggestStart = '07:00'; var suggestHours = 24;
+  if (uShifts.length > 0) {
+    var latestEndMs = 0;
+    uShifts.forEach(function(s){
+      var sh = parseInt((s.shiftStart||'0700').slice(0,2));
+      var sm = parseInt((s.shiftStart||'0700').slice(2,4)||'0');
+      var startMs = sh*60+sm;
+      var endMs = startMs + (s.shiftHours||24)*60;
+      if (endMs > latestEndMs) latestEndMs = endMs;
+    });
+    var hh = Math.floor(latestEndMs/60)%24;
+    var mm = latestEndMs%60;
+    suggestStart = (hh<10?'0':'')+hh+':'+(mm<10?'0':'')+mm;
+    suggestHours = parseFloat(remainingHrs) || 24;
+  }
+
   var h = '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #222;">';
-  h += '<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">&#128100; Assign Member to '+uLabel+'</div>';
+  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+  h += '<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;flex:1;">&#128100; Assign Member to '+uLabel+'</div>';
+  if (parseFloat(remainingHrs) > 0 && parseFloat(remainingHrs) < 24) {
+    h += '<button class="btn btn-sm" onclick="fillAvailableWindow(&quot;'+uId+'&quot;,&quot;'+suggestStart+'&quot;,'+suggestHours+')" style="font-size:10px;padding:2px 8px;background:#1A3A2A;border-color:#27AE60;color:#27AE60;">&#128203; Fill Available ('+remainingHrs+'h)</button>';
+  }
+  h += '</div>';
   h += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">';
   h += '<select id="assignPos_'+uId+'" onchange="updateAssignMemberDropdown(\''+uId+'\',\''+date+'\')" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;">';
   h += '<option value="">\u2014 Position \u2014</option>';
@@ -5694,6 +5738,15 @@ function updateAssignMemberDropdown(unitId, date) {
   memSel.innerHTML = opts;
 }
 
+
+function fillAvailableWindow(unitId, startTime, hours) {
+  var startEl = document.getElementById('assignStart_'+unitId);
+  var hoursEl = document.getElementById('assignHours_'+unitId);
+  if (startEl) startEl.value = startTime;
+  if (hoursEl) hoursEl.value = hours;
+  showToast('\u2139\ufe0f Start and hours set to fill available window. Select position and member.');
+}
+
 function officerAssign(date, unitId) {
   var memberSel = document.getElementById('assignMember_' + unitId);
   var posSel    = document.getElementById('assignPos_'    + unitId);
@@ -5746,12 +5799,34 @@ function officerAssign(date, unitId) {
     status:        'assigned'
   };
   state.staffingShifts.push(assignedShift);  // push BEFORE save so it persists
+
+  // Send assignment notification — member must acknowledge
+  var assignerMe = (state.roster||[]).find(function(r){ return r.id===state.currentUserId; });
+  var assignerName = assignerMe ? assignerMe.last+', '+assignerMe.first : 'An officer';
+  if (!Array.isArray(state.staffingAlerts)) state.staffingAlerts = [];
+  state.staffingAlerts.unshift({
+    id: 'asgn_'+Date.now(),
+    type: 'assignment',
+    targetMembers: [memberId],
+    shiftId: assignedShift.id,
+    sentBy: state.currentUserId,
+    sentAt: new Date().toISOString(),
+    needsAck: true,
+    clears: [],
+    msg: '\ud83d\udcc5 You have been assigned: '+posName+' on '+(UNIT_LABELS[unitId]||unitId)
+      + ' for '+date+' ('+assignedShift.shiftStart+', '+hours+'h).'
+      + ' Assigned by '+assignerName+'.'
+  });
+
   save();
   renderStaffingBoard();
   renderMyShifts();
+  renderStaffingAlerts();
   var m2 = (state.roster||[]).find(function(r){ return r.id===memberId; });
   sendCalendarInvite(memberId, shiftToCalDetails(assignedShift));
-  showToast('\u2705 '+(m2?m2.last+', '+m2.first:'Member')+' assigned to '+posName+'. Calendar invite sent!');
+  var mName = m2?m2.last+', '+m2.first:'Member';
+  showToast('\u2705 '+mName+' assigned to '+posName+'.');
+  showSubmitConfirmation(mName+' assigned to '+posName+' on '+date+'. Notification sent.', '\ud83d\udcc5');
 }
 
 // ── MONTHLY CALENDAR VIEW ─────────────────────────────────────
@@ -6398,7 +6473,14 @@ function renderMyShifts() {
       if (isToday && !s.clockedIn) html += '<div style="font-size:11px;color:#F5A623;font-weight:700;margin-top:2px;">&#9888; Shift starts today &mdash; please clock in!</div>';
       if (s.clockedIn) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#10003; Clocked In ' + new Date(s.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '</div>';
       html += '</div>';
-      if (isToday && !s.clockedIn) html += '<button class="btn btn-primary btn-sm" onclick="staffClockIn(\'' + s.id + '\')">Clock In</button>';
+      if (isToday && !s.clockedIn) {
+        var _ciWin = _checkShiftClockWindow(s);
+        if (_ciWin.ok) {
+          html += '<button class="btn btn-primary btn-sm" onclick="staffClockIn(\\\'' + s.id + '\\\')">⏰ Clock In</button>';
+        } else {
+          html += '<span style="font-size:10px;color:#555;display:block;margin-top:2px;">' + _ciWin.reason + '</span>';
+        }
+      }
       if (!s.clockedIn) html += '<button class="btn btn-danger btn-sm" onclick="cancelShift(\'' + s.id + '\')">&#10005;</button>';
       html += '</div>';
 
@@ -7279,7 +7361,7 @@ function saveMeeting() {
   var de=document.getElementById('mtgDate'); if(de) de.value=localDateStr();
   renderMeetingsList();
   try { renderMyShifts(); } catch(e){}
-  showToast('\u2705 Meeting scheduled'+(recurrence?' (repeating)':'')+': '+title);
+  showToast('\u2705 Meeting scheduled!'); showSubmitConfirmation('\"'+title+'\" '+(recurrence?'(repeating) ':'')+'has been scheduled.', '📅');
 }
 
 function cancelEditMeeting() {
@@ -7760,7 +7842,7 @@ function saveSpecialEvent() {
   var posC = document.getElementById('sePositionsContainer');
   if (posC) posC.innerHTML = sePositionRow();
   renderBothSpecialEventViews();
-  showToast('✅ Event "'+title+'" created.');
+  showToast('✅ Event created!'); showSubmitConfirmation('\"'+title+'\" has been added to the schedule.', '🎟️');
 }
 
 function sePositionRow(name, slots, idx) {
