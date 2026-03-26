@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -678,11 +681,20 @@ function _mergeAndRender(remote) {
       if (_seCanManage) {
         _mgCard.style.display = 'block';
         _mbCard.style.display = 'none';
+        // Re-populate Created By and In Charge if they're blank
+        var _cDisp = document.getElementById('seCreatedByDisplay');
+        if (_cDisp && !_cDisp.textContent) { try { renderSpecialEventAdmin(); } catch(e){} }
       } else {
         _mgCard.style.display = 'none';
         _mbCard.style.display = 'block';
       }
     }
+    // Re-show drill card for officers (Firestore sync can reset DOM state)
+    var _uid2 = state.currentUserId;
+    var _me2 = _uid2 ? (state.roster||[]).find(function(m){ return m.id===_uid2; }) : null;
+    var _isOff2 = _me2 && (_me2.appRole==='officer'||_me2.appRole==='admin');
+    var _dc2 = document.getElementById('drillSubmitCard');
+    if (_dc2 && _isOff2 && _dc2.style.display==='none') { _dc2.style.display='block'; }
   } catch(e){}  // rebuilds session from active shifts if needed
   console.log('[RBVFC] Synced from Firestore.');
 }
@@ -4142,6 +4154,15 @@ function showSubmitConfirmation(msg, iconStr) {
 }
 
 function saveDrillReport() {
+  // Re-populate reporter in case Firestore sync cleared it
+  if (!(document.getElementById('drillReportBy')||{}).value) {
+    try { populateDrillReportBy(); } catch(e){}
+  }
+  // Re-populate member list if empty
+  var _dml = document.getElementById('drillMemberList');
+  if (_dml && !_dml.children.length) {
+    try { populateDrillMemberList(); } catch(e){}
+  }
   var drillDate    = (document.getElementById('drillDate')||{}).value||'';
   var reportBy     = (document.getElementById('drillReportBy')||{}).value||'';
   var drillTypeVal = (document.getElementById('drillType')||{}).value||'';
@@ -6555,7 +6576,7 @@ function renderMyShifts() {
       html += '<div style="flex:1;">'
         + '<div style="font-weight:700;font-size:14px;color:#F0F0F0;">' + UNIT_LABELS[s.unitId] + '</div>'
         + '<div style="font-size:12px;color:#888;">' + s.position + ' &nbsp;&middot;&nbsp; ' + shiftLabel(s) + '</div>';
-      if (isToday && !s.clockedIn) html += '<div style="font-size:11px;color:#F5A623;font-weight:700;margin-top:2px;">&#9888; Shift starts today &mdash; please clock in!</div>';
+      if (isToday && !s.clockedIn) html += '<div style="font-size:11px;color:#F5A623;font-weight:700;margin-top:2px;">&#9888; Shift starts today</div>';
       if (s.clockedIn) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#10003; Clocked In ' + new Date(s.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '</div>';
       html += '</div>';
       if (isToday && !s.clockedIn) {
