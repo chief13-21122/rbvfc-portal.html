@@ -972,6 +972,7 @@ function showTab(id) {
   // Refresh hooks
   if (id === 'admin') onAdminTabShow();
   if (id === 'drill') initDrillTab();
+  if (id === 'clock')    { try { renderMyShifts(); } catch(e){} }
   if (id === 'staffing') initStaffingTab();
   if (id === 'training') initTrainingTab();
   if (id === 'losap') renderLOSAP();
@@ -1669,7 +1670,7 @@ function renderEmergencyResponses() {
   var isOfficer = member && (member.appRole==='officer'||member.appRole==='admin');
   var responses = (state.emergencyResponses||[]).slice(0,100);
   if (responses.length===0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:#666;">No emergency responses logged yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#666;">No emergency responses logged yet.</td></tr>';
     return;
   }
   responses.forEach(function(r) {
@@ -1699,6 +1700,7 @@ function renderEmergencyResponses() {
       '<td style="padding:8px;color:#CCC;white-space:nowrap;">'+r.date+(alarmStr?'<br>'+alarmStr:'')+'</td>'+
       '<td style="padding:8px;color:#CCC;">'+_formatCadAddress(r.address)+incNum+needsBadge+'</td>'+
       '<td style="padding:8px;">'+typeStr+'</td>'+
+      '<td style="padding:8px;font-size:11px;color:#888;white-space:nowrap;">'+(r.boxArea||'—')+'</td>'+
       '<td style="padding:8px;font-size:11px;">'+unitPills+'</td>'+
       '<td style="padding:8px;font-size:11px;color:#888;max-width:200px;">'+memberNames+'</td>'+
       '<td style="padding:8px;">'+loggedCell+'</td>'+
@@ -6326,7 +6328,8 @@ function removeFromShift(elOrId) {
 // ── MY SHIFTS ─────────────────────────────────────────────────
 function renderMyShifts() {
   var container = document.getElementById('myShiftsContainer');
-  if (!container) return;
+  var clockContainer = document.getElementById('clockTabMyShiftsContainer');
+  if (!container && !clockContainer) return;
   var uid   = state.currentUserId;
   var today = localDateStr();
 
@@ -6502,6 +6505,7 @@ function renderMyShifts() {
     }
   });
   container.innerHTML = html;
+  if (clockContainer) clockContainer.innerHTML = container ? container.innerHTML : html;
 }
 
 
@@ -6516,8 +6520,14 @@ function checkStaffingReminders() {
   if (!uid) return;
   var today = localDateStr();
   var hour  = new Date().getHours();
+  // Skip reminders entirely if member is already clocked into any session
+  var alreadyClocked = state.currentSession && state.currentSession.userId === uid && !state.currentSession.end;
+  if (alreadyClocked) { if (hour >= 6) checkClassReminders(uid, today); return; }
   (state.staffingShifts||[]).forEach(function(s) {
     if (s.memberId!==uid || s.date!==today || s.clockedIn || s.reminded) return;
+    // Also skip if shift window hasn't opened yet (before shift start time)
+    var win = _checkShiftClockWindow(s);
+    if (!win.ok) return;
     if (hour >= 6) { s.reminded = true; save(); showStaffingReminder(s); }
   });
   if (hour >= 6) checkClassReminders(uid, today);
@@ -7123,6 +7133,11 @@ function clockInSpecialEvent(elOrId) {
     return;
   }
   if (now > evEnd) { showToast('\u26a0\ufe0f This event has already ended.'); return; }
+  // Block if already clocked into another session
+  if (state.currentSession && state.currentSession.userId === uid && !state.currentSession.end) {
+    showToast('\u26a0\ufe0f You are already clocked in. Clock out first.');
+    return;
+  }
   signup.clockedIn = true;
   signup.clockedInAt = now.toISOString();
   save(); renderBothSpecialEventViews();
@@ -7345,6 +7360,11 @@ function clockInMeeting(mtgId, occurrenceDate) {
     return;
   }
   if (now > endDt) { showToast('\u26a0\ufe0f This meeting has already ended.'); return; }
+  // Block if already clocked into another session
+  if (state.currentSession && state.currentSession.userId === uid && !state.currentSession.end) {
+    showToast('\u26a0\ufe0f You are already clocked in. Clock out first.');
+    return;
+  }
   if (!Array.isArray(state.meetingAttendance)) state.meetingAttendance = [];
   var att = state.meetingAttendance.find(function(a){ return a.mtgId===mtgId&&a.date===occurrenceDate&&a.memberId===uid; });
   if (!att) {
@@ -9547,20 +9567,31 @@ function saveCadScriptUrl() {
   else updateCadStatusPanel('none', null);
 }
 function _formatCadAddress(raw) {
-  // Ensure street address comes first, then apartment/business name
   if (!raw) return '';
-  // Common pattern: "Apt 301 / 123 Main St" or "Store Name / 456 Oak Ave"
-  // Or "123 Main St, Apt 4B" — already correct
-  // Detect if address starts with a number (street) or name (business/apt)
   var trimmed = raw.trim();
-  // If first token is a number, it's already street-first
-  if (/^\d/.test(trimmed)) return trimmed;
-  // If contains a "/" separator — rearrange: "BizName / 123 St" -> "123 St — BizName"
+  // Strip empty leading label patterns from CAD: "Apartment: , 123 Main St"
+  // Pattern: "Word(s):  , STREET" — remove everything before first digit
+  trimmed = trimmed.replace(/^[A-Za-z ]+:\s*,?\s*/, '').trim();
+  // If starts with a digit, it's already street-first — check for apt suffix
+  if (/^\d/.test(trimmed)) {
+    // "123 Main St, Apt 4B" — already correct
+    return trimmed;
+  }
+  // "BizName / 123 St" or "Apt 4B / 123 Main St" — rearrange
   if (trimmed.indexOf(' / ') >= 0) {
     var parts = trimmed.split(' / ');
     var streetPart = parts.find(function(p){ return /^\d/.test(p.trim()); });
-    var namePart   = parts.filter(function(p){ return p !== streetPart; }).join(' / ');
-    if (streetPart) return streetPart.trim() + (namePart ? ' — ' + namePart.trim() : '');
+    var namePart   = parts.filter(function(p){ return p !== streetPart; }).join(', ');
+    if (streetPart) return streetPart.trim() + (namePart ? ', ' + namePart.trim() : '');
+  }
+  // Comma-separated: try to put digit-leading part first
+  if (trimmed.indexOf(',') >= 0) {
+    var cParts = trimmed.split(',').map(function(p){ return p.trim(); }).filter(Boolean);
+    var street = cParts.find(function(p){ return /^\d/.test(p); });
+    if (street) {
+      var rest = cParts.filter(function(p){ return p !== street; }).join(', ');
+      return street + (rest ? ', ' + rest : '');
+    }
   }
   return trimmed;
 }
@@ -12224,6 +12255,18 @@ function applyBulkEdit() {
         </div>
       </div>
 
+      <!-- ── My Shifts & Events (duplicate at bottom for easy clock-in) ── -->
+      <div class="card" id="clockTabMyShiftsCard">
+        <div class="card-header" onclick="toggleStaffCard('clockTabMyShiftsBody','clockTabMyShiftsChevron')" style="cursor:pointer;user-select:none;">
+          <div class="icon">📋</div>
+          <h2>My Shifts &amp; Events</h2>
+          <span id="clockTabMyShiftsChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">&#9660;</span>
+        </div>
+        <div id="clockTabMyShiftsBody" style="">
+          <div id="clockTabMyShiftsContainer"></div>
+        </div>
+      </div>
+
     </div><!-- end section-clock -->
 
     <!-- ══════════════ LOSAP TAB ══════════════ -->
@@ -12524,7 +12567,7 @@ function applyBulkEdit() {
           <table class="data-table">
             <thead>
               <tr>
-                <th>Date</th><th>Location / Incident</th><th>Type</th><th>Apparatus</th><th>Members</th><th>Logged By</th><th>Actions</th>
+                <th>Date</th><th>Location / Incident</th><th>Type</th><th>Box</th><th>Apparatus</th><th>Members</th><th>Logged By</th><th>Actions</th>
               </tr>
             </thead>
             <tbody id="erHistoryBody">
@@ -12590,7 +12633,16 @@ function applyBulkEdit() {
             <textarea id="staffingAlertMsg" rows="3" placeholder="Type your alert message…" style="width:100%;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:10px;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
           </div>
           <button class="btn btn-primary btn-full" onclick="sendStaffingAlert()">📢 Send Alert</button>
-          <div id="alertHistory" style="margin-top:16px;"></div>
+          <!-- Recent Alerts collapsible -->
+          <div id="alertHistoryWrap" style="margin-top:14px;">
+            <div onclick="toggleStaffCard('alertHistoryBody','alertHistoryChevron')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;padding:6px 0;border-top:1px solid #222;margin-bottom:4px;">
+              <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1.5px;">Recent Alerts</span>
+              <span id="alertHistoryChevron" style="font-size:12px;color:#555;transition:transform .2s;">&#9660;</span>
+            </div>
+            <div id="alertHistoryBody" style="display:none;">
+              <div id="alertHistory"></div>
+            </div>
+          </div>
         </div>
 
         <!-- Alert Groups -->
