@@ -8893,6 +8893,10 @@ function launchApp(member) {
   document.getElementById('app').style.display = 'flex';
   document.getElementById('app').style.flexDirection = 'column';
 
+  // ── Set the current user — this MUST happen first ──────────────────────
+  state.currentUserId = member.id;
+  save(); // persist to localStorage so Firestore listeners don't wipe it
+
   // Update header
   var subtitle = document.getElementById('appSubtitle');
   if (subtitle) subtitle.textContent = member.last + ', ' + member.first +
