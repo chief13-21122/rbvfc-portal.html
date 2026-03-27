@@ -6667,6 +6667,28 @@ function removeFromShift(elOrId) {
 }
 
 // ── MY SHIFTS ─────────────────────────────────────────────────
+
+function generateClassSessions(cls) {
+  // Returns array of date strings for the class schedule
+  var results = [];
+  var start = cls.startDate;
+  var end   = cls.endDate || cls.startDate;
+  var days  = cls.daysOfWeek; // array of 0-6 (Sun=0)
+  if (!start) return results;
+  // If no days-of-week configured, just return start date (single session)
+  if (!days || !days.length) return [start];
+  var cur = new Date(start + 'T12:00:00');
+  var endD = new Date(end + 'T23:59:59');
+  var limit = 200; // safety cap
+  while (cur <= endD && limit-- > 0) {
+    if (days.indexOf(cur.getDay()) >= 0) {
+      results.push(cur.toISOString().slice(0,10));
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  return results;
+}
+
 function renderMyShifts() {
   var container = document.getElementById('myShiftsContainer');
   var clockContainer = document.getElementById('clockTabMyShiftsContainer');
