@@ -5632,6 +5632,40 @@ function openSignUpModal(date, unitId, posIdx, posName, suggestStart, suggestHou
   var minRank = POSITION_MIN_RANK[posName];
   var rankEl = document.getElementById('suRankReq');
   if (rankEl) rankEl.textContent = minRank ? 'Recommended: ' + minRank + ' or above' : '';
+
+  // ── Engine 131 → Truck 13 dual-staff option ─────────────────────────
+  var tk13Sec = document.getElementById('suTk13Section');
+  var tk13Cb  = document.getElementById('suAlsoTk13');
+  var tk13Sel = document.getElementById('suTk13PosSelect');
+  var tk13Pos = document.getElementById('suTk13Positions');
+  if (tk13Sec) {
+    if (unitId === 'e131') {
+      // Populate Tk13 positions
+      if (tk13Sel) {
+        tk13Sel.innerHTML = '<option value="">— Select Truck 13 Position —</option>';
+        var tk13Positions = getUnitPositions('Tk13');
+        var date2 = document.getElementById('suDate').value || date;
+        var tk13Shifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date2 && s.unitId==='Tk13'; });
+        tk13Positions.forEach(function(pos, i) {
+          var opt = document.createElement('option');
+          opt.value = i;
+          opt.textContent = pos;
+          // Mark filled positions
+          var filled = tk13Shifts.filter(function(s){ return s.positionIndex===i && s.memberId; }).length;
+          if (filled > 0) { opt.textContent += ' (filled)'; }
+          tk13Sel.appendChild(opt);
+        });
+      }
+      if (tk13Cb)  tk13Cb.checked = false;
+      if (tk13Pos) tk13Pos.style.display = 'none';
+      tk13Sec.style.display = 'block';
+    } else {
+      tk13Sec.style.display = 'none';
+      if (tk13Cb)  tk13Cb.checked = false;
+      if (tk13Pos) tk13Pos.style.display = 'none';
+    }
+  }
+
   modal.style.display = 'flex';
 }
 
@@ -5723,6 +5757,14 @@ function eventToCalDetails(ev) {
   };
 }
 
+
+function onSuTk13Toggle() {
+  var cb  = document.getElementById('suAlsoTk13');
+  var pos = document.getElementById('suTk13Positions');
+  if (!cb || !pos) return;
+  pos.style.display = cb.checked ? 'block' : 'none';
+}
+
 function confirmSignUp() {
   var date    = document.getElementById('suDate').value;
   var unitId  = document.getElementById('suUnitId').value;
@@ -5772,13 +5814,59 @@ function confirmSignUp() {
     status: 'assigned'
   };
   state.staffingShifts.push(newShift);
+
+  // ── Dual-staff: also sign up for Truck 13 if selected ────────────────
+  var _alsoTk13Cb  = document.getElementById('suAlsoTk13');
+  var _tk13PosSel  = document.getElementById('suTk13PosSelect');
+  var _tk13PosIdx  = _tk13PosSel ? parseInt(_tk13PosSel.value) : NaN;
+  var _didTk13     = false;
+  if (_alsoTk13Cb && _alsoTk13Cb.checked && unitId === 'e131' && !isNaN(_tk13PosIdx) && _tk13PosIdx >= 0) {
+    var _tk13Positions = getUnitPositions('Tk13');
+    var _tk13PosName   = _tk13Positions[_tk13PosIdx] || 'Unknown';
+    // Eligibility check for Tk13 position
+    var _tk13Elig = me ? checkStaffingEligibility(me, 'Tk13', _tk13PosName) : { eligible: false, reason: 'Not logged in' };
+    if (!_tk13Elig.eligible) {
+      showToast('\u26a0\ufe0f Truck 13 ' + _tk13PosName + ': ' + _tk13Elig.reason + ' — Engine 131 signup saved.');
+    } else {
+      // Check not already in that Tk13 slot
+      var _tk13Dupe = (state.staffingShifts||[]).find(function(s){
+        return s.date===date && s.unitId==='Tk13' && s.positionIndex===_tk13PosIdx && s.memberId===uid;
+      });
+      if (_tk13Dupe) {
+        showToast('\u26a0\ufe0f Already signed up for Tk13 ' + _tk13PosName + ' — Engine 131 signup saved.');
+      } else {
+        var tk13Shift = {
+          id: 'sh_' + (Date.now()+1),
+          date: date,
+          unitId: 'Tk13',
+          positionIndex: _tk13PosIdx,
+          position: _tk13PosName,
+          memberId: uid,
+          shiftStart: start,
+          shiftHours: hours,
+          clockedIn: false,
+          status: 'assigned',
+          linkedShiftId: newShift.id   // cross-reference to E131 shift
+        };
+        newShift.linkedShiftId = tk13Shift.id;   // cross-reference back
+        state.staffingShifts.push(tk13Shift);
+        sendCalendarInvite(uid, shiftToCalDetails(tk13Shift));
+        _didTk13 = true;
+      }
+    }
+  }
+
   save();
   closeSignUpModal();
   renderStaffingBoard();
   renderMyShifts();
-  // Send Google Calendar invite
   sendCalendarInvite(uid, shiftToCalDetails(newShift));
-  showToast('\u2705 Signed up for '+posName+' on '+date+'. Calendar invite sent!');
+  if (_didTk13) {
+    showToast('\u2705 Signed up for Engine 131 & Truck 13 on ' + date + '!');
+    showSubmitConfirmation('Engine 131 (' + posName + ') + Truck 13 (' + (getUnitPositions('Tk13')[_tk13PosIdx]||'') + ') — ' + date, '\ud83d\ude92');
+  } else {
+    showToast('\u2705 Signed up for ' + posName + ' on ' + date + '. Calendar invite sent!');
+  }
 }
 
 // ── OFFICER ASSIGN ───────────────────────────────────────────
@@ -13972,6 +14060,20 @@ function applyBulkEdit() {
     <input type="hidden" id="suUnitId">
     <input type="hidden" id="suPosIdx">
     <input type="hidden" id="suPosName">
+    <!-- Engine 131 → also staff Truck 13 option -->
+    <div id="suTk13Section" style="display:none;background:#1A1200;border:1px solid #3A2A00;border-radius:10px;padding:12px 14px;margin-bottom:12px;">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;">
+        <input type="checkbox" id="suAlsoTk13" onchange="onSuTk13Toggle()" style="width:16px;height:16px;accent-color:#F5A623;cursor:pointer;">
+        <span style="font-size:13px;font-weight:700;color:#F5A623;">&#128663; Also staff Truck 13 this shift</span>
+      </label>
+      <div id="suTk13Positions" style="display:none;margin-top:10px;">
+        <label style="font-size:11px;color:#888;display:block;margin-bottom:5px;letter-spacing:1px;text-transform:uppercase;">Truck 13 Position</label>
+        <select id="suTk13PosSelect" style="width:100%;background:#1E1E1E;border:1px solid #3A2A00;border-radius:8px;padding:9px 12px;color:#F0F0F0;font-size:13px;">
+          <option value="">— Select Truck 13 Position —</option>
+        </select>
+        <div id="suTk13Hint" style="font-size:11px;color:#666;margin-top:5px;"></div>
+      </div>
+    </div>
     <div class="form-group">
       <label>Shift Start</label>
       <input type="time" id="suStart" value="07:00" style="width:100%;">
