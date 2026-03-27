@@ -2442,7 +2442,11 @@ function initTrainingTab() {
   if (tcBtn) tcBtn.style.display = isOfficer ? 'block' : 'none';
   renderTrainingClasses();
   renderTrainingReview();
-  if (isOfficer) { try { renderDrillReportHistory(); } catch(e){} }
+  if (isOfficer) {
+    var dhCard2 = document.getElementById('drillHistoryCard');
+    if (dhCard2) dhCard2.style.display = 'block';
+    try { renderDrillHistory(); } catch(e){}
+  }
 }
 
 function renderTrainingReview() {
@@ -2454,10 +2458,10 @@ function renderTrainingReview() {
   var container = document.getElementById('trainingReviewContainer');
   if (!container) return;
 
-  var submissions = (state.trainingSubmissions||[]);
+  var submissions = (state.trainingSubmissions||[]).filter(function(s){ return s.type !== 'drill'; });
   if (!isOfficer) {
     // Regular member — show only their own
-    submissions = submissions.filter(function(s){ return s.memberId===uid; });
+    submissions = submissions.filter(function(s){ return s.memberId===uid || (s.submittedBy===uid); });
   }
 
   var html = '';
@@ -4232,6 +4236,49 @@ function clearDrillForm() {
   var drillLoc = document.getElementById('drillLocation'); if(drillLoc) drillLoc.value='';
   var drillNotes = document.getElementById('drillNotes'); if(drillNotes) drillNotes.value='';
   drillClearAll();
+}
+
+
+function approveDrill(elOrId) {
+  var id = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
+  var s = (state.trainingSubmissions||[]).find(function(x){ return x.id===id; });
+  if (!s) return;
+  s.status = 'approved';
+  s.approvedBy = state.currentUserId;
+  s.approvedAt = new Date().toISOString();
+  // Add to each member's losapActivities
+  if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
+  (s.members||[s.memberId]).forEach(function(memberId) {
+    state.losapActivities.push({
+      id: 'act_drill_'+Date.now()+'_'+memberId,
+      memberId: memberId,
+      date: s.date,
+      category: 'drill',
+      desc: s.drillName || 'Drill',
+      pts: s.pts || 1,
+      hours: s.hours || 1,
+      approvedBy: state.currentUserId,
+      approvedAt: new Date().toISOString()
+    });
+  });
+  save();
+  renderDrillHistory();
+  try { renderCompanyLOSAP(); } catch(e) {}
+  showToast('\u2705 Drill approved — '+( (s.members||[]).length)+' members credited '+s.pts+' pt'+(s.pts!==1?'s':'')+'.');
+}
+
+function rejectDrill(elOrId) {
+  var id = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
+  var reason = prompt('Reason for rejection (optional):') || '';
+  var s = (state.trainingSubmissions||[]).find(function(x){ return x.id===id; });
+  if (!s) return;
+  s.status = 'rejected';
+  s.rejectionReason = reason;
+  s.rejectedBy = state.currentUserId;
+  s.rejectedAt = new Date().toISOString();
+  save();
+  renderDrillHistory();
+  showToast('Drill report rejected.');
 }
 
 function renderDrillHistory() {
@@ -13313,7 +13360,7 @@ function applyBulkEdit() {
       <!-- Drill Report History -->
       <div class="card" id="drillHistoryCard" style="display:none;">
         <div class="card-header"><div class="icon">🔧</div><h2>Drill Report History</h2></div>
-        <div id="drillReportHistoryContainer"></div>
+        <div id="drillHistoryContainer"></div>
       </div>
 
 
