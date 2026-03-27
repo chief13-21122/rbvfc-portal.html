@@ -1028,6 +1028,15 @@ function updateClockUI(in_) {
   if (in_ && state.currentSession && state.currentSession.userId !== state.currentUserId) {
     in_ = false;
   }
+
+  // ── Detect session type for theming ──────────────────────────
+  var _sess     = in_ && state.currentSession && !state.currentSession.end ? state.currentSession : null;
+  var _isClass  = _sess && (_sess.activity === 'training' || _sess.activity === 'drill') && _sess.classId;
+  // Colours: blue for class, green for duty/staffing
+  var _accent   = _isClass ? '#3498DB' : '#27AE60';
+  var _accentBg = _isClass ? 'rgba(52,152,219,0.12)' : 'rgba(39,174,96,0.12)';
+  var _accentShadow = _isClass ? 'rgba(52,152,219,0.4)' : 'rgba(46,204,113,0.4)';
+
   var inBtn  = document.getElementById('clockInBtn');
   var outBtn = document.getElementById('clockOutBtn');
   var timer  = document.getElementById('clockTimer');
@@ -1035,32 +1044,70 @@ function updateClockUI(in_) {
   var dot    = document.getElementById('headerDot');
   var pill   = document.getElementById('clockStatusPill');
   var nameEl = document.getElementById('clockMemberName');
+  var timerDisp = document.getElementById('clockTimerDisplay');
+  var faceArea = document.getElementById('clockFaceArea');
   var staffBadge = document.getElementById('clockStaffingBadge');
   var staffUnit  = document.getElementById('clockStaffingUnit');
   var staffPos   = document.getElementById('clockStaffingPos');
+
   // Buttons
   if (inBtn)  inBtn.style.display  = in_ ? 'none' : 'flex';
   if (outBtn) outBtn.style.display = in_ ? 'flex' : 'none';
   // Timer (elapsed)
   if (timer)  timer.style.display  = in_ ? 'block' : 'none';
-  // Status pill + member name
-  if (pill)   pill.style.display   = in_ ? 'block' : 'none';
+
+  // ── Apply theme colours ──────────────────────────────────────
+  if (pill) {
+    pill.style.display = in_ ? 'block' : 'none';
+    if (in_) {
+      pill.style.borderColor = _accent;
+      pill.querySelector('span').style.color = _accent;
+      pill.querySelector('span').textContent = _isClass ? 'CLASS IN SESSION' : 'CLOCKED IN — SESSION ACTIVE';
+    }
+  }
   if (nameEl) {
     nameEl.style.display = in_ ? 'block' : 'none';
     if (in_) {
       var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
       nameEl.textContent = me ? (me.last.toUpperCase() + ' ' + me.first.toUpperCase()) : '';
+      nameEl.style.color = in_ ? (_isClass ? '#F0F0F0' : '#2ECC71') : '';
+      nameEl.style.textShadow = '0 0 20px ' + _accentShadow;
     }
   }
-  // Show collateral duty reason beneath timer
+  if (timerDisp && in_) {
+    timerDisp.style.color = _isClass ? '#3498DB' : '#555';
+  }
+  if (faceArea && in_) {
+    // Subtle tinted background when in a class
+    faceArea.style.background = _isClass
+      ? 'linear-gradient(180deg,#060D14 0%,#0A1520 100%)'
+      : 'linear-gradient(180deg,#0A0A0A 0%,#111 100%)';
+  } else if (faceArea && !in_) {
+    faceArea.style.background = 'linear-gradient(180deg,#0A0A0A 0%,#111 100%)';
+  }
+
+  // ── Duty reason / class title beneath timer ──────────────────
   var reasonEl = document.getElementById('clockDutyReason');
   if (reasonEl) {
-    if (in_ && state.currentSession && !state.currentSession.end) {
-      var _sess = state.currentSession;
-      var _actLabel = { collateral:'Collateral Duty', duty:'Station Duty', meeting:'Meeting',
-        training:'Training', drill:'Drill', fundraiser:'Event/Fundraiser', other:'Other' }[_sess.activity] || 'On Duty';
-      var _reasonText = _sess.desc ? (_actLabel + ' — ' + _sess.desc) : _actLabel;
-      reasonEl.textContent = _reasonText;
+    if (in_ && _sess) {
+      if (_isClass) {
+        // Show class name prominently in blue
+        var cls = (state.trainingClasses||[]).find(function(c){ return c.id===_sess.classId; });
+        var clsName = (cls && cls.name) || _sess.desc || 'Training Class';
+        reasonEl.textContent = '\ud83d\udcd8 ' + clsName;
+        reasonEl.style.color = '#3498DB';
+        reasonEl.style.fontSize = '15px';
+        reasonEl.style.fontWeight = '700';
+        reasonEl.style.letterSpacing = '0.5px';
+      } else {
+        var _actLabel = { collateral:'Collateral Duty', duty:'Station Duty', meeting:'Meeting',
+          training:'Training', drill:'Drill', fundraiser:'Event/Fundraiser', other:'Other' }[_sess.activity] || 'On Duty';
+        var _reasonText = _sess.desc ? (_actLabel + ' — ' + _sess.desc) : _actLabel;
+        reasonEl.textContent = _reasonText;
+        reasonEl.style.color = '#F5A623';
+        reasonEl.style.fontSize = '13px';
+        reasonEl.style.fontWeight = '600';
+      }
       reasonEl.style.display = 'block';
     } else {
       reasonEl.style.display = 'none';
@@ -10628,13 +10675,18 @@ function tickClockTimer() {
   var el = document.getElementById('clockTimerDisplay');
   if (el) {
     el.textContent = formatDuration(elapsed) + ' elapsed';
-    // Color shift: green (< 2h) → amber (2-4h) → red (4h+)
-    var hours = elapsed / 3600;
-    var col;
-    if (hours < 2) col = '#27AE60';
-    else if (hours < 4) col = '#F5A623';
-    else col = '#C8102E';
-    el.style.color = col;
+    // Keep blue for class sessions; shift green→amber→red for duty
+    var _isClassSess = state.currentSession && state.currentSession.classId && !state.currentSession.end;
+    if (_isClassSess) {
+      el.style.color = '#3498DB';
+    } else {
+      var hours = elapsed / 3600;
+      var col;
+      if (hours < 2) col = '#27AE60';
+      else if (hours < 4) col = '#F5A623';
+      else col = '#C8102E';
+      el.style.color = col;
+    }
   }
 }
 
