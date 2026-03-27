@@ -2290,29 +2290,53 @@ function clockInAllClassMembers(classId) {
   if (members.length === 0) { showToast('⚠️ No members enrolled in this class.'); return; }
   if (!confirm('Clock in ' + members.length + ' member' + (members.length===1?'':'s') + ' for "' + cls.name + '"?')) return;
 
-  if (!Array.isArray(state.sessions)) state.sessions = [];
+  // Record class attendance for each member
+  if (!Array.isArray(state.classAttendance)) state.classAttendance = [];
   var clockedIn = 0;
   members.forEach(function(memberId) {
-    // Skip if already has open session today
-    var hasOpen = state.sessions.some(function(s){ return s.userId===memberId && !s.end && s.start && s.start.slice(0,10)===today; });
+    // Skip if already clocked in for this class today
+    var hasOpen = (state.classAttendance||[]).some(function(a){
+      return a.classId===classId && a.memberId===memberId && a.sessionDate===today && !a.clockedOutAt;
+    });
     if (hasOpen) return;
-    state.sessions.push({
-      id: 'sess_cls_'+Date.now()+'_'+memberId,
-      userId: memberId,
-      start: now.toISOString(),
-      activity: 'training',
-      desc: cls.name,
+    state.classAttendance.push({
+      id: 'ca_'+Date.now()+'_'+memberId,
       classId: classId,
-      end: null, duration: null,
+      memberId: memberId,
+      sessionDate: today,
+      clockedInAt: now.toISOString(),
+      clockedOutAt: null,
       clockedBy: state.currentUserId
     });
     clockedIn++;
   });
+  // If this is the current user's own session, also set currentSession
+  var myEntry = (state.classAttendance||[]).find(function(a){ return a.classId===classId && a.memberId===state.currentUserId && a.sessionDate===today && !a.clockedOutAt; });
+  if (myEntry && (!state.currentSession || state.currentSession.end)) {
+    state.currentSession = {
+      id: 'sess_cls_'+Date.now(),
+      userId: state.currentUserId,
+      start: now.toISOString(),
+      activity: 'training',
+      desc: cls.name,
+      classId: classId,
+      end: null, duration: null
+    };
+    try { updateClockUI(true); } catch(e){}
+    if (typeof _clockTimerInterval !== 'undefined') {
+      if (_clockTimerInterval) clearInterval(_clockTimerInterval);
+      _clockTimerInterval = setInterval(tickClockTimer, 1000);
+    }
+  }
   save();
   try { renderCompanyLOSAP(); } catch(e){}
-  showToast('\u2705 Clocked in ' + clockedIn + ' member' + (clockedIn===1?'':'s') + ' for ' + cls.name + '.');
-  showSubmitConfirmation(clockedIn + ' member' + (clockedIn===1?'':'s') + ' clocked in for \"' + cls.name + '\"', '📚');
   renderTrainingClasses();
+  if (clockedIn === 0) {
+    showToast('\u2139\ufe0f All enrolled members are already clocked in.');
+  } else {
+    showToast('\u2705 Clocked in ' + clockedIn + ' member' + (clockedIn===1?'':'s') + ' for ' + cls.name + '.');
+    showSubmitConfirmation(clockedIn + ' member' + (clockedIn===1?'':'s') + ' clocked in for "' + cls.name + '"', '📚');
+  }
 }
 
 function renderTrainingClasses() {
@@ -2425,6 +2449,9 @@ function initTrainingTab() {
   // Review / approval card
   var rc = document.getElementById('trainingSubmissionsCard');
   if (rc) rc.style.display = 'block';
+  // Training History card — show for all members
+  var thCard = document.getElementById('trainingHistoryCard');
+  if (thCard) thCard.style.display = 'block';
   // Drill report: officers and admin only
   var dc = document.getElementById('drillSubmitCard');
   if (dc) dc.style.display = isOfficer ? 'block' : 'none';
@@ -6622,8 +6649,12 @@ function renderMyShifts() {
   var uid   = state.currentUserId;
   var today = localDateStr();
 
+  // Build a set of shift IDs that are "secondary" linked shifts (Tk13 when linked from E131)
+  var _primaryLinkedIds = new Set((state.staffingShifts||[])
+    .filter(function(s){ return s.memberId===uid && s.linkedShiftId; })
+    .map(function(s){ return s.linkedShiftId; }));
   var myShifts = (state.staffingShifts||[])
-    .filter(function(s){ return s.memberId===uid && s.date >= today; })
+    .filter(function(s){ return s.memberId===uid && s.date >= today && !_primaryLinkedIds.has(s.id); })
     .sort(function(a,b){ return (a.date||'').localeCompare(b.date||'') || (a.shiftStart||'0700').localeCompare(b.shiftStart||'0700'); });
 
   var myEvents = (state.specialEvents||[]).filter(function(ev){
@@ -6682,8 +6713,12 @@ function renderMyShifts() {
         + 'border:1px solid ' + border + ';border-left:4px solid ' + border + ';border-radius:10px;margin-bottom:8px;flex-wrap:wrap;">';
       html += dateBox;
       html += '<div style="flex:1;">'
-        + '<div style="font-weight:700;font-size:14px;color:#F0F0F0;">' + UNIT_LABELS[s.unitId] + '</div>'
-        + '<div style="font-size:12px;color:#888;">' + s.position + ' &nbsp;&middot;&nbsp; ' + shiftLabel(s) + '</div>';
+        // Show linked Tk13 partner shift inline
+        var _lnk = s.linkedShiftId ? (state.staffingShifts||[]).find(function(x){ return x.id===s.linkedShiftId && x.memberId===uid; }) : null;
+        var _uLbl = UNIT_LABELS[s.unitId] + (_lnk ? ' + ' + (UNIT_LABELS[_lnk.unitId]||_lnk.unitId) : '');
+        var _pLbl = s.position + (_lnk ? ' / ' + _lnk.position : '');
+        + '<div style="font-weight:700;font-size:14px;color:#F0F0F0;">' + _uLbl + '</div>'
+        + '<div style="font-size:12px;color:#888;">' + _pLbl + ' &nbsp;&middot;&nbsp; ' + shiftLabel(s) + '</div>';
       if (isToday && !s.clockedIn) html += '<div style="font-size:11px;color:#F5A623;font-weight:700;margin-top:2px;">&#9888; Shift starts today</div>';
       if (s.clockedIn) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#10003; Clocked In ' + new Date(s.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '</div>';
       html += '</div>';
@@ -7777,7 +7812,17 @@ function renderMeetingsList() {
       +'<div style="font-weight:700;font-size:15px;color:#F0F0F0;">'+(mtg.title||'')+'</div>'
       +'<div style="font-size:12px;color:#888;margin-top:3px;">'+ds+(ts?' \u00b7 '+ts:'')+(mtg.duration?' \u00b7 '+mtg.duration+'min':'')+(mtg.location?' \u00b7 '+mtg.location:'')+fmtRec(mtg)+'</div>'
       +(mtg.desc?'<div style="font-size:12px;color:#666;margin-top:4px;">'+mtg.desc+'</div>':'')
-      +(cnt?'<div style="font-size:11px;color:#555;margin-top:3px;">'+cnt+' signed up</div>':'')
+      +(function(){
+        var attendees = (state.meetingAttendance||[]).filter(function(a){ return a.mtgId===mtg.id&&a.date===sd; });
+        if (!attendees.length) return '';
+        var names = attendees.map(function(a){
+          var mbr = (state.roster||[]).find(function(m){ return m.id===a.memberId; });
+          var nm = mbr ? mbr.last+', '+mbr.first : a.memberId;
+          var ci = a.clockedInAt ? ' <span style="color:#27AE60;font-size:10px;">&#10003;</span>' : '';
+          return nm + ci;
+        }).join(' &nbsp;&bull;&nbsp; ');
+        return '<div style="font-size:11px;color:#888;margin-top:5px;border-top:1px solid #222;padding-top:5px;">'          +'<span style="color:#555;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:9px;">Attending ('+attendees.length+'):</span> '          +'<span style="color:#AAA;">'+names+'</span></div>';
+      })()
       +(mtg.inCharge?(function(){ var _ic=(state.roster||[]).find(function(m){ return m.id===mtg.inCharge; }); return _ic?'<div style="font-size:12px;color:#F5A623;font-weight:700;margin-top:3px;">&#128100; In Charge: '+_ic.last+', '+_ic.first+'</div>':''; })():'')
       +(mtg.createdBy?(function(){ var _cb=(state.roster||[]).find(function(m){ return m.id===mtg.createdBy; }); return _cb?'<div style="font-size:11px;color:#555;margin-top:2px;">Scheduled by: '+_cb.last+', '+_cb.first+'</div>':''; })():'')
       +'</div>'
@@ -8191,6 +8236,27 @@ function updateApprovalsBadge() {
 // ═══════════════════════════════════════════════════════════════════
 var _rejectPending = null; // {type, id, name}
 
+
+function switchApprovalTab(tab) {
+  var tabs = ['training','drill','losap','history'];
+  var containers = {
+    training: 'approvalTrainingContainer',
+    drill:    'approvalDrillContainer',
+    losap:    'approvalLosapContainer',
+    history:  'approvalHistoryContainer'
+  };
+  tabs.forEach(function(t) {
+    var btn = document.getElementById('atab-'+t);
+    var cont = document.getElementById(containers[t]);
+    var active = (t === tab);
+    if (btn) {
+      btn.style.background = active ? '#C8102E' : '#111';
+      btn.style.color = active ? '#FFF' : '#AAA';
+    }
+    if (cont) cont.style.display = active ? 'block' : 'none';
+  });
+}
+
 function initApprovalsTab() {
   var uid = state.currentUserId;
   var m   = (state.roster||[]).find(function(x){ return x.id===uid; });
@@ -8206,6 +8272,8 @@ function initApprovalsTab() {
   renderApprovalDrills(canApproveDrills);
   renderApprovalLosap(canApproveLosap);
   renderApprovalHistory();
+  // Init tab display — show Training tab by default
+  switchApprovalTab('training');
 }
 
 function setApprovalTab(tab) {
@@ -13441,22 +13509,22 @@ function applyBulkEdit() {
 
       <!-- Filter tabs -->
       <div style="display:flex;gap:0;margin-bottom:16px;border:1px solid #2A2A2A;border-radius:10px;overflow:hidden;background:#111;">
-        <button id="atab-training"
+        <button id="atab-training" onclick="switchApprovalTab('training')"
           style="flex:1;padding:10px 6px;background:#C8102E;border:none;color:#FFF;font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;position:relative;">
           📚 Training
           <span id="approvalTrainingBadge" style="display:none;position:absolute;top:4px;right:4px;background:#FFF;color:#C8102E;font-size:9px;font-weight:900;border-radius:8px;padding:1px 5px;"></span>
         </button>
-        <button id="atab-drill"
+        <button id="atab-drill" onclick="switchApprovalTab('drill')"
           style="flex:1;padding:10px 6px;background:#111;border:none;border-left:1px solid #2A2A2A;color:#AAA;font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;position:relative;">
           🔧 Drills
           <span id="approvalDrillBadge" style="display:none;position:absolute;top:4px;right:4px;background:#C8102E;color:#FFF;font-size:9px;font-weight:900;border-radius:8px;padding:1px 5px;"></span>
         </button>
-        <button id="atab-losap"
+        <button id="atab-losap" onclick="switchApprovalTab('losap')" 
           style="flex:1;padding:10px 6px;background:#111;border:none;border-left:1px solid #2A2A2A;color:#AAA;font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;position:relative;">
           🏅 LOSAP
           <span id="approvalLosapBadge" style="display:none;position:absolute;top:4px;right:4px;background:#C8102E;color:#FFF;font-size:9px;font-weight:900;border-radius:8px;padding:1px 5px;"></span>
         </button>
-        <button id="atab-history"
+        <button id="atab-history" onclick="switchApprovalTab('history')" 
           style="flex:1;padding:10px 6px;background:#111;border:none;border-left:1px solid #2A2A2A;color:#AAA;font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;">
           📋 History
         </button>
