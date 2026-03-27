@@ -2387,12 +2387,23 @@ function renderTrainingClasses() {
       h += '<button onclick="deleteTrainingClass(\''+cls.id+'\')" class="btn btn-sm btn-danger" style="font-size:10px;">Delete</button>';
     }
     h += '<button onclick="openClassDetailModal(\''+cls.id+'\')" class="btn btn-sm btn-secondary" style="font-size:10px;">Details</button>';
-    if (myEnrolled) {
-      h += '<span style="font-size:11px;font-weight:700;color:#27AE60;">&#10003; Enrolled</span>';
-    } else {
-      h += '<button onclick="enrollInClass(\''+cls.id+'\')" class="btn btn-sm btn-success" style="font-size:10px;">Enroll</button>';
+    h += '</div></div>';
+    // ── Enrolled members list ──────────────────────────────
+    if ((cls.members||[]).length > 0) {
+      var memberNames = (cls.members||[]).map(function(mid){
+        var mbr=(state.roster||[]).find(function(x){ return x.id===mid; });
+        if (!mbr) return null;
+        // Check if clocked in today
+        var today2 = new Date().toISOString().slice(0,10);
+        var att = (state.classAttendance||[]).find(function(a){ return a.classId===cls.id&&a.memberId===mid&&a.sessionDate===today2&&!a.clockedOutAt; });
+        var name = mbr.last+', '+mbr.first;
+        return att ? '<span style="color:#27AE60;font-weight:700;">'+name+' &#10003;</span>' : '<span style="color:#888;">'+name+'</span>';
+      }).filter(Boolean).join(' &nbsp;&bull;&nbsp; ');
+      h += '<div style="font-size:11px;color:#666;border-top:1px solid #222;padding-top:8px;margin-top:6px;line-height:1.8;">';
+      h += '<span style="color:#555;text-transform:uppercase;letter-spacing:1px;font-size:9px;font-weight:700;">Enrolled ('+cls.members.length+'):</span> ' + memberNames;
+      h += '</div>';
     }
-    h += '</div></div></div>';
+    h += '</div>';
   });
   container.innerHTML = h;
 }
@@ -10002,7 +10013,7 @@ function _autoLogCadCall(call) {
   // Skip auto-log if no unit info at all, or no units could be resolved
   if (!callUnits.length || !resolvedUnitIds.length) return;
 
-  // Find members staffed on those units today
+  // Find members staffed on those units today (clocked-in shifts take priority)
   var staffedMembers = [];
   resolvedUnitIds.forEach(function(unitId) {
     (state.staffingShifts || []).forEach(function(s) {
@@ -10011,6 +10022,14 @@ function _autoLogCadCall(call) {
         staffedMembers.push(s.memberId);
       }
     });
+  });
+  // Also include any member clocked into an active staffing shift right now
+  (state.staffingShifts||[]).forEach(function(s) {
+    if (s.date === today && s.clockedIn && !s.clockedOutAt && s.memberId &&
+        resolvedUnitIds.indexOf(s.unitId) >= 0 &&
+        staffedMembers.indexOf(s.memberId) < 0) {
+      staffedMembers.push(s.memberId);
+    }
   });
 
   // Even if nobody is staffed, log the response so officers can edit it
