@@ -5639,7 +5639,13 @@ function openSignUpModal(date, unitId, posIdx, posName, suggestStart, suggestHou
 
   // Smart default: find next uncovered time window on this unit
   var existingShifts = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===unitId && s.positionIndex===posIdx && s.memberId; });
-  var suggestedStart = '07:00', suggestedHours = 24;
+  // Default start = NOW (rounded to nearest 15 min), hours = remaining in day
+  var _now = new Date();
+  var _nh = _now.getHours(), _nm = Math.round(_now.getMinutes()/15)*15;
+  if (_nm === 60) { _nh++; _nm = 0; }
+  if (_nh >= 24) { _nh = 23; _nm = 45; }
+  var suggestedStart = (_nh<10?'0':'')+_nh+':'+(_nm<10?'0':'')+_nm;
+  var suggestedHours = Math.max(0.5, parseFloat((24 - _nh - _nm/60).toFixed(1)));
 
   if (existingShifts.length) {
     // Find latest shift end time
@@ -5676,9 +5682,12 @@ function openSignUpModal(date, unitId, posIdx, posName, suggestStart, suggestHou
     if (hintEl2) hintEl2.style.display = 'none';
   }
 
-  // Use caller-provided suggestion (from board's gap calculator) if available
-  if (suggestStart) suggestedStart = suggestStart.slice(0,2)+':'+suggestStart.slice(2,4);
-  if (suggestHours) suggestedHours = suggestHours;
+  // Use caller-provided suggestion ONLY if it's NOT the 0700 default
+  // (0700 means board has no existing gap calc — keep current-time default)
+  if (suggestStart && suggestStart !== '0700') {
+    suggestedStart = suggestStart.slice(0,2)+':'+suggestStart.slice(2,4);
+    if (suggestHours) suggestedHours = suggestHours;
+  }
   document.getElementById('suStart').value = suggestedStart;
   document.getElementById('suHours').value  = suggestedHours;
   var minRank = POSITION_MIN_RANK[posName];
@@ -6689,6 +6698,21 @@ function generateClassSessions(cls) {
   return results;
 }
 
+
+function toggleMyShiftsOverflow(btn) {
+  var overflow = document.getElementById('myShiftsOverflow');
+  var toggleText = document.getElementById('myShiftsOverflowToggleText');
+  if (!overflow) return;
+  var isHidden = overflow.style.display === 'none';
+  overflow.style.display = isHidden ? 'block' : 'none';
+  if (toggleText) {
+    var count = overflow.querySelectorAll('[data-shift-item]').length || overflow.children.length;
+    toggleText.innerHTML = isHidden
+      ? '&#9650; Show less'
+      : '&#9660; ' + count + ' more item' + (count===1?'':'s');
+  }
+}
+
 function renderMyShifts() {
   var container = document.getElementById('myShiftsContainer');
   var clockContainer = document.getElementById('clockTabMyShiftsContainer');
@@ -6743,8 +6767,12 @@ function renderMyShifts() {
     .concat(myClassItems).concat(myMtgItems)
     .sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
 
+  var _SHOW_LIMIT = 4;
   var html = '';
-  allItems.forEach(function(item) {
+  allItems.forEach(function(item, _itemIdx) {
+    if (_itemIdx === _SHOW_LIMIT && allItems.length > _SHOW_LIMIT) {
+      html += '<div id="myShiftsOverflow" style="display:none;">';
+    }
     var d = new Date(item.date+'T12:00:00');
     var dayN = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
     var isToday = item.date === today;
@@ -6882,6 +6910,12 @@ function renderMyShifts() {
         +'</div></div>';
     }
   });
+  if (allItems.length > _SHOW_LIMIT) {
+    html += '</div>'; // close overflow div
+    html += '<div onclick="toggleMyShiftsOverflow(this)" style="text-align:center;padding:10px 0;cursor:pointer;'
+          + 'color:#555;font-size:12px;border-top:1px solid #1E1E1E;margin-top:4px;">'
+          + '<span id="myShiftsOverflowToggleText">&#9660; '+(allItems.length-_SHOW_LIMIT)+' more item'+(allItems.length-_SHOW_LIMIT===1?'':'s')+'</span></div>';
+  }
   container.innerHTML = html;
   if (clockContainer) clockContainer.innerHTML = container ? container.innerHTML : html;
 }
@@ -7951,7 +7985,8 @@ function renderSpecialEventAdmin() {
     if (cDisp) cDisp.textContent = me ? me.last+', '+me.first+' · '+((me.ranks&&me.ranks.length?me.ranks[0]:me.rank)||me.appRole) : '—';
     // Populate In Charge dropdown (officers + admin)
     var icSel = document.getElementById('seInCharge');
-    if (icSel && icSel.options.length <= 1) {
+    if (icSel) {
+      while (icSel.options.length > 1) icSel.remove(1); // reset first
       (state.roster||[]).filter(function(m){ return m.active!==false && (m.appRole==='officer'||m.appRole==='admin'); })
         .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
         .forEach(function(m){
