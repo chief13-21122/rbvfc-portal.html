@@ -4174,11 +4174,20 @@ function saveDrillReport() {
   var location     = ((document.getElementById('drillLocation')||{}).value||'').trim();
   var notes        = ((document.getElementById('drillNotes')||{}).value||'').trim();
 
-  if (!drillDate)    { showToast('⚠️ Drill date is required.'); return; }
+  function _highlightDrillField(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.style.borderColor = '#E74C3C';
+    el.style.boxShadow = '0 0 0 2px rgba(231,76,60,0.35)';
+    setTimeout(function(){ el.style.borderColor=''; el.style.boxShadow=''; }, 3000);
+    var scrollArea = document.getElementById('scrollArea');
+    if (scrollArea) scrollArea.scrollTop = Math.max(0, el.offsetTop - 80);
+  }
+  if (!drillDate) { _highlightDrillField('drillDate'); showToast('⚠️ Drill date is required.'); return; }
   if (!reportBy) reportBy = state.currentUserId || '';
-  if (!reportBy) { showToast('⚠️ Could not determine submitting member. Please re-open the Drill tab.'); return; }
-  if (!drillTypeVal) { showToast('⚠️ Please select a drill type.'); return; }
-  if (!hours || hours <= 0) { showToast('⚠️ Duration in hours is required.'); return; }
+  if (!reportBy) { showToast('⚠️ Could not determine reporter — please re-open the Training tab.'); return; }
+  if (!drillTypeVal) { _highlightDrillField('drillType'); showToast('⚠️ Please select a drill type.'); return; }
+  if (!hours || hours <= 0) { _highlightDrillField('drillHours'); showToast('⚠️ Enter the drill duration in hours.'); return; }
 
   var parts = drillTypeVal.split('|');
   var drillCode = parts[0] || '';
@@ -4190,7 +4199,18 @@ function saveDrillReport() {
     var cb = document.getElementById('drill_'+m.id); return cb && cb.checked;
   }).map(function(m){ return m.id; });
 
-  if (members.length === 0) { showToast('⚠️ Select at least one participating member.'); return; }
+  if (members.length === 0) {
+    var mlEl = document.getElementById('drillMemberList');
+    if (mlEl) {
+      mlEl.style.outline = '2px solid #E74C3C';
+      mlEl.style.borderRadius = '8px';
+      setTimeout(function(){ mlEl.style.outline=''; }, 3000);
+      var scrollArea2 = document.getElementById('scrollArea');
+      if (scrollArea2) scrollArea2.scrollTop = Math.max(0, mlEl.offsetTop - 80);
+    }
+    showToast('⚠️ Check at least one participating member.');
+    return;
+  }
 
   var pts = Math.floor(hours / 2); // 1 pt per 2 hrs, AA County rule
   if (pts < 1) pts = 1; // minimum 1 pt for any approved drill
@@ -4221,10 +4241,14 @@ function saveDrillReport() {
   save();
   clearDrillForm();
   renderDrillHistory();
-  var reporterName = '';
-  var rep = (state.roster||[]).find(function(m){ return m.id===reportBy; });
-  if (rep) reporterName = rep.first+' '+rep.last;
-  showToast('✅ Drill report submitted!'); showSubmitConfirmation('Drill report for '+members.length+' member'+(members.length===1?'':'s')+' submitted. Awaiting approval.', '🔧');
+  // Scroll to the drill history so user can see their submission
+  setTimeout(function(){
+    var histCard = document.getElementById('drillHistoryCard');
+    var scrollArea = document.getElementById('scrollArea');
+    if (histCard && scrollArea) scrollArea.scrollTop = histCard.offsetTop - 60;
+  }, 200);
+  showToast('✅ Drill report submitted!');
+  showSubmitConfirmation('Drill report for '+members.length+' member'+(members.length===1?'':'s')+' submitted — pending approval.', '🔧');
 }
 
 function clearDrillForm() {
