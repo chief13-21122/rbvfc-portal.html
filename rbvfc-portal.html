@@ -2297,12 +2297,9 @@ function clockInAllClassMembers(classId) {
   var now = new Date();
   var today = now.toISOString().slice(0,10);
   // Check class is active today
-  if (cls.startDate > today || (cls.endDate && cls.endDate < today)) {
-    if (!confirm('This class is not scheduled for today. Clock in all enrolled members anyway?')) return;
-  }
+  // Allow clock-in regardless of schedule — officer's discretion
   var members = cls.members || [];
   if (members.length === 0) { showToast('⚠️ No members enrolled in this class.'); return; }
-  if (!confirm('Clock in ' + members.length + ' member' + (members.length===1?'':'s') + ' for "' + cls.name + '"?')) return;
 
   // Record class attendance for each member
   if (!Array.isArray(state.classAttendance)) state.classAttendance = [];
@@ -2382,18 +2379,17 @@ function renderTrainingClasses() {
     h += '<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;">';
     h += '<span style="font-size:11px;color:#888;padding:3px 8px;border:1px solid #333;border-radius:4px;">'+enrolled+' enrolled</span>';
     if (isOfficer) {
-            h += '<button onclick="openClassModal(\\\'' + cls.id + '\\\')" class="btn btn-sm btn-secondary" style="font-size:10px;">Edit</button>';
-      h += '<button onclick="clockInAllClassMembers(\\\'' + cls.id + '\\\')" class="btn btn-sm btn-primary" style="font-size:10px;margin-left:4px;">&#128994; Clock In All</button>';
-      h += '<button onclick="deleteTrainingClass(\''+cls.id+'\')" class="btn btn-sm btn-danger" style="font-size:10px;">Delete</button>';
+      h += '<button data-cls-action="edit" data-cls-id="'+cls.id+'" class="btn btn-sm btn-secondary" style="font-size:10px;">&#9998; Edit</button>';
+      h += ' <button data-cls-action="clockall" data-cls-id="'+cls.id+'" class="btn btn-sm btn-primary" style="font-size:10px;">&#128994; Clock In All</button>';
+      h += ' <button data-cls-action="delete" data-cls-id="'+cls.id+'" class="btn btn-sm btn-danger" style="font-size:10px;">&#128465;</button>';
     }
-    h += '<button onclick="openClassDetailModal(\''+cls.id+'\')" class="btn btn-sm btn-secondary" style="font-size:10px;">Details</button>';
+    h += ' <button data-cls-action="detail" data-cls-id="'+cls.id+'" class="btn btn-sm btn-secondary" style="font-size:10px;">Details</button>';
     h += '</div></div>';
-    // ── Enrolled members list ──────────────────────────────
+    // Enrolled members list
     if ((cls.members||[]).length > 0) {
       var memberNames = (cls.members||[]).map(function(mid){
         var mbr=(state.roster||[]).find(function(x){ return x.id===mid; });
         if (!mbr) return null;
-        // Check if clocked in today
         var today2 = new Date().toISOString().slice(0,10);
         var att = (state.classAttendance||[]).find(function(a){ return a.classId===cls.id&&a.memberId===mid&&a.sessionDate===today2&&!a.clockedOutAt; });
         var name = mbr.last+', '+mbr.first;
@@ -2406,6 +2402,16 @@ function renderTrainingClasses() {
     h += '</div>';
   });
   container.innerHTML = h;
+  // Delegation — no onclick escaping needed
+  if (container) container.onclick = function(e) {
+    var b = e.target; while (b && !b.dataset.clsAction) b = b.parentElement;
+    if (!b) return;
+    var a = b.dataset.clsAction, id = b.dataset.clsId;
+    if      (a==='edit')    openClassModal(id);
+    else if (a==='clockall')clockInAllClassMembers(id);
+    else if (a==='delete')  deleteTrainingClass(id);
+    else if (a==='detail')  openClassDetailModal(id);
+  };
 }
 
 function enrollInClass(classId) {
@@ -6713,6 +6719,36 @@ function toggleMyShiftsOverflow(btn) {
   }
 }
 
+
+function clockInMyClass(btn) {
+  var classId = btn.dataset.clsId, sessionDate = btn.dataset.sessDate;
+  var cls = (state.trainingClasses||[]).find(function(c){ return c.id===classId; });
+  if (!cls) return;
+  var uid = state.currentUserId;
+  if (!uid) { showToast('\u26a0\ufe0f Please log in first.'); return; }
+  var today = localDateStr();
+  if (sessionDate !== today) { showToast('\u26a0\ufe0f This class is not today.'); return; }
+  if (!Array.isArray(state.classAttendance)) state.classAttendance = [];
+  var hasOpen = state.classAttendance.some(function(a){
+    return a.classId===classId && a.memberId===uid && a.sessionDate===today && !a.clockedOutAt;
+  });
+  if (hasOpen) { showToast('\u2139\ufe0f Already clocked in for this class.'); return; }
+  var now = new Date();
+  state.classAttendance.push({ id:'ca_'+Date.now()+'_'+uid, classId:classId, memberId:uid,
+    sessionDate:today, clockedInAt:now.toISOString(), clockedOutAt:null, clockedBy:uid });
+  if (!state.currentSession || state.currentSession.end) {
+    state.currentSession = { id:'sess_cls_'+Date.now(), userId:uid, start:now.toISOString(),
+      activity:'training', desc:cls.name, classId:classId, end:null, duration:null };
+    try { updateClockUI(true); } catch(e){}
+    if (typeof _clockTimerInterval!=='undefined') {
+      if (_clockTimerInterval) clearInterval(_clockTimerInterval);
+      _clockTimerInterval = setInterval(tickClockTimer, 1000);
+    }
+  }
+  save(); renderMyShifts(); try { renderTrainingClasses(); } catch(e){}
+  showToast('\u2705 Clocked in to '+cls.name+'!');
+}
+
 function renderMyShifts() {
   var container = document.getElementById('myShiftsContainer');
   var clockContainer = document.getElementById('clockTabMyShiftsContainer');
@@ -6837,7 +6873,16 @@ function renderMyShifts() {
         + '</div>'
         + seStaffingBar(ev)
         + sePositionSummary(ev);
-      if (isToday && !isClockedIn) html += '<div style="font-size:11px;color:#C8102E;font-weight:700;margin-top:2px;">Event is today &mdash; clock in via Special Events!</div>';
+      if (isToday && signup && !isClockedIn) {
+        var _evNow=new Date(), _evStart=new Date(ev.date+'T'+(ev.startTime||ev.time||'00:00')+':00');
+        var _evEnd=ev.endTime?new Date(ev.date+'T'+ev.endTime+':00'):new Date(_evStart.getTime()+7200000);
+        if (_evNow>=new Date(_evStart.getTime()-3600000) && _evNow<=_evEnd) {
+          html += '<button class="btn btn-sm btn-primary" style="margin-top:4px;font-size:11px;" '
+               + 'onclick="clockInSpecialEvent(this)" data-ev="'+ev.id+'">&#128994; Clock In</button>';
+        } else {
+          html += '<div style="font-size:11px;color:#888;margin-top:2px;">Opens 1 hr before event</div>';
+        }
+      }
       if (isClockedIn) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#128994; Clocked In' + (signup.clockedInAt ? ' at ' + new Date(signup.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '') + '</div>';
       html += '</div></div>';
 
@@ -6869,7 +6914,11 @@ function renderMyShifts() {
       html += '<div style="font-size:12px;color:#888;margin-top:2px;">'+(clsTime||'')+(cls.instructor?' · '+cls.instructor:'')+'</div>';
       if (clsIn)        html += '<div style="font-size:11px;color:#3498DB;font-weight:700;margin-top:2px;">In session now</div>';
       else if (clsDone) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">✓ Attended</div>';
-      else if (isToday) html += '<div style="font-size:11px;color:#3498DB;font-weight:700;margin-top:2px;">Class today — see Training tab to clock in</div>';
+      else if (isToday) {
+        var _clsId = cls.id, _sessD = sessionDate;
+        html += '<button class="btn btn-sm btn-primary" style="margin-top:4px;background:#0D1A2A;border-color:#3498DB;color:#3498DB;font-size:11px;" '
+             + 'onclick="clockInMyClass(this)" data-cls-id="'+_clsId+'" data-sess-date="'+_sessD+'">&#128336; Clock In</button>';
+      }
       html += '</div></div>';
     }
 
