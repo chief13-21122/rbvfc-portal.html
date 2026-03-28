@@ -1023,6 +1023,8 @@ function closeMoreMenu() { hideMoreMenu(); }
 // ═══════════════════════════════════════════════════
 //  CLOCK IN / OUT
 // ═══════════════════════════════════════════════════
+function _hexToRgb(h){var r=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h);return r?parseInt(r[1],16)+','+parseInt(r[2],16)+','+parseInt(r[3],16):'128,128,128';}
+
 function updateClockUI(in_) {
   // Treat cross-user session as "not clocked in" for UI purposes
   if (in_ && state.currentSession && state.currentSession.userId !== state.currentUserId) {
@@ -1113,23 +1115,33 @@ function updateClockUI(in_) {
       reasonEl.style.display = 'none';
     }
   }
-  // Staffing assignment badge
+  var _bdg=document.getElementById('clockBadgeLabel');
   if (staffBadge) {
-    if (in_) {
-      var todayStr = localDateStr();
-      var myShift = (state.staffingShifts||[]).find(function(s){
-        return s.date === todayStr && s.memberId === state.currentUserId && s.unitId;
-      });
-      if (myShift) {
-        staffBadge.style.display = 'block';
-        if (staffUnit) staffUnit.textContent = (typeof UNIT_LABELS !== 'undefined' && UNIT_LABELS[myShift.unitId]) ? UNIT_LABELS[myShift.unitId] : (myShift.unitId||'').toUpperCase();
-        if (staffPos)  staffPos.textContent  = myShift.position || '';
+    if (in_&&_sess) {
+      var _bc,_bl,_bt,_bs;
+      if (_isClass) {
+        _bc='#3498DB';_bl='CLASS IN SESSION';
+        var _c2=(state.trainingClasses||[]).find(function(c){return c.id===_sess.classId;});
+        _bt=(_c2&&_c2.name)||_sess.desc||'Training';_bs=_c2&&_c2.instructor?'Instructor: '+_c2.instructor:'';
+      } else if (_sess.activity==='meeting') {
+        _bc='#F5A623';_bl='MEETING';_bt=_sess.desc||'Company Meeting';_bs='';
+      } else if (_sess.activity==='fundraiser') {
+        _bc='#1ABC9C';_bl='SPECIAL EVENT';_bt=_sess.desc||'Event';_bs='';
       } else {
-        staffBadge.style.display = 'none';
+        var _td=localDateStr();
+        var _ms=(state.staffingShifts||[]).find(function(s){return s.date===_td&&s.memberId===state.currentUserId&&s.unitId;});
+        if (_ms) {
+          _bc='#C8102E';_bl='STAFFING ASSIGNMENT';
+          _bt=(UNIT_LABELS&&UNIT_LABELS[_ms.unitId])||(_ms.unitId||'').toUpperCase();_bs=_ms.position||'';
+        } else { _bc='#E67E22';_bl='COLLATERAL DUTY';_bt=_sess.desc||'On Duty';_bs=''; }
       }
-    } else {
-      staffBadge.style.display = 'none';
-    }
+      staffBadge.style.display='block';
+      staffBadge.style.border='1px solid '+_bc;
+      staffBadge.style.background='rgba('+_hexToRgb(_bc)+',0.1)';
+      if (_bdg){_bdg.textContent=_bl;_bdg.style.color=_bc;}
+      if (staffUnit) staffUnit.textContent=_bt;
+      if (staffPos)  staffPos.textContent=_bs;
+    } else { staffBadge.style.display='none'; }
   }
   // Header badge
   if (badge)  badge.style.display  = in_ ? 'inline-flex' : 'none';
@@ -6978,7 +6990,7 @@ function renderMyShifts() {
       var _can=_nw>=new Date(_ms.getTime()-3600000)&&_nw<=_me&&_od===today;
       var _tp=(function(){ var p=_m.time.split(':'); var h=parseInt(p[0]); return (h%12||12)+':'+p[1]+' '+(h>=12?'PM':'AM'); })();
       var _rl={weekly:'Weekly',biweekly:'Every 2 wks',monthly:'Monthly'};
-      html += '<div style="background:#181818;border:2px solid '+(_ci?'#27AE60':'#2A2A2A')+';border-radius:12px;padding:14px;display:flex;gap:12px;align-items:stretch;">'
+      html += '<div style="background:#181818;border:2px solid '+(_ci?'#27AE60':'#2A1400')+';border-left:4px solid '+(_ci?'#27AE60':'#F5A623')+';border-radius:12px;padding:14px;display:flex;gap:12px;align-items:stretch;">'
         +'<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:44px;background:#111;border-radius:8px;padding:8px 4px;">'
         +'<div style="font-size:11px;color:#888;text-transform:uppercase;">'+_dO.toLocaleDateString([],{month:'short'})+'</div>'
         +'<div style="font-size:22px;font-weight:700;color:#F0F0F0;line-height:1;">'+_dO.getDate()+'</div>'
@@ -6986,7 +6998,7 @@ function renderMyShifts() {
         +'</div>'
         +'<div style="flex:1;">'
         +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">'
-        +'<span style="font-size:10px;font-weight:700;letter-spacing:1.5px;padding:2px 7px;border-radius:4px;background:#1A2A3A;color:#3498DB;text-transform:uppercase;">MTG</span>'
+        +'<span style="font-size:10px;font-weight:700;letter-spacing:1.5px;padding:2px 7px;border-radius:4px;background:#1A1200;color:#F5A623;text-transform:uppercase;">MTG</span>'
         +(_m.recurrence&&_m.recurrence.freq?'<span style="font-size:10px;color:#555;">Repeats: '+(_rl[_m.recurrence.freq]||_m.recurrence.freq)+'</span>':'')
         +'</div>'
         +'<div style="font-weight:700;font-size:15px;color:#F0F0F0;">'+_m.title+'</div>'
@@ -7968,7 +7980,56 @@ function checkAutoClockOuts() {
   if (changed) { save(); try{renderMyShifts();}catch(e){} try{renderStaffingBoard();}catch(e){} }
 }
 
+function openMtgAlert(mid, mdate) {
+  var mtg=(state.meetings||[]).find(function(m){return m.id===mid;});
+  if (!mtg) return;
+  var tgts=(state.meetingAttendance||[]).filter(function(a){return a.mtgId===mid&&a.date===mdate;}).map(function(a){return a.memberId;});
+  var old=document.getElementById('_mtgAM'); if(old) old.remove();
+  var wrap=document.createElement('div'); wrap.id='_mtgAM';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var inner=document.createElement('div');
+  inner.style.cssText='background:#1A1A1A;border:1px solid #F5A623;border-radius:14px;padding:20px;width:100%;max-width:400px;';
+  var title=document.createElement('div'); title.style.cssText='font-size:16px;font-weight:700;color:#F5A623;margin-bottom:4px;'; title.textContent='\uD83D\uDD14 Meeting Alert';
+  var sub=document.createElement('div'); sub.style.cssText='font-size:12px;color:#888;margin-bottom:10px;'; sub.textContent=mtg.title+(mdate?' \u2014 '+mdate:'');
+  var ta=document.createElement('textarea'); ta.id='_mtgAMsg'; ta.rows=3; ta.placeholder='Enter alert message\u2026';
+  ta.style.cssText='width:100%;background:#111;border:1px solid #F5A623;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;';
+  var hint=document.createElement('div'); hint.style.cssText='font-size:11px;color:#555;margin-top:6px;margin-bottom:12px;';
+  hint.textContent=tgts.length?'Sending to '+tgts.length+' attendee'+(tgts.length===1?'':'s'):'Sending to all members';
+  var idIn=document.createElement('input'); idIn.type='hidden'; idIn.id='_mtgAId'; idIn.value=mid;
+  var dtIn=document.createElement('input'); dtIn.type='hidden'; dtIn.id='_mtgADate'; dtIn.value=mdate;
+  var tgIn=document.createElement('input'); tgIn.type='hidden'; tgIn.id='_mtgATgts'; tgIn.value=tgts.join(',');
+  var btnRow=document.createElement('div'); btnRow.style.cssText='display:flex;gap:10px;';
+  var sendBtn=document.createElement('button');
+  sendBtn.style.cssText='flex:2;background:#F5A623;border:none;color:#111;border-radius:8px;padding:11px;cursor:pointer;font-size:14px;font-weight:700;';
+  sendBtn.textContent='Send Alert'; sendBtn.onclick=doSendMtgAlert;
+  var canBtn=document.createElement('button');
+  canBtn.style.cssText='flex:1;background:none;border:1px solid #333;color:#888;border-radius:8px;padding:11px;cursor:pointer;';
+  canBtn.textContent='Cancel'; canBtn.onclick=function(){ document.getElementById('_mtgAM').remove(); };
+  btnRow.appendChild(sendBtn); btnRow.appendChild(canBtn);
+  [title,sub,ta,hint,idIn,dtIn,tgIn,btnRow].forEach(function(el){inner.appendChild(el);});
+  wrap.appendChild(inner); document.body.appendChild(wrap);
+  setTimeout(function(){ta.focus();},100);
+}
+function doSendMtgAlert() {
+  var msg=((document.getElementById('_mtgAMsg')||{}).value||'').trim();
+  if (!msg){showToast('\u26a0\ufe0f Enter a message.');return;}
+  var mid=(document.getElementById('_mtgAId')||{}).value||'';
+  var mdate=(document.getElementById('_mtgADate')||{}).value||'';
+  var tgts=((document.getElementById('_mtgATgts')||{}).value||'').split(',').filter(Boolean);
+  var mtg=(state.meetings||[]).find(function(m){return m.id===mid;});
+  if (!Array.isArray(state.staffingAlerts)) state.staffingAlerts=[];
+  state.staffingAlerts.unshift({id:'ma_'+Date.now(),type:'meeting_alert',targetMembers:tgts,mtgId:mid,
+    sentBy:state.currentUserId,sentAt:new Date().toISOString(),needsAck:true,clears:[],
+    groupLabel:(mtg?mtg.title:'Meeting')+(mdate?' ('+mdate+')':''),msg:msg});
+  save();
+  var mo=document.getElementById('_mtgAM'); if(mo) mo.remove();
+  try{renderStaffingAlerts();}catch(e){}
+  showToast('\u2705 Alert sent'+(tgts.length?' to '+tgts.length+' member'+(tgts.length===1?'':'s'):'')+'.');
+  showSubmitConfirmation('Meeting alert sent','\uD83D\uDD14');
+}
+
 function renderMeetingsList() {
+  var _mUid=state.currentUserId,_mMe=_mUid?(state.roster||[]).find(function(m){return m.id===_mUid;}):null,_mOff=_mMe&&(_mMe.appRole==='officer'||_mMe.appRole==='admin');
   var container=document.getElementById('meetingsListContainer'); if(!container) return;
   var mtgs=(state.meetings||[]).slice().sort(function(a,b){ return b.date.localeCompare(a.date); });
   if (!mtgs.length) { container.innerHTML='<p style="color:#666;font-size:13px;text-align:center;padding:16px;">No meetings scheduled.</p>'; return; }
@@ -7978,6 +8039,7 @@ function renderMeetingsList() {
     return ' \u00b7 Repeats: '+(rlabels[mtg.recurrence.freq]||mtg.recurrence.freq)+(mtg.recurrence.until?' until '+mtg.recurrence.until:'');
   }
   function mtgCard(mtg) {
+    var _canAlert=_mOff||(mtg.inCharge&&mtg.inCharge===_mUid);
     var nd=nextMeetingOccurrence(mtg), isPast=!nd, sd=nd||mtg.date;
     var d=new Date(sd+'T12:00:00');
     var ds=d.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric',year:'numeric'});
@@ -8005,6 +8067,7 @@ function renderMeetingsList() {
       +'</div>'
       +'<div style="display:flex;flex-direction:column;gap:5px;">'
       +'<button onclick="openEditMeeting(\''+mtg.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#9998; Edit</button>'
+      +(_canAlert?'<button data-mid="'+mtg.id+'" data-mdate="'+sd+'" class="_mtgAlertBtn" style="background:#1A1200;border:1px solid #F5A623;color:#F5A623;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;margin-top:3px;">&#128276; Send Alert</button>':'')
       +'<button onclick="deleteMeeting(\''+mtg.id+'\')" style="background:none;border:1px solid #333;color:#E74C3C;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#128465; Delete</button>'
       +'</div></div></div>';
   }
@@ -8017,6 +8080,7 @@ function renderMeetingsList() {
        +past.map(function(m){ return mtgCard(m); }).join('')+'</div>';
   }
   container.innerHTML=h;
+  if(container)container.addEventListener('click',function(e){var b=e.target.closest('._mtgAlertBtn');if(b)openMtgAlert(b.dataset.mid,b.dataset.mdate);});
 }
 
 
@@ -12710,7 +12774,7 @@ function applyBulkEdit() {
 
           <!-- Staffing assignment badge — shown when on duty via staffing -->
           <div id="clockStaffingBadge" style="display:none;margin:8px auto 0;width:fit-content;background:rgba(200,16,46,0.1);border:1px solid rgba(200,16,46,0.4);border-radius:8px;padding:6px 16px;text-align:center;">
-            <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#C8102E;margin-bottom:2px;">STAFFING ASSIGNMENT</div>
+            <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#C8102E;margin-bottom:2px;" id="clockBadgeLabel">STAFFING ASSIGNMENT</div>
             <div id="clockStaffingUnit" style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px;color:#F0F0F0;line-height:1;"></div>
             <div id="clockStaffingPos" style="font-size:12px;color:#888;letter-spacing:1px;margin-top:1px;"></div>
           </div>
