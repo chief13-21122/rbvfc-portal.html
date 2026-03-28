@@ -1035,9 +1035,9 @@ function updateClockUI(in_) {
   var _sess     = in_ && state.currentSession && !state.currentSession.end ? state.currentSession : null;
   var _isClass  = _sess && (_sess.activity === 'training' || _sess.activity === 'drill') && _sess.classId;
   // Colours: blue for class, green for duty/staffing
-  var _accent   = _isClass ? '#3498DB' : '#27AE60';
-  var _accentBg = _isClass ? 'rgba(52,152,219,0.12)' : 'rgba(39,174,96,0.12)';
-  var _accentShadow = _isClass ? 'rgba(52,152,219,0.4)' : 'rgba(46,204,113,0.4)';
+  var _accent   = _isClass ? ACT_COLORS.class : '#27AE60';
+  var _accentBg = _isClass ? actBg(ACT_COLORS.class) : 'rgba(39,174,96,0.12)';
+  var _accentShadow = _isClass ? 'rgba('+_hexToRgb(ACT_COLORS.class)+',0.4)' : 'rgba(46,204,113,0.4)';
 
   var inBtn  = document.getElementById('clockInBtn');
   var outBtn = document.getElementById('clockOutBtn');
@@ -1077,7 +1077,7 @@ function updateClockUI(in_) {
     }
   }
   if (timerDisp && in_) {
-    timerDisp.style.color = _isClass ? '#3498DB' : '#555';
+    timerDisp.style.color = _isClass ? ACT_COLORS.class : '#555';
   }
   if (faceArea && in_) {
     // Subtle tinted background when in a class
@@ -1097,7 +1097,7 @@ function updateClockUI(in_) {
         var cls = (state.trainingClasses||[]).find(function(c){ return c.id===_sess.classId; });
         var clsName = (cls && cls.name) || _sess.desc || 'Training Class';
         reasonEl.textContent = '\ud83d\udcd8 ' + clsName;
-        reasonEl.style.color = '#3498DB';
+        reasonEl.style.color = ACT_COLORS.class;
         reasonEl.style.fontSize = '15px';
         reasonEl.style.fontWeight = '700';
         reasonEl.style.letterSpacing = '0.5px';
@@ -1120,20 +1120,26 @@ function updateClockUI(in_) {
     if (in_&&_sess) {
       var _bc,_bl,_bt,_bs;
       if (_isClass) {
-        _bc='#3498DB';_bl='CLASS IN SESSION';
+        _bc=ACT_COLORS.class;_bl='CLASS IN SESSION';
         var _c2=(state.trainingClasses||[]).find(function(c){return c.id===_sess.classId;});
         _bt=(_c2&&_c2.name)||_sess.desc||'Training';_bs=_c2&&_c2.instructor?'Instructor: '+_c2.instructor:'';
-      } else if (_sess.activity==='meeting') {
-        _bc='#F5A623';_bl='MEETING';_bt=_sess.desc||'Company Meeting';_bs='';
+      } else if (_sess.activity==='meeting'||_sess.activity==='boardmeeting') {
+        _bc=ACT_COLORS.meeting;_bl='MEETING';_bt=_sess.desc||'Company Meeting';_bs='';
+      } else if (_sess.activity==='training') {
+        _bc=ACT_COLORS.training;_bl='FORMAL TRAINING';_bt=_sess.desc||'Training';_bs='';
+      } else if (_sess.activity==='drill') {
+        _bc=ACT_COLORS.drill;_bl='DRILL';_bt=_sess.desc||'Drill';_bs='';
       } else if (_sess.activity==='fundraiser') {
-        _bc='#1ABC9C';_bl='SPECIAL EVENT';_bt=_sess.desc||'Event';_bs='';
+        _bc=ACT_COLORS.fundraiser;_bl='SPECIAL EVENT';_bt=_sess.desc||'Event';_bs='';
+      } else if (_sess.activity==='duties'||_sess.activity==='collateral'||_sess.activity==='duty') {
+        _bc=ACT_COLORS.duties;_bl='STANDBY / COLLATERAL DUTY';_bt=_sess.desc||'On Duty';_bs='';
       } else {
         var _td=localDateStr();
         var _ms=(state.staffingShifts||[]).find(function(s){return s.date===_td&&s.memberId===state.currentUserId&&s.unitId;});
         if (_ms) {
-          _bc='#C8102E';_bl='STAFFING ASSIGNMENT';
+          _bc=ACT_COLORS.emergency;_bl='STAFFING ASSIGNMENT';
           _bt=(UNIT_LABELS&&UNIT_LABELS[_ms.unitId])||(_ms.unitId||'').toUpperCase();_bs=_ms.position||'';
-        } else { _bc='#E67E22';_bl='COLLATERAL DUTY';_bt=_sess.desc||'On Duty';_bs=''; }
+        } else { _bc=ACT_COLORS.duties;_bl='COLLATERAL DUTY';_bt=_sess.desc||'On Duty';_bs=''; }
       }
       staffBadge.style.display='block';
       staffBadge.style.border='1px solid '+_bc;
@@ -1199,6 +1205,28 @@ var CAT_CONFIG = {
   committee_chair:  { pts: 15, maxPts: 25, label: 'Committee Chairperson' },
   committee_member: { pts: 10, maxPts: 25, label: 'Committee Member' }
 };
+
+
+// ── ACTIVITY COLOR PALETTE ─────────────────────────────────────
+// Single source of truth: Emergency=Red, Drill=Orange, Class=BabyBlue,
+// Standby=Grey, Meeting=Yellow, FormalTraining=Purple
+var ACT_COLORS = {
+  emergency:        '#C8102E',   // Red
+  drill:            '#E67E22',   // Orange
+  training:         '#9B59B6',   // Purple (Formal Training)
+  class:            '#5DADE2',   // Baby Blue (in-class session)
+  duties:           '#7F8C8D',   // Grey (Standby / Collateral)
+  collateral:       '#7F8C8D',   // Grey (alias)
+  duty:             '#7F8C8D',   // Grey (alias)
+  meeting:          '#F5A623',   // Yellow (Company Meeting)
+  boardmeeting:     '#F5A623',   // Yellow
+  position:         '#C8102E',   // Red (positions tie to emergency)
+  fundraiser:       '#1ABC9C',   // Teal (Special Event)
+  other:            '#95A5A6',   // Light grey
+};
+// Background tint for a color: rgba(r,g,b,0.12)
+function actBg(c){var r=_hexToRgb(c);return 'rgba('+r+',0.12)';}
+function actBorder(c){var r=_hexToRgb(c);return 'rgba('+r+',0.5)';}
 
 // ── Canonical LOSAP position title lists (kept in sync with umPositionBoxes) ─
 var LOSAP_OFFICER_TITLES = [
@@ -1291,8 +1319,13 @@ function typeLabel(cat) {
 }
 
 function typePillColor(cat) {
-  var map = { emergency:'red', meeting:'blue', training:'green', drill:'gold', duties:'gray', position:'red' };
+  // Returns CSS class name (legacy) - use typePillStyle(cat) for full inline style
+  var map = { emergency:'red', meeting:'gold', training:'purple', drill:'orange', duties:'gray', position:'red', collateral:'gray', duty:'gray', boardmeeting:'gold' };
   return map[cat]||'gray';
+}
+function typePillStyle(cat) {
+  var c = ACT_COLORS[cat] || ACT_COLORS.other;
+  return 'background:'+actBg(c)+';color:'+c+';border:1px solid '+actBorder(c)+';border-radius:5px;padding:2px 7px;font-size:11px;font-weight:700;white-space:nowrap;';
 }
 
 // ═══════════════════════════════════════════════════
@@ -1911,7 +1944,7 @@ function renderLOSAP() {
     var certBtn = item.cert ? '<a href="'+item.cert+'" target="_blank" style="font-size:11px;color:#3498DB;">📄 Cert</a>' : '';
     var unitBadges = item.units ? item.units.map(function(u){ return '<span class="pill gray" style="font-size:10px;padding:2px 5px;">'+u+'</span>'; }).join(' ') : '';
     tr.innerHTML = '<td style="padding:8px;color:#AAA;white-space:nowrap;">'+item.date+'</td>'+
-      '<td style="padding:8px;"><span class="pill '+typePillColor(item.cat)+'" style="font-size:11px;">'+typeLabel(item.cat)+'</span></td>'+
+      '<td style="padding:8px;"><span class="pill '+typePillStyle(item.cat)+'" style="font-size:11px;">'+typeLabel(item.cat)+'</span></td>'+
       '<td style="padding:8px;color:#CCC;">'+item.desc+(unitBadges?' <br>'+unitBadges:'')+(certBtn?' '+certBtn:'')+'</td>'+
       '<td style="padding:8px;text-align:center;font-weight:700;color:#F0F0F0;">+'+item.pts+'</td>';
     tbody.appendChild(tr);
@@ -6952,7 +6985,7 @@ function renderMyShifts() {
       html += dateBox;
       html += '<div style="flex:1;">'
         + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
-        + '<span style="font-size:10px;background:#1A2A3A;color:#7EC8E3;border:1px solid #2980B9;border-radius:4px;padding:1px 5px;flex-shrink:0;">EVENT</span>'
+        + '<span style="font-size:10px;background:#0D1A0D;color:#1ABC9C;border:1px solid rgba(26,188,156,0.5);border-radius:4px;padding:1px 5px;flex-shrink:0;">EVENT</span>'
         + '<span style="font-weight:700;font-size:14px;color:#F0F0F0;">' + ev.title + '</span>'
         + (signup&&signup.position ? '<span style="font-size:10px;background:#1A3A1A;color:#27AE60;border:1px solid #27AE60;border-radius:4px;padding:1px 5px;margin-left:4px;">' + signup.position + '</span>' : '')
         + '</div>'+ '</div>'
@@ -7001,12 +7034,12 @@ function renderMyShifts() {
           clsTime += ' – '+(ceh%12||12)+':'+cem+' '+(ceh>=12?'PM':'AM');
         }
       }
-      var clsBd = clsIn ? '#3498DB' : (clsDone ? '#27AE60' : (isToday ? '#3498DB' : '#1A2A3A'));
+      var clsBd = clsIn ? ACT_COLORS.class : (clsDone ? '#27AE60' : (isToday ? ACT_COLORS.class : '#0D1825'));
       html += '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#181818;border:1px solid '+clsBd+';border-left:4px solid '+clsBd+';border-radius:10px;margin-bottom:8px;flex-wrap:wrap;">';
       html += dateBox;
       html += '<div style="flex:1;">';
       html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
-      html += '<span style="font-size:10px;background:#0D1A2A;color:#3498DB;border:1px solid #3498DB;border-radius:4px;padding:1px 5px;flex-shrink:0;">CLASS</span>';
+      html += '<span style="font-size:10px;background:#0D1825;color:#5DADE2;border:1px solid rgba(93,173,226,0.5);border-radius:4px;padding:1px 5px;flex-shrink:0;">CLASS</span>';
       html += '<span style="font-weight:700;font-size:14px;color:#F0F0F0;">'+cls.name+'</span>';
       html += '</div>';
       html += '<div style="font-size:12px;color:#888;margin-top:2px;">'+(clsTime||'')+(cls.instructor?' · '+cls.instructor:'')+'</div>';
@@ -9886,9 +9919,9 @@ function renderCompanyStats() {
 
   container.innerHTML =
     statBox('&#127941;', 'Qualified Members', qualified + ' / ' + totalMembers, '#27AE60', qualPct + '% of company &nbsp;&middot;&nbsp; ' + onTrack + ' on track') +
-    statBox('&#128680;', 'Emergency Responses', totalResponses, '#E74C3C', yr + ' service year') +
-    statBox('&#128218;', 'Training Hours', totalTrainingHrs.toFixed(0) + ' hrs', '#3498DB', trainingActs.length + ' training activities') +
-    statBox('&#128336;', 'Duty Hours Logged', dutyHrs.toFixed(0) + ' hrs', '#F5A623', drills + ' drill' + (drills!==1?'s':'') + ' conducted');
+    statBox('&#128680;', 'Emergency Responses', totalResponses, ACT_COLORS.emergency, yr + ' service year') +
+    statBox('&#128218;', 'Training Hours', totalTrainingHrs.toFixed(0) + ' hrs', ACT_COLORS.training, trainingActs.length + ' training activities') +
+    statBox('&#128336;', 'Duty Hours Logged', dutyHrs.toFixed(0) + ' hrs', ACT_COLORS.drill, drills + ' drill' + (drills!==1?'s':'') + ' conducted');
 }
 
 function renderCompanyLOSAP() {
@@ -9921,9 +9954,9 @@ function renderCompanyLOSAP() {
   // Build clocked-in lookup: memberId -> { activity, note }
   var clockedIn = {};
   var activityLabels = {
-    duty:'Station Duty', meeting:'Meeting', training:'Training',
-    collateral:'Collateral Duty', fundraiser:'Fundraiser/Event', other:'Other',
-    drill:'Drill / Training'
+    duty:'Standby / Duty', meeting:'Company Meeting', training:'Formal Training',
+    collateral:'Collateral Duty', fundraiser:'Special Event', other:'Other',
+    drill:'Drill', emergency:'Emergency Response', class:'Class In Session'
   };
   var todayStr = localDateStr();
 
@@ -10781,7 +10814,7 @@ function tickClockTimer() {
     // Keep blue for class sessions; shift green→amber→red for duty
     var _isClassSess = state.currentSession && state.currentSession.classId && !state.currentSession.end;
     if (_isClassSess) {
-      el.style.color = '#3498DB';
+      el.style.color = ACT_COLORS.class;
     } else {
       var hours = elapsed / 3600;
       var col;
