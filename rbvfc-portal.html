@@ -5531,7 +5531,13 @@ function renderStaffingBoard() {
         var isPastDate = date < localDateStr();
         var isPastTime = date === localDateStr() && new Date().getHours() >= 20;
         var _elig = member ? checkStaffingEligibility(member, uId, posName) : { eligible:false, code:'NO_MEMBER', reason:'' };
-        var canSignUp = !hasConflict && !adminRestricted && !isPastDate && !isPastTime && _elig.eligible && !alreadyHaveSlot && !isFullyCovered;
+        // Same-unit rule: member may not hold multiple positions on the same unit simultaneously
+        var hasSameUnitConflict = (state.staffingShifts||[]).some(function(s){
+          return s.date===date && s.unitId===uId && s.memberId===uid &&
+                 s.positionIndex !== posIdx &&
+                 _shiftsOverlap(s.shiftStart||'0700', s.shiftHours||24, _nextStart||'0700', _remHours||24);
+        });
+        var canSignUp = !hasConflict && !adminRestricted && !isPastDate && !isPastTime && _elig.eligible && !alreadyHaveSlot && !isFullyCovered && !hasSameUnitConflict;
 
         // Pre-fill values for the Sign Up modal
         var _nextStart = nextOpenStart() || '0700';
@@ -5637,6 +5643,12 @@ function renderStaffingBoard() {
                + 'letter-spacing:0.5px;flex-shrink:0;">'+_btnLabel+'</button>';
         } else if (!canSignUp && !isFullyCovered && !alreadyHaveSlot) {
           // Show why blocked
+          if (hasSameUnitConflict) {
+            html += '<div style="display:inline-flex;align-items:center;gap:6px;background:#1A0A00;border:1px solid #3A2A00;border-radius:6px;padding:5px 10px;">'
+                  + '<span style="font-size:13px;">\u26d4</span>'
+                  + '<div style="font-size:11px;color:#F5A623;line-height:1.3;">Already staffed on this unit — one position per unit only</div>'
+                  + '</div>';
+          }
           var _bIco = {'BANNED_RANK':'\u26d4','RIDE_REPORT':'\ud83d\udecb','MIN_RANK':'\ud83c\udfc5','REQ_CERT':'\ud83d\udcc4'}[_elig.code]||'\u26a0\ufe0f';
           if (!_elig.eligible) {
             html += '<div style="display:inline-flex;align-items:center;gap:6px;background:#1A0A0A;border:1px solid #3A1A1A;border-radius:6px;padding:5px 10px;">'
@@ -5930,10 +5942,16 @@ function confirmSignUp() {
     return s.date===date && s.unitId===unitId && s.positionIndex===posIdx && s.memberId===uid;
   });
   if (_alreadyInPos) { showToast('\u26a0\ufe0f You are already signed up for the '+posName+' position.'); return; }
-  // Time-overlap check — only block if on a DIFFERENT unit (same unit = different position = OK)
+  // Staffing rule: no member may hold more than one position on the same unit
+  // Also block overlapping shifts on different units
   var _overlapSh = _memberHasOverlappingShift(uid, date, start, hours);
-  if (_overlapSh && _overlapSh.unitId !== unitId) {
-    showToast('\u26a0\ufe0f Conflict: already on '+(UNIT_LABELS[_overlapSh.unitId]||_overlapSh.unitId)+' at that time.');
+  if (_overlapSh) {
+    var _oUnit = (UNIT_LABELS&&UNIT_LABELS[_overlapSh.unitId]) || _overlapSh.unitId;
+    if (_overlapSh.unitId === unitId) {
+      showToast('\u26d4 Already signed up for ' + (_overlapSh.position||'a position') + ' on ' + _oUnit + '. One position per unit only.');
+    } else {
+      showToast('\u26a0\ufe0f Conflict: already on '+ _oUnit +' during that time.');
+    }
     return;
   }
   if (!Array.isArray(state.staffingShifts)) state.staffingShifts = [];
@@ -6127,9 +6145,20 @@ function officerAssign(date, unitId) {
     return s.date===date && s.unitId===unitId && s.positionIndex===posIdx && s.memberId===memberId;
   });
   if (memberAlreadyOnPos) { showToast('\u26a0\ufe0f ' + assigningMember.last + ' already has a slot for ' + posName + ' on this date.'); return; }
-  // Check for time-overlap conflict before assigning
+  // Check: no member may staff more than one position on the same unit at the same time
+  var sameUnitConflict = (state.staffingShifts||[]).find(function(s){
+    return s.date===date && s.unitId===unitId && s.memberId===memberId && s.positionIndex!==posIdx &&
+           _shiftsOverlap(s.shiftStart||'0700', s.shiftHours||24, start, hours);
+  });
+  if (sameUnitConflict) {
+    var _scm = (state.roster||[]).find(function(r){ return r.id===memberId; });
+    var _scName = _scm ? _scm.last+', '+_scm.first : 'That member';
+    showToast('\u26d4 ' + _scName + ' is already assigned to ' + (sameUnitConflict.position||'a position') + ' on ' + (UNIT_LABELS[unitId]||unitId) + '. A member may only hold one position per unit.');
+    return;
+  }
+  // Check for time-overlap conflict on any OTHER unit
   var overlapShift = _memberHasOverlappingShift(memberId, date, start, hours);
-  if (overlapShift) {
+  if (overlapShift && overlapShift.unitId !== unitId) {
     var mConflict = (state.roster||[]).find(function(r){ return r.id===memberId; });
     var mName = mConflict ? mConflict.last+', '+mConflict.first : 'That member';
     showToast('\u26a0\ufe0f '+mName+' already has an overlapping shift on '+(UNIT_LABELS[overlapShift.unitId]||overlapShift.unitId)+'.');
