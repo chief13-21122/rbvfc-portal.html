@@ -9934,47 +9934,75 @@ function renderCompanyLOSAP() {
     totals[m.id] = { member:m, pts:mPts, hours:mHours, responses:mResponses };
   });
 
-  // Build clocked-in lookup: memberId -> { activity, note }
+  // Build clocked-in lookup: memberId -> { activity, note, color }
   var clockedIn = {};
-  var activityLabels = {
+  var _aLabels = {
     duty:'Standby / Duty', meeting:'Company Meeting', training:'Formal Training',
-    collateral:'Collateral Duty', fundraiser:'Special Event', other:'Other',
-    drill:'Drill', emergency:'Emergency Response', class:'Class In Session'
+    collateral:'Collateral Duty', fundraiser:'Special Event', other:'On Duty',
+    drill:'Drill', emergency:'Emergency Response', class:'Class In Session',
+    boardmeeting:'Board Meeting'
   };
   var todayStr = localDateStr();
 
-  // 1. Members with an open clock session started TODAY
-  var _todayStr = localDateStr();
-  (state.sessions||[]).filter(function(s){ return !s.end && s.start && s.start.slice(0,10)===_todayStr; }).forEach(function(s){
-    if (!s.userId) return;
-    // Check if this member also has a staffing assignment today — if so, show unit+position
-    var staffShift = (state.staffingShifts||[]).find(function(sh){
-      return sh.date === todayStr && sh.memberId === s.userId && sh.unitId;
-    });
-    if (staffShift) {
-      clockedIn[s.userId] = {
-        activity: (staffShift.unitId||'').toUpperCase(),
-        note: staffShift.position || ''
-      };
-    } else {
-      clockedIn[s.userId] = {
-        activity: activityLabels[s.activity] || s.activity || 'On Duty',
-        note: s.desc || s.note || ''
-      };
-    }
-  });
+  function _ciSet(uid, activity, note, color) {
+    if (!uid || clockedIn[uid]) return; // first source wins
+    clockedIn[uid] = { activity: activity, note: note || '', color: color || '#27AE60' };
+  }
 
-  // 2. Staffing shifts explicitly clocked in (via staffing Clock In button) also show — covers cases with no open session
+  // Source 1: Staffing shifts clocked in → RED (on apparatus)
   (state.staffingShifts||[]).filter(function(s){
-    return s.date === todayStr && s.clockedIn && s.memberId && !clockedIn[s.memberId];
+    return s.date===todayStr && s.clockedIn && !s.clockedOutAt && s.memberId;
   }).forEach(function(s){
-    clockedIn[s.memberId] = {
-      activity: (s.unitId||'').toUpperCase(),
-      note: s.position || ''
-    };
+    var lbl = (UNIT_LABELS&&UNIT_LABELS[s.unitId]) || (s.unitId||'').toUpperCase();
+    _ciSet(s.memberId, 'emergency', lbl + (s.position?' · '+s.position:''), ACT_COLORS.emergency);
   });
 
-  // Update stats summary alongside leaderboard
+  // Source 2: Staffing shifts assigned today (not clocked in yet) — grey
+  (state.staffingShifts||[]).filter(function(s){
+    return s.date===todayStr && s.memberId && !s.clockedOutAt && !clockedIn[s.memberId];
+  }).forEach(function(s){
+    var lbl = (UNIT_LABELS&&UNIT_LABELS[s.unitId]) || (s.unitId||'').toUpperCase();
+    _ciSet(s.memberId, 'duties', lbl + (s.position?' · '+s.position:''), '#555');
+  });
+
+  // Source 3: Active currentSession (logged-in user's own session)
+  if (state.currentSession && !state.currentSession.end && state.currentSession.userId) {
+    var _cs = state.currentSession;
+    var _csAct = _cs.activity || 'duty';
+    var _csColor = _cs.classId ? ACT_COLORS.class : (ACT_COLORS[_csAct] || ACT_COLORS.duties);
+    var _csNote = _cs.desc || _aLabels[_csAct] || 'On Duty';
+    if (_cs.classId) {
+      var _csCls = (state.trainingClasses||[]).find(function(c){return c.id===_cs.classId;});
+      _csNote = _csCls ? _csCls.name : 'Class In Session';
+    }
+    _ciSet(_cs.userId, _csAct, _csNote, _csColor);
+  }
+
+  // Source 4: Class attendance — BABY BLUE
+  (state.classAttendance||[]).filter(function(a){
+    return a.sessionDate===todayStr && a.clockedInAt && !a.clockedOutAt && a.memberId;
+  }).forEach(function(a){
+    var cls = (state.trainingClasses||[]).find(function(c){return c.id===a.classId;});
+    _ciSet(a.memberId, 'class', cls ? cls.name : 'Training Class', ACT_COLORS.class);
+  });
+
+  // Source 5: Meeting attendance clocked in — YELLOW
+  (state.meetingAttendance||[]).filter(function(a){
+    return a.date===todayStr && a.clockedInAt && !a.clockedOutAt && a.memberId;
+  }).forEach(function(a){
+    var mtg = (state.meetings||[]).find(function(m){return m.id===a.mtgId;});
+    _ciSet(a.memberId, 'meeting', mtg ? mtg.title : 'Meeting', ACT_COLORS.meeting);
+  });
+
+  // Source 6: Legacy state.sessions (collateral duty, drill, etc.)
+  (state.sessions||[]).filter(function(s){
+    return !s.end && s.start && s.start.slice(0,10)===todayStr && s.userId;
+  }).forEach(function(s){
+    var act = s.activity || 'duty';
+    _ciSet(s.userId, act, s.desc || s.note || _aLabels[act] || act, ACT_COLORS[act] || ACT_COLORS.duties);
+  });
+
+    // Update stats summary alongside leaderboard
   try { renderCompanyStats(); } catch(e){}
   var sorted = Object.values(totals).sort(function(a,b){ return b.pts-a.pts; });
   if(!sorted.length) {
@@ -10025,12 +10053,14 @@ function renderCompanyLOSAP() {
       }
 
       var ci = clockedIn[m.id];
+      var _ciColor = ci ? (ci.color || '#27AE60') : '#27AE60';
+      var _ciRgb   = _hexToRgb(_ciColor);
       var dutyCell = ci
-        ? '<td><span style="display:inline-flex;align-items:center;gap:5px;background:rgba(39,174,96,0.12);border:1px solid rgba(39,174,96,0.35);border-radius:12px;padding:2px 8px;font-size:11px;color:#2ECC71;white-space:nowrap;">' +
-            '<span style="width:6px;height:6px;border-radius:50%;background:#2ECC71;flex-shrink:0;box-shadow:0 0 5px #2ECC71;display:inline-block;animation:pulse 2s infinite;"></span>' +
+        ? '<td><span style="display:inline-flex;align-items:center;gap:5px;background:rgba('+_ciRgb+',0.12);border:1px solid rgba('+_ciRgb+',0.35);border-radius:12px;padding:2px 8px;font-size:11px;color:'+_ciColor+';white-space:nowrap;">' +
+            '<span style="width:6px;height:6px;border-radius:50%;background:'+_ciColor+';flex-shrink:0;box-shadow:0 0 5px '+_ciColor+';display:inline-block;animation:pulse 2s infinite;"></span>' +
             '<strong>' + ci.activity + '</strong>' + (ci.note ? '<span style="color:#888;font-weight:400;"> &middot; ' + ci.note + '</span>' : '') +
           '</span></td>'
-        : '<td style="color:#333;text-align:center;">—</td>';
+        : '<td style="color:#333;font-size:11px;">—</td>';
 
       return '<tr style="'+rowStyle+'">'+numCell+
         '<td style="font-weight:'+(p?'700':'600')+';color:'+(p?p.nameColor:'#F0F0F0')+';">'+m.last+', '+m.first+'</td>'+
