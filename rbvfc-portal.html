@@ -990,10 +990,10 @@ function showTab(id) {
   if (id === 'losap') renderLOSAP();
   if (id === 'company') { populateCompanyYearSelect(); renderCompanyLOSAP(); renderCompanyStats(); }
   if (id === 'hours') renderHoursLog();
-  if (id === 'training') renderTrainingReview();
   if (id === 'emergency') initEmergencyTab();
   if (id === 'log-entry') initLogEntryTab();
   if (id === 'approvals') initApprovalsTab();
+  if (id === 'history') initHistoryTab();
   // Sync collapse icons to current state
   setTimeout(fixCollapseIcons, 10);
   // Wire up any new cards rendered in this tab
@@ -2529,41 +2529,45 @@ function buildClassDetailModal() {
 }
 
 
+
+function initHistoryTab() {
+  var uid = state.currentUserId;
+  var me = uid ? (state.roster||[]).find(function(m){ return m.id===uid; }) : null;
+  var isOfficer = me && (me.appRole==='officer'||me.appRole==='admin');
+  // Training History — visible to all (own records) or all records for officers
+  var thCard = document.getElementById('trainingHistoryCard');
+  if (thCard) thCard.style.display = 'block';
+  try { renderTrainingReview(); } catch(e){}
+  // Drill Report History — officers and admins only
+  var dhCard = document.getElementById('drillHistoryCard');
+  if (dhCard) dhCard.style.display = isOfficer ? 'block' : 'none';
+  if (isOfficer) {
+    try { renderDrillHistory(); } catch(e){}
+  }
+}
+
 function initTrainingTab() {
   var uid = state.currentUserId;
   var m = (state.roster||[]).find(function(x){ return x.id===uid; });
   var isOfficer = m && (m.appRole==='officer'||m.appRole==='admin');
-  // Training submission form: all members
+  // Drill submit card: officers only
+  var drillCard = document.getElementById('drillSubmitCard');
+  if (drillCard) drillCard.style.display = isOfficer ? 'block' : 'none';
+  // Training submit form: all members
   var sc = document.getElementById('trainingSubmitCard');
   if (sc) sc.style.display = 'block';
-  // Review / approval card
-  var rc = document.getElementById('trainingSubmissionsCard');
-  if (rc) rc.style.display = 'block';
-  // Training History card — show for all members
-  var thCard = document.getElementById('trainingHistoryCard');
-  if (thCard) thCard.style.display = 'block';
-  // Drill report: officers and admin only
-  var dc = document.getElementById('drillSubmitCard');
-  if (dc) dc.style.display = isOfficer ? 'block' : 'none';
-  var dhCard = document.getElementById('drillHistoryCard');
-  if (dhCard) dhCard.style.display = isOfficer ? 'block' : 'none';
-  // Set drill date default and populate drill form
+  // Populate drill form fields for officers
   var ddEl = document.getElementById('drillDate');
   if (ddEl && !ddEl.value) ddEl.value = new Date().toISOString().slice(0,10);
   if (isOfficer) {
-    try { populateDrillReportBy(); }    catch(e){}
-    try { populateDrillMemberList(); }  catch(e){}
+    try { populateDrillReportBy(); }   catch(e){}
+    try { populateDrillMemberList(); } catch(e){}
   }
-  // Training classes button
+  // Training Classes
   var tcBtn = document.getElementById('trainingClassesOfficerBtn');
   if (tcBtn) tcBtn.style.display = isOfficer ? 'block' : 'none';
   renderTrainingClasses();
-  renderTrainingReview();
-  if (isOfficer) {
-    var dhCard2 = document.getElementById('drillHistoryCard');
-    if (dhCard2) dhCard2.style.display = 'block';
-    try { renderDrillHistory(); } catch(e){}
-  }
+  // Training History and Drill History live in MORE > History — not rendered here
 }
 
 function renderTrainingReview() {
@@ -13563,90 +13567,8 @@ function applyBulkEdit() {
     <!-- ══════════════ TRAINING TAB ══════════════ -->
     <div id="section-training" class="section">
 
-      <!-- Submit Training for Approval -->
-      <div class="card" id="trainingSubmitCard">
-        <div class="card-header"><div class="icon">📤</div><h2>Submit Training for Approval</h2></div>
-        <div class="alert info" style="margin-bottom:14px;">📋 Submit completed training courses for LOSAP credit. All submissions require Fire Chief approval before points are posted.</div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label>Date of Training <span style="color:#C8102E;">*</span></label>
-            <input type="date" id="tsubDate">
-          </div>
-          <div class="form-group">
-            <label>Total Hours <span style="color:#C8102E;">*</span></label>
-            <input type="number" id="tsubHours" min="0.5" step="0.5" placeholder="e.g. 8">
-          </div>
-          <div class="form-group" style="grid-column:1/-1;">
-            <label>Course Name <span style="color:#C8102E;">*</span></label>
-            <input type="text" id="tsubName" placeholder="e.g. Firefighter I, EVOC, HazMat Awareness">
-          </div>
-          <div class="form-group">
-            <label>Class / Course #</label>
-            <input type="text" id="tsubClassNum" placeholder="e.g. FF1-2025-042">
-          </div>
-          <div class="form-group">
-            <label>Training Provider</label>
-            <input type="text" id="tsubProvider" placeholder="e.g. MFRI, MSFA, FEMA">
-          </div>
-          <div class="form-group" style="grid-column:1/-1;">
-            <label>Notes</label>
-            <textarea id="tsubNotes" rows="2" placeholder="Additional details about the training…" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
-          </div>
-        </div>
-
-        <!-- Certificate upload -->
-        <div class="form-group" style="margin-top:4px;">
-          <label>Certificate (optional)</label>
-          <div id="tsubCertZone" class="cert-upload-zone" onclick="document.getElementById('tsubCertInput').click()" ondragover="tsubDragOver(event)" ondragleave="tsubDragLeave(event)" ondrop="tsubDrop(event)">
-            <div style="font-size:28px;">📎</div>
-            <div style="font-size:13px;color:#888;">Click or drag to upload certificate</div>
-            <div style="font-size:11px;color:#666;">PDF, JPG, or PNG — max 10MB</div>
-            <input type="file" id="tsubCertInput" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="handleTsubCert(this.files[0])">
-          </div>
-          <div id="tsubCertPreview" style="display:none;margin-top:8px;background:#181818;border:1px solid #333;border-radius:8px;padding:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span id="tsubCertIcon" style="font-size:20px;">📄</span>
-              <div>
-                <div id="tsubCertName" style="font-size:13px;font-weight:700;color:#F0F0F0;"></div>
-                <div id="tsubCertSize" style="font-size:11px;color:#888;"></div>
-              </div>
-            </div>
-            <button style="background:none;border:none;color:#E74C3C;cursor:pointer;font-size:18px;">✕</button>
-          </div>
-        </div>
-
-        <div class="alert" style="background:#1A2A1A;border-color:#27AE60;margin-top:12px;font-size:12px;">
-          ℹ️ Points are calculated at <strong>1 pt per 2 hours</strong> of approved training, max 60 pts/year.
-        </div>
-        <button class="btn btn-primary btn-full" onclick="submitTraining()">📤 Submit for Approval</button>
-      </div>
-
-      <!-- Training History / Review -->
-      <!-- Training Classes -->
-      <div class="card" style="padding:0;overflow:hidden;">
-        <div class="card-header" onclick="toggleStaffCard('trainingClassesBody','trainingClassesChevron')" style="cursor:pointer;user-select:none;padding:14px 16px;">
-          <div class="icon">📚</div>
-          <h2>Training Classes</h2>
-          <span id="trainingClassesChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span>
-        </div>
-        <div id="trainingClassesBody" style="padding:0 16px 16px;">
-          <div id="trainingClassesOfficerBtn" style="display:none;margin-bottom:12px;">
-            <button class="btn btn-primary" onclick="openClassModal()">＋ Create Class</button>
-          </div>
-          <div id="trainingClassesContainer"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header" onclick="toggleAdminCardById('trainingHistoryCard')" style="cursor:pointer;user-select:none;"><div class="icon">📚</div><h2>Training History</h2><span id="trainingHistoryChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;transform:rotate(-90deg);">&#9660;</span></div>
-        <div id="trainingHistoryCard" style="display:none;"><div id="trainingReviewContainer">
-          <p style="color:#666;font-size:13px;text-align:center;padding:16px;">No training submissions yet.</p>
-        </div></div>
-      </div>
-
-      <!-- ─────── Drill Reports ─────── -->
-      <!-- Submit Drill Report (officers) -->
-      <div class="card" id="drillSubmitCard" style="display:none;">
+      <!-- Submit Drill Report (moved to top) -->
+      <div class="card" id="drillSubmitCard">
         <div class="card-header"><div class="icon">🔧</div><h2>Submit Drill Report</h2></div>
         <div class="form-grid">
           <div class="form-group">
@@ -13728,15 +13650,87 @@ function applyBulkEdit() {
         <button class="btn btn-primary btn-full" onclick="saveDrillReport()">📝 Submit Drill Report</button>
       </div>
 
-      <!-- Drill History -->
-      <!-- Drill Report History -->
-      <div class="card" id="drillHistoryCard" style="display:none;">
-        <div class="card-header"><div class="icon">🔧</div><h2>Drill Report History</h2><span style="font-size:11px;color:#555;margin-left:8px;">Officers / Admin — Pending Approval</span></div>
-        <div id="drillHistoryContainer"></div>
+      <!-- Submit Training for Approval -->
+      <div class="card" id="trainingSubmitCard">
+        <div class="card-header"><div class="icon">📤</div><h2>Submit Training for Approval</h2></div>
+        <div class="alert info" style="margin-bottom:14px;">📋 Submit completed training courses for LOSAP credit. All submissions require Fire Chief approval before points are posted.</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Date of Training <span style="color:#C8102E;">*</span></label>
+            <input type="date" id="tsubDate">
+          </div>
+          <div class="form-group">
+            <label>Total Hours <span style="color:#C8102E;">*</span></label>
+            <input type="number" id="tsubHours" min="0.5" step="0.5" placeholder="e.g. 8">
+          </div>
+          <div class="form-group" style="grid-column:1/-1;">
+            <label>Course Name <span style="color:#C8102E;">*</span></label>
+            <input type="text" id="tsubName" placeholder="e.g. Firefighter I, EVOC, HazMat Awareness">
+          </div>
+          <div class="form-group">
+            <label>Class / Course #</label>
+            <input type="text" id="tsubClassNum" placeholder="e.g. FF1-2025-042">
+          </div>
+          <div class="form-group">
+            <label>Training Provider</label>
+            <input type="text" id="tsubProvider" placeholder="e.g. MFRI, MSFA, FEMA">
+          </div>
+          <div class="form-group" style="grid-column:1/-1;">
+            <label>Notes</label>
+            <textarea id="tsubNotes" rows="2" placeholder="Additional details about the training…" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+          </div>
+        </div>
+
+        <!-- Certificate upload -->
+        <div class="form-group" style="margin-top:4px;">
+          <label>Certificate (optional)</label>
+          <div id="tsubCertZone" class="cert-upload-zone" onclick="document.getElementById('tsubCertInput').click()" ondragover="tsubDragOver(event)" ondragleave="tsubDragLeave(event)" ondrop="tsubDrop(event)">
+            <div style="font-size:28px;">📎</div>
+            <div style="font-size:13px;color:#888;">Click or drag to upload certificate</div>
+            <div style="font-size:11px;color:#666;">PDF, JPG, or PNG — max 10MB</div>
+            <input type="file" id="tsubCertInput" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="handleTsubCert(this.files[0])">
+          </div>
+          <div id="tsubCertPreview" style="display:none;margin-top:8px;background:#181818;border:1px solid #333;border-radius:8px;padding:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span id="tsubCertIcon" style="font-size:20px;">📄</span>
+              <div>
+                <div id="tsubCertName" style="font-size:13px;font-weight:700;color:#F0F0F0;"></div>
+                <div id="tsubCertSize" style="font-size:11px;color:#888;"></div>
+              </div>
+            </div>
+            <button style="background:none;border:none;color:#E74C3C;cursor:pointer;font-size:18px;">✕</button>
+          </div>
+        </div>
+
+        <div class="alert" style="background:#1A2A1A;border-color:#27AE60;margin-top:12px;font-size:12px;">
+          ℹ️ Points are calculated at <strong>1 pt per 2 hours</strong> of approved training, max 60 pts/year.
+        </div>
+        <button class="btn btn-primary btn-full" onclick="submitTraining()">📤 Submit for Approval</button>
+      </div>
+
+      <!-- Training History / Review -->
+      <!-- Training Classes -->
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div class="card-header" onclick="toggleStaffCard('trainingClassesBody','trainingClassesChevron')" style="cursor:pointer;user-select:none;padding:14px 16px;">
+          <div class="icon">📚</div>
+          <h2>Training Classes</h2>
+          <span id="trainingClassesChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span>
+        </div>
+        <div id="trainingClassesBody" style="padding:0 16px 16px;">
+          <div id="trainingClassesOfficerBtn" style="display:none;margin-bottom:12px;">
+            <button class="btn btn-primary" onclick="openClassModal()">＋ Create Class</button>
+          </div>
+          <div id="trainingClassesContainer"></div>
+        </div>
       </div>
 
 
-
+      <!-- Quick link to History in MORE -->
+      <div style="text-align:center;padding:8px 0 12px;">
+        <button onclick="showTab('history');closeMoreMenu&&closeMoreMenu();" class="btn btn-secondary" style="font-size:12px;padding:8px 20px;">
+          📋 View Training &amp; Drill History
+        </button>
+      </div>
 
     </div><!-- end section-training -->
 
@@ -13744,6 +13738,24 @@ function applyBulkEdit() {
     
 
     <!-- ══════════════ APPROVALS TAB ══════════════ -->
+    <div id="section-history" class="section" style="display:none;">
+
+      <!-- Training History -->
+      <div class="card">
+        <div class="card-header" onclick="toggleAdminCardById('trainingHistoryCard')" style="cursor:pointer;user-select:none;"><div class="icon">📚</div><h2>Training History</h2><span id="trainingHistoryChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;transform:rotate(-90deg);">&#9660;</span></div>
+        <div id="trainingHistoryCard" style="display:none;"><div id="trainingReviewContainer">
+          <p style="color:#666;font-size:13px;text-align:center;padding:16px;">No training submissions yet.</p>
+        </div></div>
+      </div>
+
+      <!-- Drill Report History -->
+      <div class="card" id="drillHistoryCard" style="display:none;">
+        <div class="card-header"><div class="icon">🔧</div><h2>Drill Report History</h2><span style="font-size:11px;color:#555;margin-left:8px;">Officers / Admin — Pending Approval</span></div>
+        <div id="drillHistoryContainer"></div>
+      </div>
+
+    </div><!-- end section-history -->
+
     <div id="section-approvals" class="section">
 
       <!-- Summary bar -->
@@ -14255,6 +14267,7 @@ function applyBulkEdit() {
     <div id="moreSheetPanel" style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:20px;width:100%;box-sizing:border-box;transform:translateY(100%);transition:transform .3s ease;">
       <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 20px;"></div>
       <button class="btn btn-secondary btn-full" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;position:relative;" id="moreApprovalsBtn" onclick="showTab('approvals');closeMoreMenu()">
         ✅ Approvals
         <span id="approvalsBadge" style="display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);background:#C8102E;color:#FFF;font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;"></span>
