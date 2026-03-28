@@ -697,6 +697,12 @@ function _mergeAndRender(remote) {
     if (_dc2 && _isOff2 && _dc2.style.display==='none') { _dc2.style.display='block'; }
   } catch(e){}  // rebuilds session from active shifts if needed
   console.log('[RBVFC] Synced from Firestore.');
+  // Auto-start CAD sync on every state load — no login required
+  if (state.cadScriptUrl && !_cadSyncInterval) {
+    try { startCadAutoSync(); } catch(e){}
+  }
+  // Reprocess any pending CAD calls now that staffing data may have updated
+  try { reprocessPendingCadCalls(); } catch(e){}
 }
 
 function _startFbSync() {
@@ -9373,6 +9379,13 @@ function boot() {
   initFirebase();
   setInterval(tickClockTimer, 1000);
   setInterval(checkClockReminder, 60000);
+  // Start CAD auto-sync immediately on page load — no login required.
+  // Uses cadScriptUrl from localStorage/Firestore state.
+  // Runs 2s after boot so Firebase has time to connect; also triggered on
+  // every Firestore merge (_mergeAndRender) so it re-starts if URL changes.
+  if (state.cadScriptUrl) {
+    setTimeout(function(){ try { startCadAutoSync(); } catch(e){} }, 2000);
+  }
   try { checkYearEndBanner(); } catch(e){}
 
   // Auto-login if user was previously logged in
@@ -10322,8 +10335,8 @@ function _autoLogCadCall(call) {
     autoStaffed:  staffedMembers,
     alarmTime:    call.alarmTime || '',
     notes:        staffedMembers.length
-                    ? 'Auto-logged from CAD sync.'
-                    : 'Auto-logged from CAD sync. No staffing found — please add responding members.',
+                    ? 'Auto-logged from CAD sync. ' + staffedMembers.length + ' member(s) auto-assigned from staffing.'
+                    : 'Auto-logged from CAD sync. No staffing found — officers must add responding members.',
     needsReview:  !staffedMembers.length,
     _cadKey:      incKey,
     enteredBy:    state.currentUserId || 'system',
@@ -12474,7 +12487,7 @@ function startCadAutoSync() {
   if (_cadSyncInterval) clearInterval(_cadSyncInterval);
   if (!state.cadScriptUrl) return;
   syncCadCalls();
-  _cadSyncInterval = setInterval(syncCadCalls, 300000); // every 5 min
+  _cadSyncInterval = setInterval(syncCadCalls, 120000); // every 2 min
 }
 
 // 10. staffingDatePrev — move staffing board to previous day
