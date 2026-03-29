@@ -906,6 +906,28 @@ const UNITS = ['e131','e132','Tk13','a139','Mu13','U13','Br13','RB13','FB13','CH
 const EMS_UNITS = ['a139','Mu13'];
 const FIRE_UNITS = ['e131','e132','Tk13','U13','Br13','RB13','FB13','CH13'];
 
+
+// ── ACTIVITY COLOR PALETTE ─────────────────────────────────────
+// Single source of truth: Emergency=Red, Drill=Orange, Class=BabyBlue,
+// Standby=Grey, Meeting=Yellow, FormalTraining=Purple
+var ACT_COLORS = {
+  emergency:        '#C8102E',   // Red
+  drill:            '#E67E22',   // Orange
+  training:         '#9B59B6',   // Purple (Formal Training)
+  class:            '#5DADE2',   // Baby Blue (in-class session)
+  duties:           '#7F8C8D',   // Grey (Standby / Collateral)
+  collateral:       '#7F8C8D',   // Grey (alias)
+  duty:             '#7F8C8D',   // Grey (alias)
+  meeting:          '#F5A623',   // Yellow (Company Meeting)
+  boardmeeting:     '#F5A623',   // Yellow
+  position:         '#C8102E',   // Red (positions tie to emergency)
+  fundraiser:       '#1ABC9C',   // Teal (Special Event)
+  other:            '#95A5A6',   // Light grey
+};
+// Background tint for a color: rgba(r,g,b,0.12)
+function actBg(c){var r=_hexToRgb(c);return 'rgba('+r+',0.12)';}
+function actBorder(c){var r=_hexToRgb(c);return 'rgba('+r+',0.5)';}
+
 // ═══════════════════════════════════════════════════
 //  STORAGE
 // ═══════════════════════════════════════════════════
@@ -1186,27 +1208,6 @@ var CAT_CONFIG = {
   committee_member: { pts: 10, maxPts: 25, label: 'Committee Member' }
 };
 
-
-// ── ACTIVITY COLOR PALETTE ─────────────────────────────────────
-// Single source of truth: Emergency=Red, Drill=Orange, Class=BabyBlue,
-// Standby=Grey, Meeting=Yellow, FormalTraining=Purple
-var ACT_COLORS = {
-  emergency:        '#C8102E',   // Red
-  drill:            '#E67E22',   // Orange
-  training:         '#9B59B6',   // Purple (Formal Training)
-  class:            '#5DADE2',   // Baby Blue (in-class session)
-  duties:           '#7F8C8D',   // Grey (Standby / Collateral)
-  collateral:       '#7F8C8D',   // Grey (alias)
-  duty:             '#7F8C8D',   // Grey (alias)
-  meeting:          '#F5A623',   // Yellow (Company Meeting)
-  boardmeeting:     '#F5A623',   // Yellow
-  position:         '#C8102E',   // Red (positions tie to emergency)
-  fundraiser:       '#1ABC9C',   // Teal (Special Event)
-  other:            '#95A5A6',   // Light grey
-};
-// Background tint for a color: rgba(r,g,b,0.12)
-function actBg(c){var r=_hexToRgb(c);return 'rgba('+r+',0.12)';}
-function actBorder(c){var r=_hexToRgb(c);return 'rgba('+r+',0.5)';}
 
 // ── Canonical LOSAP position title lists (kept in sync with umPositionBoxes) ─
 var LOSAP_OFFICER_TITLES = [
@@ -4397,47 +4398,6 @@ function clearDrillForm() {
 }
 
 
-function approveDrill(elOrId) {
-  var id = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
-  var s = (state.trainingSubmissions||[]).find(function(x){ return x.id===id; });
-  if (!s) return;
-  s.status = 'approved';
-  s.approvedBy = state.currentUserId;
-  s.approvedAt = new Date().toISOString();
-  // Add to each member's losapActivities
-  if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
-  (s.members||[s.memberId]).forEach(function(memberId) {
-    state.losapActivities.push({
-      id: 'act_drill_'+Date.now()+'_'+memberId,
-      memberId: memberId,
-      date: s.date,
-      category: 'drill',
-      desc: s.drillName || 'Drill',
-      pts: s.pts || 1,
-      hours: s.hours || 1,
-      approvedBy: state.currentUserId,
-      approvedAt: new Date().toISOString()
-    });
-  });
-  save();
-  renderDrillHistory();
-  try { renderCompanyLOSAP(); } catch(e) {}
-  showToast('\u2705 Drill approved — '+( (s.members||[]).length)+' members credited '+s.pts+' pt'+(s.pts!==1?'s':'')+'.');
-}
-
-function rejectDrill(elOrId) {
-  var id = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
-  var reason = prompt('Reason for rejection (optional):') || '';
-  var s = (state.trainingSubmissions||[]).find(function(x){ return x.id===id; });
-  if (!s) return;
-  s.status = 'rejected';
-  s.rejectionReason = reason;
-  s.rejectedBy = state.currentUserId;
-  s.rejectedAt = new Date().toISOString();
-  save();
-  renderDrillHistory();
-  showToast('Drill report rejected.');
-}
 
 function renderDrillHistory() {
   var container = document.getElementById('drillHistoryContainer');
@@ -6769,7 +6729,7 @@ function editShift(elOrId) {
 
 function cancelShift(elOrId) {
   var shiftId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
-  if (!confirm('Cancel your shift?')) return;
+  // No blocking confirm — mobile-safe
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
   if (shift && shift.calEventId) deleteCalendarInvite(shift.calEventId);
   state.staffingShifts = (state.staffingShifts||[]).filter(function(s){ return s.id!==shiftId; });
@@ -6781,7 +6741,7 @@ function cancelShift(elOrId) {
 }
 function removeFromShift(elOrId) {
   var shiftId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
-  if (!confirm('Remove this member from the shift?')) return;
+  // No blocking confirm — officer action is reversible
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
   if (shift && shift.calEventId) deleteCalendarInvite(shift.calEventId);
   state.staffingShifts = (state.staffingShifts||[]).filter(function(s){ return s.id!==shiftId; });
@@ -7734,35 +7694,44 @@ function sendEventAlert(evId) {
   var ev = (state.specialEvents||[]).find(function(e){ return e.id===evId; });
   if (!ev) return;
   var signups = (ev.signups||[]).map(function(s){ return s.memberId; }).filter(Boolean);
-  if (!signups.length) { showToast('⚠️ No signed-up members for this event.'); return; }
-  var members = signups.map(function(mid){
-    var m = (state.roster||[]).find(function(r){ return r.id===mid; });
-    return m ? m.last+', '+m.first : mid;
-  });
+  if (!signups.length) { showToast('\u26a0\ufe0f No signed-up members.'); return; }
   var d = new Date((ev.startDate||ev.date)+'T12:00:00');
   var dateStr = d.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});
-  var defaultMsg = ev.title + ' — ' + dateStr + (ev.location ? ' @ '+ev.location : '') + '. Please confirm your availability.';
-  var msg = prompt('Send alert to ' + signups.length + ' signed-up member(s): ' + members.join(', ') + ' -- Message:', defaultMsg);
-  if (!msg) return;
-  var alertId = 'alert_' + Date.now();
-  if (!Array.isArray(state.staffingAlerts)) state.staffingAlerts = [];
-  state.staffingAlerts.unshift({
-    id:            alertId,
-    msg:           msg,
-    sentBy:        state.currentUserId,
-    sentAt:        new Date().toISOString(),
-    group:         'event_' + evId,
-    groupLabel:    ev.title,
-    targetMembers: signups,
-    clears:        []
-  });
-  save();
-  renderMemberAlertBanner();
-  showToast('✅ Alert sent to ' + signups.length + ' member(s) for ' + ev.title + '.');
+  var old = document.getElementById('_evAM'); if(old) old.remove();
+  var wrap=document.createElement('div'); wrap.id='_evAM';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var inner=document.createElement('div');
+  inner.style.cssText='background:#1A1A1A;border:1px solid #1ABC9C;border-radius:14px;padding:20px;width:100%;max-width:400px;';
+  var title=document.createElement('div'); title.style.cssText='font-size:16px;font-weight:700;color:#1ABC9C;margin-bottom:4px;'; title.textContent='\ud83d\udce2 Event Alert';
+  var sub=document.createElement('div'); sub.style.cssText='font-size:12px;color:#888;margin-bottom:10px;'; sub.textContent=ev.title+' \u2014 '+dateStr;
+  var ta=document.createElement('textarea'); ta.id='_evAMsg'; ta.rows=3;
+  ta.value=ev.title+' \u2014 '+dateStr+(ev.location?' @ '+ev.location:'')+'. Please confirm your availability.';
+  ta.style.cssText='width:100%;background:#111;border:1px solid #1ABC9C;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;';
+  var hint=document.createElement('div'); hint.style.cssText='font-size:11px;color:#555;margin-top:6px;margin-bottom:12px;';
+  hint.textContent='Sending to '+signups.length+' member'+(signups.length===1?'':'s');
+  var btnRow=document.createElement('div'); btnRow.style.cssText='display:flex;gap:10px;';
+  var sendBtn=document.createElement('button');
+  sendBtn.style.cssText='flex:2;background:#1ABC9C;border:none;color:#111;border-radius:8px;padding:11px;cursor:pointer;font-size:14px;font-weight:700;';
+  sendBtn.textContent='Send Alert';
+  sendBtn.onclick=function(){
+    var msg=(document.getElementById('_evAMsg')||{}).value||'';
+    if (!msg.trim()){showToast('\u26a0\ufe0f Enter a message.');return;}
+    if (!Array.isArray(state.staffingAlerts)) state.staffingAlerts=[];
+    state.staffingAlerts.unshift({id:'alert_'+Date.now(),msg:msg,sentBy:state.currentUserId,
+      sentAt:new Date().toISOString(),group:'event_'+evId,groupLabel:ev.title,
+      targetMembers:signups,clears:[],needsAck:true});
+    save(); document.getElementById('_evAM').remove();
+    renderMemberAlertBanner();
+    showToast('\u2705 Alert sent to '+signups.length+' member'+(signups.length===1?'':'s')+'.');
+  };
+  var canBtn=document.createElement('button');
+  canBtn.style.cssText='flex:1;background:none;border:1px solid #333;color:#888;border-radius:8px;padding:11px;cursor:pointer;';
+  canBtn.textContent='Cancel'; canBtn.onclick=function(){document.getElementById('_evAM').remove();};
+  btnRow.appendChild(sendBtn); btnRow.appendChild(canBtn);
+  [title,sub,ta,hint,btnRow].forEach(function(el){inner.appendChild(el);});
+  wrap.appendChild(inner); document.body.appendChild(wrap);
+  setTimeout(function(){ta.focus();ta.select();},100);
 }
-
-
-// === MEETINGS ===
 
 function toggleMtgRecurrenceOpts() {
   var sel = document.getElementById('mtgRecurrence');
