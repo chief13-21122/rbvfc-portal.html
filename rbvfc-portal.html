@@ -5610,7 +5610,7 @@ function renderStaffingBoard() {
         // ── Sign Up button ────────────────────────────────────────────────
         if (canSignUp) {
           var _btnLabel = isOpen ? '&#9996; Sign Up' : '&#9996; Fill Gap';
-          html += '<button onclick="callSignUpFromBtn(this)" data-date="'+date+'" data-unit="'+uId+'" data-pos="'+posIdx+'" data-posname="'+posName.replace(/'/g,"\'")+"'" + '" data-start="'+_nextStart+'" data-hours="'+_remHours+'"'
+          html += '<button onclick="callSignUpFromBtn(this)" data-date="'+date+'" data-unit="'+uId+'" data-pos="'+posIdx+'" data-posname="'+posName+'" data-start="'+_nextStart+'" data-hours="'+_remHours+'"'
                + ' style="background:#0D2200;border:2px solid #27AE60;color:#27AE60;border-radius:8px;'
                + 'padding:7px 18px;cursor:pointer;font-weight:700;font-size:14px;white-space:nowrap;'
                + 'letter-spacing:0.5px;flex-shrink:0;">'+_btnLabel+'</button>';
@@ -5890,7 +5890,7 @@ function confirmSignUp() {
   var date    = document.getElementById('suDate').value;
   var unitId  = document.getElementById('suUnitId').value;
   var posIdx  = parseInt(document.getElementById('suPosIdx').value);
-  var posName = document.getElementById('suPosName').value;
+  var posName = (document.getElementById('suPosName').value||'').replace(/'+$/,'').replace(/^'+/,'');
   var start   = (document.getElementById('suStart').value||'0700').replace(':','');
   var hours   = parseFloat(document.getElementById('suHours').value||24);
   if (!hours || hours <= 0) { showToast('\u26a0\ufe0f Enter valid shift hours.'); return; }
@@ -9518,8 +9518,19 @@ function doLogin() {
   }
   if (errEl) errEl.style.display='none';
   state.currentUserId = member.id;
+  try { _sanitizeShiftPositions(); } catch(e){}
   save();
   launchApp(member);
+}
+
+
+function _sanitizeShiftPositions() {
+  // Fix any positions that have trailing/leading quotes (from previous bug)
+  (state.staffingShifts||[]).forEach(function(s) {
+    if (s.position && typeof s.position === 'string') {
+      s.position = s.position.replace(/['"]$/, '').replace(/^['"]/, '').trim();
+    }
+  });
 }
 
 function launchApp(member) {
