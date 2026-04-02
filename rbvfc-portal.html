@@ -607,6 +607,8 @@ function _fbSplitState() {
   delete full.currentSession;
   delete full._classRemindedToday;
   delete full.adminPin;
+  // Logo is localStorage-only — too large for Firestore (would exceed 1MB limit)
+  delete full.companyLogo;
 
   var acts  = { losapActivities: full.losapActivities || [] };
   var train = { trainingSubmissions: full.trainingSubmissions || [] };
@@ -641,6 +643,9 @@ var _fbSyncUnsubTrain = null;
 function _mergeAndRender(remote) {
   if (!remote) return;
   // Preserve local fb config so incognito doesn't lose baked-in values
+  // Strip logo from remote — it's localStorage-only; Firestore can't hold it (>1MB)
+  if (remote.main) delete remote.main.companyLogo;
+  delete remote.companyLogo;
   var _savedCfg = { fbApiKey: state.fbApiKey, fbProjectId: state.fbProjectId,
     fbAuthDomain: state.fbAuthDomain, fbStorageBucket: state.fbStorageBucket,
     fbMessagingSenderId: state.fbMessagingSenderId, fbAppId: state.fbAppId };
@@ -696,11 +701,6 @@ function _mergeAndRender(remote) {
     var _dc2 = document.getElementById('drillSubmitCard');
     if (_dc2 && _isOff2 && _dc2.style.display==='none') { _dc2.style.display='block'; }
   } catch(e){}  // rebuilds session from active shifts if needed
-  // Sync logo: if Firestore has a logo, also update localStorage for fast access
-  if (state.companyLogo) {
-    try { localStorage.setItem('rbvfc_logo', state.companyLogo); } catch(e){}
-  }
-  try { applyLogo(); } catch(e){}
   console.log('[RBVFC] Synced from Firestore.');
   // Auto-start CAD sync on every state load — no login required
   if (state.cadScriptUrl && !_cadSyncInterval) {
@@ -8930,22 +8930,14 @@ function rejectTrainingFromApprovals(elOrId) { openRejectModal_training(elOrId);
 //  LOGO / BRANDING
 // ═══════════════════════════════════════════════════
 function getLogoData() {
-  // Prefer Firestore-synced logo; fall back to localStorage
-  if (state.companyLogo) {
-    try { localStorage.setItem('rbvfc_logo', state.companyLogo); } catch(e){}
-    return state.companyLogo;
-  }
-  try { 
-    var local = localStorage.getItem('rbvfc_logo') || '';
-    if (local) state.companyLogo = local; // migrate local → state on next save
-    return local;
-  } catch(e){ return ''; }
+  // Logo lives in localStorage only — never in state or Firestore
+  try { return localStorage.getItem('rbvfc_logo') || ''; } catch(e){ return ''; }
 }
 function saveLogoData(dataUrl) {
-  // Save to both localStorage (local fast access) and state (Firestore sync)
+  // Logo is localStorage-only — base64 images exceed Firestore's 1MB document limit
   try { localStorage.setItem('rbvfc_logo', dataUrl); } catch(e){}
-  state.companyLogo = dataUrl || '';
-  save(); // syncs to Firestore so all devices see it
+  // Explicitly remove from state so it never bleeds into a Firestore save
+  delete state.companyLogo;
 }
 function applyLogo() {
   var logo = getLogoData();
