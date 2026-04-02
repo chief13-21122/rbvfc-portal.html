@@ -696,6 +696,11 @@ function _mergeAndRender(remote) {
     var _dc2 = document.getElementById('drillSubmitCard');
     if (_dc2 && _isOff2 && _dc2.style.display==='none') { _dc2.style.display='block'; }
   } catch(e){}  // rebuilds session from active shifts if needed
+  // Sync logo: if Firestore has a logo, also update localStorage for fast access
+  if (state.companyLogo) {
+    try { localStorage.setItem('rbvfc_logo', state.companyLogo); } catch(e){}
+  }
+  try { applyLogo(); } catch(e){}
   console.log('[RBVFC] Synced from Firestore.');
   // Auto-start CAD sync on every state load — no login required
   if (state.cadScriptUrl && !_cadSyncInterval) {
@@ -7952,6 +7957,64 @@ function clockOutMeeting(mtgId, occurrenceDate) {
   showToast('\u23f9 Clocked out of ' + (mtg?mtg.title:'meeting') + '.');
 }
 
+
+function _askStayClockIn(type, entityId, entityTitle, scheduledEnd) {
+  // Don't show if modal already visible
+  if (document.getElementById('_stayClockInModal')) return;
+  var endStr = scheduledEnd.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  var wrap = document.createElement('div');
+  wrap.id = '_stayClockInModal';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var inner = document.createElement('div');
+  inner.style.cssText = 'background:#1A1A1A;border:1px solid #F5A623;border-radius:16px;padding:24px;width:100%;max-width:380px;text-align:center;';
+  var icon  = document.createElement('div'); icon.style.cssText = 'font-size:36px;margin-bottom:10px;'; icon.textContent = '\u23f1\ufe0f';
+  var title = document.createElement('div'); title.style.cssText = 'font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:700;color:#F5A623;margin-bottom:6px;'; title.textContent = 'Event Ended';
+  var sub   = document.createElement('div'); sub.style.cssText = 'font-size:13px;color:#AAA;margin-bottom:20px;line-height:1.5;';
+  sub.textContent = '"'+entityTitle+'" ended at '+endStr+'. Are you still on duty?';
+  var btnRow = document.createElement('div'); btnRow.style.cssText = 'display:flex;gap:10px;';
+  var yesBtn = document.createElement('button');
+  yesBtn.style.cssText = 'flex:1;background:#27AE60;border:none;color:#FFF;border-radius:10px;padding:13px;cursor:pointer;font-size:15px;font-weight:700;';
+  yesBtn.textContent = '\u2705 Still on duty';
+  yesBtn.onclick = function() {
+    // Keep them clocked in — just dismiss
+    document.getElementById('_stayClockInModal').remove();
+  };
+  var noBtn = document.createElement('button');
+  noBtn.style.cssText = 'flex:1;background:none;border:1px solid #E74C3C;color:#E74C3C;border-radius:10px;padding:13px;cursor:pointer;font-size:15px;font-weight:700;';
+  noBtn.textContent = '\u23f9 Clock me out';
+  noBtn.onclick = function() {
+    document.getElementById('_stayClockInModal').remove();
+    // Clock out now
+    if (type === 'event') {
+      var ev = (state.specialEvents||[]).find(function(e){ return e.id===entityId; });
+      if (ev) {
+        (ev.signups||[]).forEach(function(s){
+          if (s.memberId===state.currentUserId && s.clockedIn && !s.clockedOutAt) {
+            s.clockedIn = false; s.clockedOutAt = new Date().toISOString();
+          }
+        });
+      }
+    } else if (type === 'meeting') {
+      var att = (state.meetingAttendance||[]).find(function(a){
+        return a.mtgId===entityId && a.memberId===state.currentUserId && !a.clockedOutAt;
+      });
+      if (att) att.clockedOutAt = new Date().toISOString();
+    }
+    if (state.currentSession && !state.currentSession.end) {
+      state.currentSession.end = new Date().toISOString();
+      state.currentSession.duration = (new Date() - new Date(state.currentSession.start)) / 1000;
+      try { updateClockUI(false); } catch(e){}
+    }
+    save();
+    try { renderMyShifts(); } catch(e){}
+    showToast('\u23f9 Clocked out of '+entityTitle+'.');
+  };
+  btnRow.appendChild(yesBtn); btnRow.appendChild(noBtn);
+  [icon, title, sub, btnRow].forEach(function(el){ inner.appendChild(el); });
+  wrap.appendChild(inner);
+  document.body.appendChild(wrap);
+}
+
 function checkAutoClockOuts() {
   var now = new Date(), changed = false;
   (state.specialEvents||[]).forEach(function(ev) {
@@ -7960,8 +8023,19 @@ function checkAutoClockOuts() {
     var evEnd = new Date(ev.date + 'T' + ts + ':00');
     if (!ev.endTime) evEnd = new Date(evEnd.getTime() + 7200000);
     if (now < evEnd) return;
+    // Grace period: ask within 30 min after event ends, before auto-clocking out
+    var graceEnd = new Date(evEnd.getTime() + 30 * 60000);
     (ev.signups||[]).forEach(function(s) {
-      if (s.clockedIn && !s.clockedOutAt) { s.clockedIn=false; s.clockedOutAt=evEnd.toISOString(); changed=true; }
+      if (!s.clockedIn || s.clockedOutAt) return;
+      var uid = state.currentUserId;
+      if (s.memberId === uid && now <= graceEnd && !s._askedClockOut) {
+        // Ask this member if they want to stay clocked in
+        s._askedClockOut = true;
+        _askStayClockIn('event', ev.id, ev.title, evEnd);
+      } else if (now > graceEnd) {
+        // Grace expired — auto clock out
+        s.clockedIn = false; s.clockedOutAt = graceEnd.toISOString(); changed = true;
+      }
     });
   });
   (state.meetingAttendance||[]).forEach(function(att) {
@@ -7971,14 +8045,20 @@ function checkAutoClockOuts() {
     var mEnd = new Date(att.date + 'T' + mtg.time + ':00');
     mEnd = new Date(mEnd.getTime() + (mtg.duration||60)*60000);
     if (now < mEnd) return;
-    att.clockedOutAt = mEnd.toISOString(); changed = true;
-    if (state.currentSession && state.currentSession.mtgId===att.mtgId && state.currentSession.userId===att.memberId) {
-      state.currentSession.end = mEnd.toISOString();
-      state.currentSession.duration = (mEnd - new Date(state.currentSession.start)) / 1000;
-      if (!Array.isArray(state.sessions)) state.sessions = [];
-      state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
-      state.currentSession = null;
-      try{updateClockUI(false);}catch(e){}
+    var mtgGraceEnd = new Date(mEnd.getTime() + 30 * 60000);
+    if (now <= mtgGraceEnd && !att._askedClockOut && att.memberId === state.currentUserId) {
+      att._askedClockOut = true;
+      _askStayClockIn('meeting', att.mtgId, mtg.title, mEnd);
+    } else if (now > mtgGraceEnd) {
+      att.clockedOutAt = mtgGraceEnd.toISOString(); changed = true;
+      if (state.currentSession && state.currentSession.mtgId===att.mtgId && state.currentSession.userId===att.memberId) {
+        state.currentSession.end = mtgGraceEnd.toISOString();
+        state.currentSession.duration = (mtgGraceEnd - new Date(state.currentSession.start)) / 1000;
+        if (!Array.isArray(state.sessions)) state.sessions = [];
+        state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+        state.currentSession = null;
+        try{updateClockUI(false);}catch(e){}
+      }
     }
   });
   (state.staffingShifts||[]).forEach(function(s) {
@@ -8849,10 +8929,22 @@ function rejectTrainingFromApprovals(elOrId) { openRejectModal_training(elOrId);
 //  LOGO / BRANDING
 // ═══════════════════════════════════════════════════
 function getLogoData() {
-  try { return localStorage.getItem('rbvfc_logo') || ''; } catch(e){ return ''; }
+  // Prefer Firestore-synced logo; fall back to localStorage
+  if (state.companyLogo) {
+    try { localStorage.setItem('rbvfc_logo', state.companyLogo); } catch(e){}
+    return state.companyLogo;
+  }
+  try { 
+    var local = localStorage.getItem('rbvfc_logo') || '';
+    if (local) state.companyLogo = local; // migrate local → state on next save
+    return local;
+  } catch(e){ return ''; }
 }
 function saveLogoData(dataUrl) {
+  // Save to both localStorage (local fast access) and state (Firestore sync)
   try { localStorage.setItem('rbvfc_logo', dataUrl); } catch(e){}
+  state.companyLogo = dataUrl || '';
+  save(); // syncs to Firestore so all devices see it
 }
 function applyLogo() {
   var logo = getLogoData();
