@@ -6624,6 +6624,7 @@ function openAdjustClockIn(shiftId) {
     '<input type="hidden" id="adjustClockShiftId" value="' + shiftId + '">' +
     '<div style="display:flex;gap:10px;">' +
       '<button onclick="document.getElementById(\'adjustClockModal\').remove()" style="flex:1;background:none;border:1px solid #333;color:#888;border-radius:10px;padding:14px;cursor:pointer;">Cancel</button>' +
+      '<button onclick="clockOutShiftNow()" style="flex:1;background:rgba(200,16,46,0.15);border:1px solid #E74C3C;color:#E74C3C;border-radius:10px;padding:14px;cursor:pointer;font-weight:700;font-size:13px;">⏹ Out</button>' +
       '<button onclick="confirmAdjustClockIn()" style="flex:2;background:#F5A623;border:none;color:#000;border-radius:10px;padding:14px;cursor:pointer;font-weight:700;">&#10003; Save Time</button>' +
     '</div>' +
     '</div>';
@@ -9625,6 +9626,151 @@ function _sanitizeShiftPositions() {
   });
 }
 
+
+function adminClockOutMember(memberId) {
+  var m = (state.roster||[]).find(function(x){ return x.id===memberId; });
+  if (!m) return;
+  var name = m.last+', '+m.first;
+  var today = localDateStr();
+  var sessions = [];
+
+  // 1. Staffing shifts clocked in today
+  (state.staffingShifts||[]).filter(function(s){
+    return s.memberId===memberId && s.clockedIn && !s.clockedOutAt && s.date===today;
+  }).forEach(function(s){
+    var lbl=(UNIT_LABELS&&UNIT_LABELS[s.unitId])||(s.unitId||'Unit');
+    sessions.push({type:'shift',id:s.id,label:lbl+(s.position?' · '+s.position:''),color:ACT_COLORS.emergency,icon:'🚒'});
+  });
+
+  // 2. Class attendance today
+  (state.classAttendance||[]).filter(function(a){
+    return a.memberId===memberId && a.clockedInAt && !a.clockedOutAt && a.sessionDate===today;
+  }).forEach(function(a){
+    var cls=(state.trainingClasses||[]).find(function(c){return c.id===a.classId;});
+    sessions.push({type:'class',id:a.id,label:(cls?cls.name:'Training Class'),color:ACT_COLORS.class,icon:'📘'});
+  });
+
+  // 3. Meeting attendance today
+  (state.meetingAttendance||[]).filter(function(a){
+    return a.memberId===memberId && a.clockedInAt && !a.clockedOutAt && a.date===today;
+  }).forEach(function(a){
+    var mtg=(state.meetings||[]).find(function(x){return x.id===a.mtgId;});
+    sessions.push({type:'meeting',id:a.id,label:(mtg?mtg.title:'Meeting'),color:ACT_COLORS.meeting,icon:'📋'});
+  });
+
+  // 4. Special events clocked in
+  (state.specialEvents||[]).forEach(function(ev){
+    (ev.signups||[]).filter(function(s){
+      return s.memberId===memberId && s.clockedIn && !s.clockedOutAt;
+    }).forEach(function(){
+      sessions.push({type:'event',evId:ev.id,label:ev.title,color:ACT_COLORS.fundraiser,icon:'⭐'});
+    });
+  });
+
+  // 5. Current session (collateral, drill, etc.)
+  if (state.currentSession && state.currentSession.userId===memberId && !state.currentSession.end) {
+    var cs=state.currentSession;
+    var csLbl={collateral:'Collateral Duty',duty:'Station Duty',drill:'Drill',meeting:'Meeting',training:'Training',other:'On Duty'}[cs.activity]||'Active Session';
+    sessions.push({type:'session',label:(cs.desc||csLbl),color:ACT_COLORS[cs.activity]||ACT_COLORS.duties,icon:'⏱'});
+  }
+
+  if (!sessions.length) { showToast('ℹ '+name+' is not clocked in anywhere.'); return; }
+
+  var old=document.getElementById('_adminCoModal'); if(old) old.remove();
+  var wrap=document.createElement('div'); wrap.id='_adminCoModal';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:4000;display:flex;align-items:flex-end;justify-content:center;';
+  var inner=document.createElement('div');
+  inner.style.cssText='background:#1A1A1A;border:1px solid #C8102E;border-top:4px solid #C8102E;border-radius:20px 20px 0 0;padding:20px;width:100%;max-width:440px;box-sizing:border-box;max-height:80vh;overflow-y:auto;';
+
+  var bar=document.createElement('div'); bar.style.cssText='width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 16px;';
+  var title=document.createElement('div'); title.style.cssText='font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:700;color:#C8102E;margin-bottom:2px;'; title.textContent='⏹ Clock Out';
+  var sub=document.createElement('div'); sub.style.cssText='font-size:13px;color:#888;margin-bottom:16px;'; sub.textContent=name+' — select sessions to end';
+  inner.appendChild(bar); inner.appendChild(title); inner.appendChild(sub);
+
+  sessions.forEach(function(sess,i){
+    var row=document.createElement('label');
+    row.style.cssText='display:flex;align-items:center;gap:12px;padding:12px;background:#222;border:1px solid #333;border-left:4px solid '+sess.color+';border-radius:10px;margin-bottom:8px;cursor:pointer;';
+    var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=true; cb.id='_co_cb_'+i;
+    cb.style.cssText='width:18px;height:18px;accent-color:'+sess.color+';cursor:pointer;flex-shrink:0;';
+    var icon=document.createElement('span'); icon.style.cssText='font-size:18px;'; icon.textContent=sess.icon;
+    var lbl=document.createElement('div'); lbl.style.cssText='flex:1;font-size:13px;color:#F0F0F0;font-weight:600;'; lbl.textContent=sess.label;
+    var badge=document.createElement('span');
+    badge.style.cssText='font-size:10px;padding:2px 6px;border-radius:4px;background:rgba('+_hexToRgb(sess.color)+',0.15);color:'+sess.color+';font-weight:700;text-transform:uppercase;';
+    badge.textContent=sess.type;
+    row.appendChild(cb); row.appendChild(icon); row.appendChild(lbl); row.appendChild(badge);
+    row._sessData=sess;
+    inner.appendChild(row);
+  });
+
+  var btnRow=document.createElement('div'); btnRow.style.cssText='display:flex;gap:10px;margin-top:16px;';
+  var coBtn=document.createElement('button');
+  coBtn.style.cssText='flex:2;background:#C8102E;border:none;color:#FFF;border-radius:10px;padding:14px;cursor:pointer;font-size:15px;font-weight:700;';
+  coBtn.textContent='⏹ Clock Out Selected';
+  coBtn.onclick=function(){
+    var nowTs=new Date().toISOString();
+    var changed=0;
+    var rows=inner.querySelectorAll('label[style*="border-left"]');
+    rows.forEach(function(row,i){
+      var cb=document.getElementById('_co_cb_'+i);
+      if(!cb||!cb.checked) return;
+      var sess=row._sessData;
+      if(sess.type==='shift'){
+        var s=(state.staffingShifts||[]).find(function(x){return x.id===sess.id;});
+        if(s){s.clockedIn=false;s.clockedOutAt=nowTs;s.status='complete';changed++;}
+      } else if(sess.type==='class'){
+        var a=(state.classAttendance||[]).find(function(x){return x.id===sess.id;});
+        if(a){a.clockedOutAt=nowTs;changed++;}
+      } else if(sess.type==='meeting'){
+        var ma=(state.meetingAttendance||[]).find(function(x){return x.id===sess.id;});
+        if(ma){ma.clockedOutAt=nowTs;changed++;}
+      } else if(sess.type==='event'){
+        var ev=(state.specialEvents||[]).find(function(x){return x.id===sess.evId;});
+        if(ev){(ev.signups||[]).forEach(function(sg){if(sg.memberId===memberId&&sg.clockedIn&&!sg.clockedOutAt){sg.clockedIn=false;sg.clockedOutAt=nowTs;changed++;}});}
+      } else if(sess.type==='session'){
+        if(state.currentSession&&state.currentSession.userId===memberId&&!state.currentSession.end){
+          state.currentSession.end=nowTs;
+          state.currentSession.duration=(new Date()-new Date(state.currentSession.start))/1000;
+          if(!Array.isArray(state.sessions))state.sessions=[];
+          state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+          state.currentSession=null;
+          if(memberId===state.currentUserId){try{updateClockUI(false);}catch(e){}}
+          changed++;
+        }
+      }
+    });
+    if(changed){save();try{renderCompanyLOSAP();}catch(e){} try{renderStaffingBoard();}catch(e){} try{renderMyShifts();}catch(e){}}
+    document.getElementById('_adminCoModal').remove();
+    showToast('✅ Clocked out '+changed+' session'+(changed===1?'':'s')+' for '+name+'.');
+  };
+  var canBtn=document.createElement('button');
+  canBtn.style.cssText='flex:1;background:none;border:1px solid #333;color:#888;border-radius:10px;padding:14px;cursor:pointer;';
+  canBtn.textContent='Cancel'; canBtn.onclick=function(){document.getElementById('_adminCoModal').remove();};
+  btnRow.appendChild(coBtn); btnRow.appendChild(canBtn);
+  inner.appendChild(btnRow);
+  wrap.appendChild(inner); document.body.appendChild(wrap);
+  wrap.onclick=function(e){if(e.target===wrap) wrap.remove();};
+}
+
+function clockOutShiftNow() {
+  var shiftId=(document.getElementById('adjustClockShiftId')||{}).value;
+  var shift=shiftId?(state.staffingShifts||[]).find(function(s){return s.id===shiftId;}):null;
+  var modal=document.getElementById('adjustClockModal'); if(modal) modal.remove();
+  if(!shift) return;
+  var nowTs=new Date().toISOString();
+  shift.clockedIn=false; shift.clockedOutAt=nowTs; shift.status='complete';
+  if(state.currentSession&&state.currentSession.shiftId===shiftId){
+    state.currentSession.end=nowTs;
+    state.currentSession.duration=(new Date()-new Date(state.currentSession.start))/1000;
+    if(!Array.isArray(state.sessions))state.sessions=[];
+    state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+    state.currentSession=null;
+    if(shift.memberId===state.currentUserId){try{updateClockUI(false);}catch(e){}}
+  }
+  save(); try{renderStaffingBoard();}catch(e){} try{renderMyShifts();}catch(e){}
+  var m2=(state.roster||[]).find(function(r){return r.id===shift.memberId;});
+  showToast('⏹ '+(m2?m2.last+', '+m2.first:'Member')+' clocked out of '+(UNIT_LABELS[shift.unitId]||shift.unitId)+'.');
+}
+
 function launchApp(member) {
   document.getElementById('loginOverlay').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
@@ -9924,6 +10070,7 @@ function changeAdminPin() {
 // ═══════════════════════════════════════════════════
 function renderCompanyStats() {
   var yr = parseInt((document.getElementById('companyYear')||{}).value) || new Date().getFullYear();
+  var _loUid=state.currentUserId,_loMe=_loUid?(state.roster||[]).find(function(x){return x.id===_loUid;}):null,_loOff=_loMe&&(_loMe.appRole==='officer'||_loMe.appRole==='admin');
   var container = document.getElementById('companyStatsContainer');
   if (!container) return;
 
@@ -10131,7 +10278,8 @@ function renderCompanyLOSAP() {
         ? '<td><span style="display:inline-flex;align-items:center;gap:5px;background:rgba('+_ciRgb+',0.12);border:1px solid rgba('+_ciRgb+',0.35);border-radius:12px;padding:2px 8px;font-size:11px;color:'+_ciColor+';white-space:nowrap;">' +
             '<span style="width:6px;height:6px;border-radius:50%;background:'+_ciColor+';flex-shrink:0;box-shadow:0 0 5px '+_ciColor+';display:inline-block;animation:pulse 2s infinite;"></span>' +
             '<strong>' + ci.activity + '</strong>' + (ci.note ? '<span style="color:#888;font-weight:400;"> &middot; ' + ci.note + '</span>' : '') +
-          '</span></td>'
+          '</span>' + (_loOff ? '<button data-mid="'+m.id+'" onclick="adminClockOutMember(this.dataset.mid)" style="margin-left:6px;background:rgba(200,16,46,0.15);border:1px solid rgba(200,16,46,0.5);color:#E74C3C;border-radius:5px;padding:1px 6px;cursor:pointer;font-size:10px;font-weight:700;">⏹</button>' : '') +
+          '</td>'
         : '<td style="color:#333;font-size:11px;">—</td>';
 
       return '<tr style="'+rowStyle+'">'+numCell+
