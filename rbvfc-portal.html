@@ -2581,6 +2581,9 @@ function initTrainingTab() {
   // Populate drill form fields for officers
   var ddEl = document.getElementById('drillDate');
   if (ddEl && !ddEl.value) ddEl.value = new Date().toISOString().slice(0,10);
+  // Default hours to 2 so the field is never blank (user can change it)
+  var dhEl = document.getElementById('drillHours');
+  if (dhEl && !dhEl.value) { dhEl.value = '2'; dhEl.dataset.lastVal = '2'; }
   if (isOfficer) {
     try { populateDrillReportBy(); }   catch(e){}
     try { populateDrillMemberList(); } catch(e){}
@@ -4353,16 +4356,15 @@ function saveDrillReport() {
   }
   console.log('[DRILL] type:', JSON.stringify(drillTypeVal), 'idx:', _drillTypeEl ? _drillTypeEl.selectedIndex : -1, 'method1:', _drillTypeEl ? JSON.stringify(_drillTypeEl.value) : 'n/a');
   // Blur hours field first to commit any in-progress mobile keyboard input
-  // Blur ALL inputs first so mobile keyboard commits any in-progress value
-  document.querySelectorAll('#drillSubmitCard input, #drillSubmitCard select, #drillSubmitCard textarea').forEach(function(el){ try{el.blur();}catch(e){} });
   var _hoursEl = document.getElementById('drillHours');
-  // Try multiple reading methods for cross-browser compatibility
+  // Snapshot hours BEFORE any blur (in case blur triggers a reset)
+  var _hoursSnapshot = _hoursEl ? ((_hoursEl.value||'').trim() || (_hoursEl.dataset.lastVal||'').trim()) : '';
+  // Now blur all inputs to commit mobile keyboard input
+  document.querySelectorAll('#drillSubmitCard input, #drillSubmitCard select, #drillSubmitCard textarea').forEach(function(el){ try{el.blur();}catch(e){} });
+  // Re-read after blur, fall back to pre-blur snapshot
   var _hoursRaw = '';
   if (_hoursEl) {
-    _hoursRaw = (_hoursEl.value || '').trim();
-    // Fallback: dataset backup (set on every input event)
-    if (!_hoursRaw && _hoursEl.dataset.lastVal) _hoursRaw = _hoursEl.dataset.lastVal;
-    // Strip any non-numeric characters except decimal point
+    _hoursRaw = ((_hoursEl.value||'').trim() || (_hoursEl.dataset.lastVal||'').trim() || _hoursSnapshot);
     _hoursRaw = _hoursRaw.replace(/[^0-9.]/g, '');
   }
   var hours = _hoursRaw ? parseFloat(_hoursRaw) : 0;
@@ -4519,7 +4521,7 @@ function clearDrillForm() {
   if (drillDate) drillDate.value = localDateStr();
   var drillType = document.getElementById('drillType'); if(drillType) drillType.value='';
   var drillCode = document.getElementById('drillCodeDisplay'); if(drillCode) drillCode.value='';
-  var drillHours = document.getElementById('drillHours'); if(drillHours) drillHours.value='';
+  var drillHours = document.getElementById('drillHours'); if(drillHours) { drillHours.value='2'; drillHours.dataset.lastVal='2'; }
   var drillLoc = document.getElementById('drillLocation'); if(drillLoc) drillLoc.value='';
   var drillNotes = document.getElementById('drillNotes'); if(drillNotes) drillNotes.value='';
   drillClearAll();
