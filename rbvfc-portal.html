@@ -1501,7 +1501,7 @@ function saveActivity() {
     return;
   } else if (cat==='drill') {
     hours = parseFloat((document.getElementById('drillHours')||{}).value||0);
-    var dtype = document.getElementById('drillType'); 
+    var dtype = document.getElementById('logDrillType') || document.getElementById('drillType'); 
     desc = dtype ? dtype.options[dtype.selectedIndex].text : 'Drill';
     if (!hours || hours <= 0) { showToast('⚠️ Hours required (must be > 0).'); return; }
     pts = calcActivityPts('drill', hours);
@@ -1563,7 +1563,7 @@ function clearActivityForm() {
   });
   var cat = document.getElementById('entryCategory'); if(cat) cat.value='';
   var meet = document.getElementById('meetingType'); if(meet) meet.value='';
-  var drill = document.getElementById('drillType'); if(drill) drill.value='';
+  var drill = document.getElementById('logDrillType'); if(drill) drill.value='';
   document.getElementById('entryDate').value = localDateStr();
   updateCategoryHelp();
   removeCert();
@@ -4241,6 +4241,15 @@ function drillClearAll() {
   });
 }
 
+
+function logDrillTypeChanged() {
+  var sel = document.getElementById('logDrillType');
+  if (!sel) return;
+  var val = sel.value;
+  var codeEl = document.getElementById('drillCodeDisplay');
+  if (codeEl) codeEl.value = val ? val.split('|')[0] : '';
+}
+
 function drillTypeChanged() {
   var sel = document.getElementById('drillType');
   if (!sel) return;
@@ -4316,7 +4325,9 @@ function saveDrillReport() {
   }
   var drillDate    = (document.getElementById('drillDate')||{}).value||'';
   var reportBy     = (document.getElementById('drillReportBy')||{}).value||'';
-  var drillTypeVal = (document.getElementById('drillType')||{}).value||'';
+  var _drillTypeEl = document.getElementById('drillType');
+  var drillTypeVal = _drillTypeEl ? (_drillTypeEl.value || (_drillTypeEl.selectedIndex > 0 ? _drillTypeEl.options[_drillTypeEl.selectedIndex].value : '')) : '';
+  console.log('[DRILL] drillType el:', _drillTypeEl ? 'found' : 'MISSING', 'value:', JSON.stringify(drillTypeVal), 'selectedIndex:', _drillTypeEl ? _drillTypeEl.selectedIndex : -1);
   var hours        = parseFloat((document.getElementById('drillHours')||{}).value||0);
   var location     = ((document.getElementById('drillLocation')||{}).value||'').trim();
   var notes        = ((document.getElementById('drillNotes')||{}).value||'').trim();
@@ -4332,6 +4343,7 @@ function saveDrillReport() {
   }
 
   function _drillError(msg, fieldId) {
+    console.log('[DRILL ERROR]', msg, '| drillTypeVal at error time:', JSON.stringify(drillTypeVal), '| drillDate:', JSON.stringify(drillDate), '| hours:', hours);
     if (_submitBtn) { _submitBtn.disabled=false; _submitBtn.innerHTML='&#128221; Submit Drill Report'; }
     showToast('\u26a0\ufe0f ' + msg);
     // Inline error banner right above submit button so user can't miss it
@@ -13377,7 +13389,7 @@ function applyBulkEdit() {
           <div class="form-grid">
             <div class="form-group">
               <label>Drill Type</label>
-              <select id="drillType" onchange="drillTypeChanged()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+              <select id="logDrillType" onchange="logDrillTypeChanged()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
                 <option value="">— Select Drill Type —</option>
                 <optgroup label="Engine / Suppression">
                   <option value="E-OPS|Engine Company Operations">E-OPS — Engine Company Operations</option>
