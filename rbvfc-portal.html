@@ -2572,6 +2572,9 @@ function initTrainingTab() {
   // Drill submit card: officers only
   var drillCard = document.getElementById('drillSubmitCard');
   if (drillCard) drillCard.style.display = isOfficer ? 'block' : 'none';
+  // Always reset the submit button — prevents stuck disabled state
+  var drillBtn = document.querySelector('#drillSubmitCard button.btn-primary');
+  if (drillBtn) { drillBtn.disabled = false; drillBtn.innerHTML = '&#128221; Submit Drill Report'; }
   // Training submit form: all members
   var sc = document.getElementById('trainingSubmitCard');
   if (sc) sc.style.display = 'block';
@@ -4413,6 +4416,8 @@ function saveDrillReport() {
   save();
   clearDrillForm();
   renderDrillHistory();
+  // Re-enable button immediately after save — don't wait for modal dismiss
+  if (_submitBtn) { _submitBtn.disabled = false; _submitBtn.innerHTML = '&#128221; Submit Drill Report'; }
   setTimeout(function(){
     var scrollArea = document.getElementById('scrollArea');
     if (scrollArea) scrollArea.scrollTop = 0;
@@ -4424,9 +4429,9 @@ function saveDrillReport() {
 function showDrillConfirmation(drillName, drillDate, memberCount, pts, autoApproved) {
   var old = document.getElementById('_drillConfModal'); if(old) old.remove();
   var wrap = document.createElement('div'); wrap.id='_drillConfModal';
-  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:5000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;-webkit-overflow-scrolling:touch;';
   var inner = document.createElement('div');
-  inner.style.cssText = 'background:#1A1A1A;border:2px solid #E67E22;border-radius:16px;padding:28px 24px;width:100%;max-width:380px;text-align:center;';
+  inner.style.cssText = 'background:#1A1A1A;border:2px solid #E67E22;border-radius:16px;padding:28px 24px;width:100%;max-width:380px;text-align:center;position:relative;';
   var iconEl = document.createElement('div'); iconEl.style.cssText='font-size:48px;margin-bottom:12px;'; iconEl.textContent='\uD83D\uDD27';
   var titleEl = document.createElement('div'); titleEl.style.cssText='font-family:Barlow Condensed,sans-serif;font-size:26px;font-weight:700;color:#E67E22;letter-spacing:1px;margin-bottom:8px;'; titleEl.textContent='DRILL SUBMITTED';
   var nameEl = document.createElement('div'); nameEl.style.cssText='font-size:15px;font-weight:600;color:#F0F0F0;margin-bottom:6px;'; nameEl.textContent=drillName;
