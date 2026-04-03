@@ -2586,7 +2586,8 @@ function initTrainingTab() {
   var tcBtn = document.getElementById('trainingClassesOfficerBtn');
   if (tcBtn) tcBtn.style.display = isOfficer ? 'block' : 'none';
   renderTrainingClasses();
-  // Training History and Drill History live in MORE > History — not rendered here
+  // Drill history summary (inline on this tab for officers)
+  if (isOfficer) { try { renderDrillHistory(); } catch(e){} }
 }
 
 function renderTrainingReview() {
@@ -4447,7 +4448,12 @@ function showDrillConfirmation(drillName, drillDate, memberCount, pts, autoAppro
   var closeBtn = document.createElement('button');
   closeBtn.style.cssText='width:100%;background:#E67E22;border:none;color:#111;border-radius:10px;padding:14px;cursor:pointer;font-size:16px;font-weight:700;';
   closeBtn.textContent='Got It';
-  closeBtn.onclick=function(){ document.getElementById('_drillConfModal').remove(); };
+  closeBtn.onclick=function(){
+    document.getElementById('_drillConfModal').remove();
+    // Re-enable submit button after user acknowledges
+    var sb = document.querySelector('#drillSubmitCard button.btn-primary');
+    if (sb) { sb.disabled = false; sb.innerHTML = '📝 Submit Drill Report'; }
+  };
   [iconEl,titleEl,nameEl,dateEl,statsRow,pendingNote,closeBtn].forEach(function(el){inner.appendChild(el);});
   wrap.appendChild(inner); document.body.appendChild(wrap);
   wrap.onclick=function(e){if(e.target===wrap) wrap.remove();};
@@ -5735,6 +5741,35 @@ function renderStaffingBoard() {
   });
 
   container.innerHTML = html;
+
+  // Also update inline summary card on Training tab
+  var summaryCard = document.getElementById('drillHistorySummaryCard');
+  var summaryBody = document.getElementById('drillHistorySummaryContainer');
+  if (summaryCard && summaryBody) {
+    if (isOfficer) {
+      summaryCard.style.display = 'block';
+      // Show the 5 most recent drills compactly
+      var recent = drills.slice(0, 5);
+      if (!recent.length) {
+        summaryBody.innerHTML = '<p style="color:#666;font-size:13px;text-align:center;padding:12px;">No drill reports yet.</p>';
+      } else {
+        summaryBody.innerHTML = recent.map(function(s) {
+          var sc = {pending:'#F5A623', approved:'#27AE60', rejected:'#E74C3C'}[s.status]||'#888';
+          var sl = {pending:'Pending', approved:'Approved', rejected:'Rejected'}[s.status]||s.status;
+          return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #1E1E1E;">'
+            + '<div style="flex:1;">'
+            + '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">' + (s.drillName||s.drillCode||'Drill') + '</div>'
+            + '<div style="font-size:11px;color:#888;margin-top:2px;">' + s.date + ' &nbsp;&middot;&nbsp; ' + (s.hours||0) + 'h &nbsp;&middot;&nbsp; ' + (s.members||[]).length + ' members</div>'
+            + '</div>'
+            + '<span style="font-size:11px;font-weight:700;color:'+sc+';background:rgba('+_hexToRgb(sc)+',0.12);padding:3px 8px;border-radius:5px;">' + sl + '</span>'
+            + (isOfficer && s.status==='pending' ? '<button data-did="'+s.id+'" onclick="approveDrill(this.dataset.did);renderDrillHistory();" style="margin-left:6px;background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:5px;padding:3px 8px;cursor:pointer;font-size:11px;">\u2713 Approve</button>' : '')
+            + '</div>';
+        }).join('');
+      }
+    } else {
+      summaryCard.style.display = 'none';
+    }
+  }
 }
 
 
@@ -13996,6 +14031,17 @@ function applyBulkEdit() {
           <div id="drillMemberList" style="max-height:220px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#181818;"></div>
         </div>
         <button class="btn btn-primary btn-full" onclick="saveDrillReport()">📝 Submit Drill Report</button>
+      </div>
+
+      <!-- Drill History Summary (officer/admin only, inline on Training tab) -->
+      <div class="card" id="drillHistorySummaryCard" style="display:none;">
+        <div class="card-header" onclick="toggleStaffCard('drillHistorySummaryBody','drillHistorySummaryChevron')" style="cursor:pointer;user-select:none;">
+          <div class="icon">📋</div><h2>Recent Drill Reports</h2>
+          <span id="drillHistorySummaryChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span>
+        </div>
+        <div id="drillHistorySummaryBody" style="padding:0 4px 8px;">
+          <div id="drillHistorySummaryContainer"></div>
+        </div>
       </div>
 
       <!-- Submit Training for Approval -->
