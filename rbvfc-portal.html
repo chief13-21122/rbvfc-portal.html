@@ -1680,6 +1680,53 @@ function erClearAll() {
   roster.forEach(function(m){ var cb = document.getElementById('er_'+m.id); if(cb) cb.checked=false; });
 }
 
+
+function renderApparatusAdmin() {
+  var grid = document.getElementById('erApparatusGrid');
+  if (!grid) return;
+  var defaults = Array.isArray(state.apparatusDefaults) && state.apparatusDefaults.length
+    ? state.apparatusDefaults : getActiveUnits();
+  if (!grid.dataset.built) {
+    grid.dataset.built = '1';
+    grid.innerHTML = '';
+    Object.keys(UNIT_LABELS).forEach(function(u) {
+      var checked = defaults.indexOf(u) > -1;
+      var btn = document.createElement('label');
+      btn.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;background:#1E1E1E;border:1px solid #333;border-radius:7px;padding:8px 12px;transition:background .15s;user-select:none;';
+      btn.innerHTML = '<input type="checkbox" id="unit_'+u+'" value="'+u+'"'+(checked?' checked':'')+' style="accent-color:#C8102E;width:15px;height:15px;cursor:pointer;flex-shrink:0;">'
+        + '<span style="font-size:13px;font-weight:600;color:#F0F0F0;">'+UNIT_LABELS[u]+'</span>';
+      var cb = btn.querySelector('input');
+      (function(b,c){function upd(){b.style.background=c.checked?'rgba(200,16,46,0.12)':'#1E1E1E';b.style.borderColor=c.checked?'#C8102E':'#333';}upd();c.addEventListener('change',upd);})(btn,cb);
+      grid.appendChild(btn);
+    });
+  } else {
+    Object.keys(UNIT_LABELS).forEach(function(u) {
+      var cb = document.getElementById('unit_'+u);
+      if (cb) cb.checked = defaults.indexOf(u) > -1;
+    });
+  }
+}
+function saveApparatusDefaults() {
+  state.apparatusDefaults = Object.keys(UNIT_LABELS).filter(function(u) {
+    var cb = document.getElementById('unit_'+u); return cb && cb.checked;
+  });
+  save(); showToast('✅ Default apparatus saved.');
+}
+function apparatusSelectAll() {
+  Object.keys(UNIT_LABELS).forEach(function(u) {
+    var cb=document.getElementById('unit_'+u); if(cb){cb.checked=true;cb.dispatchEvent(new Event('change'));}
+  });
+}
+function apparatusClearAll() {
+  Object.keys(UNIT_LABELS).forEach(function(u) {
+    var cb=document.getElementById('unit_'+u); if(cb){cb.checked=false;cb.dispatchEvent(new Event('change'));}
+  });
+}
+function getDefaultApparatus() {
+  return (Array.isArray(state.apparatusDefaults) && state.apparatusDefaults.length)
+    ? state.apparatusDefaults.slice() : getActiveUnits();
+}
+
 function saveEmergencyResponse() {
   var date  = (document.getElementById('erDate')||{}).value||'';
   var addr  = ((document.getElementById('erAddress')||{}).value||'').trim();
@@ -1696,7 +1743,7 @@ function saveEmergencyResponse() {
   if (!date||!addr) { showToast('⚠️ Date and address are required.'); return; }
 
   // Get selected units
-  var units = UNITS.filter(function(u){ var cb=document.getElementById('unit_'+u); return cb&&cb.checked; });
+  var units = (function(){ var sel=UNITS.filter(function(u){var cb=document.getElementById('unit_'+u);return cb&&cb.checked;}); return sel.length ? sel : getDefaultApparatus(); })();
   if (units.length===0) { showToast('⚠️ Select at least one responding unit.'); return; }
 
   // Get selected members (manually checked)
@@ -3499,6 +3546,7 @@ function onAdminTabShow() {
   renderRankEditor();
   // Render unit config checkboxes (no-op if not present)
   if (typeof renderUnitConfigCard === 'function') renderUnitConfigCard();
+  try { renderApparatusAdmin(); } catch(e){}
 
   // Update monthly email status panel
   updateMonthlyEmailStatus();
@@ -3526,7 +3574,8 @@ function onAdminTabShow() {
     'firestoreConfigCard',    // Cloud Sync (Firestore)
     'logoMgmtCard',           // Company Logo
     'publicLinkCard',         // Public View Link
-    'adminPinCard',           // Change PIN
+    'adminPinCard',              // Change PIN
+    'respondingApparatusCard',   // Responding Apparatus defaults
   ];
   _adminOnly.forEach(function(cardId) {
     var el = document.getElementById(cardId);
@@ -3569,7 +3618,7 @@ function syncAllToSheet(manual) {
     sessions: (state.sessions||[]).map(function(s) {
       return {memberId:s.memberId,date:s.date,type:s.type,hours:s.hours};
     }),
-    losap: (state.losapActivities||[]).map(function(a) {
+    losap: (state.losapActivities||[]).slice(-200).map(function(a) {
       return {memberId:a.memberId,date:a.date,category:a.category,desc:a.desc,pts:a.pts,hours:a.hours||''};
     }),
     emergency: (state.emergencyResponses||[]).map(function(r) {
@@ -4315,6 +4364,23 @@ function showSubmitConfirmation(msg, iconStr) {
     setTimeout(function(){ if(banner.parentNode) banner.parentNode.removeChild(banner); }, 400); }, 3000);
 }
 
+
+
+function editDrillHours() {
+  var hiddenEl = document.getElementById('drillHours');
+  var dispEl   = document.getElementById('drillHoursDisplay');
+  if (!hiddenEl || !dispEl) return;
+  var cur = parseFloat(hiddenEl.value) || 2;
+  var input = window.prompt('Enter drill duration in hours (e.g. 2, 30, 0.5):', String(cur));
+  if (input === null) return; // cancelled
+  var val = parseFloat(input.replace(/[^0-9.]/g,''));
+  if (!isNaN(val) && val > 0) {
+    val = Math.round(val * 10) / 10;
+    if (val > 96) val = 96;
+    hiddenEl.value = val;
+    dispEl.textContent = val % 1 === 0 ? String(val) : val.toFixed(1);
+  }
+}
 
 function adjustDrillHours(delta) {
   var hiddenEl = document.getElementById('drillHours');
@@ -5807,33 +5873,6 @@ function renderStaffingBoard() {
   container.innerHTML = html;
 
   // Also update inline summary card on Training tab
-  var summaryCard = document.getElementById('drillHistorySummaryCard');
-  var summaryBody = document.getElementById('drillHistorySummaryContainer');
-  if (summaryCard && summaryBody) {
-    if (isOfficer) {
-      summaryCard.style.display = 'block';
-      // Show the 5 most recent drills compactly
-      var recent = drills.slice(0, 5);
-      if (!recent.length) {
-        summaryBody.innerHTML = '<p style="color:#666;font-size:13px;text-align:center;padding:12px;">No drill reports yet.</p>';
-      } else {
-        summaryBody.innerHTML = recent.map(function(s) {
-          var sc = {pending:'#F5A623', approved:'#27AE60', rejected:'#E74C3C'}[s.status]||'#888';
-          var sl = {pending:'Pending', approved:'Approved', rejected:'Rejected'}[s.status]||s.status;
-          return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #1E1E1E;">'
-            + '<div style="flex:1;">'
-            + '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">' + (s.drillName||s.drillCode||'Drill') + '</div>'
-            + '<div style="font-size:11px;color:#888;margin-top:2px;">' + s.date + ' &nbsp;&middot;&nbsp; ' + (s.hours||0) + 'h &nbsp;&middot;&nbsp; ' + (s.members||[]).length + ' members</div>'
-            + '</div>'
-            + '<span style="font-size:11px;font-weight:700;color:'+sc+';background:rgba('+_hexToRgb(sc)+',0.12);padding:3px 8px;border-radius:5px;">' + sl + '</span>'
-            + (isOfficer && s.status==='pending' ? '<button data-did="'+s.id+'" onclick="approveDrill(this.dataset.did);renderDrillHistory();" style="margin-left:6px;background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:5px;padding:3px 8px;cursor:pointer;font-size:11px;">\u2713 Approve</button>' : '')
-            + '</div>';
-        }).join('');
-      }
-    } else {
-      summaryCard.style.display = 'none';
-    }
-  }
 }
 
 
@@ -13472,8 +13511,9 @@ function applyBulkEdit() {
               <div style="display:flex;align-items:center;gap:0;border:1px solid #555;border-radius:8px;overflow:hidden;background:#1E1E1E;">
                 <button type="button" onclick="adjustDrillHours(-0.5)" style="background:#2A2A2A;border:none;color:#F0F0F0;font-size:24px;font-weight:700;padding:10px 20px;cursor:pointer;line-height:1;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">−</button>
                 <div style="flex:1;text-align:center;padding:8px 0;">
-                  <span id="drillHoursDisplay" style="font-size:24px;font-weight:700;color:#F5A623;">2</span>
+                  <span id="drillHoursDisplay" onclick="editDrillHours()" style="font-size:24px;font-weight:700;color:#F5A623;text-decoration:underline dotted;cursor:pointer;-webkit-tap-highlight-color:rgba(245,166,35,0.2);" title="Tap to enter custom hours">2</span>
                   <span style="font-size:13px;color:#888;margin-left:4px;">hrs</span>
+                  <div style="font-size:10px;color:#666;margin-top:1px;">tap # to type</div>
                 </div>
                 <input type="hidden" id="drillHours" value="2">
                 <button type="button" onclick="adjustDrillHours(0.5)" style="background:#2A2A2A;border:none;color:#F0F0F0;font-size:24px;font-weight:700;padding:10px 20px;cursor:pointer;line-height:1;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">+</button>
@@ -13628,11 +13668,7 @@ function applyBulkEdit() {
           </div>
         </div>
 
-        <!-- Responding Apparatus -->
-        <div class="form-group" style="margin-top:4px;">
-          <label>Responding Apparatus *</label>
-          <div id="erApparatusGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;background:#181818;border:1px solid #2A2A2A;border-radius:8px;padding:10px;"></div>
-        </div>
+
         <!-- Member checkboxes -->
         <div class="form-group" style="margin-top:8px;">
           <label>Responding Members</label>
@@ -14488,7 +14524,24 @@ function applyBulkEdit() {
       </div>
 
       <!-- Data Management -->
-      <div class="card" data-no-collapse="1" id="dataMgmtCard">
+              <div class="card" id="respondingApparatusCard">
+          <div class="card-header" style="cursor:pointer;user-select:none;" onclick="toggleStaffCard('respondingApparatusBody','respondingApparatusChev')">
+            <div class="icon">&#128664;</div>
+            <h2>Responding Apparatus</h2>
+            <span id="respondingApparatusChev" style="margin-left:auto;color:#555;font-size:13px;">&#9660;</span>
+          </div>
+          <div id="respondingApparatusBody" style="padding:0 4px 14px;">
+            <p style="font-size:12px;color:#888;margin-bottom:12px;">Set which units respond by default when logging emergency incidents. Admins can adjust per-incident when logging a response.</p>
+            <div id="erApparatusGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#181818;border:1px solid #2A2A2A;border-radius:8px;padding:10px;"></div>
+            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-sm btn-secondary" onclick="apparatusSelectAll()">Select All</button>
+              <button class="btn btn-sm btn-secondary" onclick="apparatusClearAll()">Clear All</button>
+              <button class="btn btn-primary btn-sm" onclick="saveApparatusDefaults()" style="margin-left:auto;">&#10003; Save Defaults</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" data-no-collapse="1" id="dataMgmtCard">
         <div class="card-header"><div class="icon">🗄</div><h2>Data Management</h2></div>
 
         <!-- Google Drive Cert Upload subsection -->
