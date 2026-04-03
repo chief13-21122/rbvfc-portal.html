@@ -4330,11 +4330,27 @@ function saveDrillReport() {
     var scrollArea = document.getElementById('scrollArea');
     if (scrollArea) scrollArea.scrollTop = Math.max(0, el.offsetTop - 80);
   }
-  if (!drillDate) { _highlightDrillField('drillDate'); showToast('⚠️ Drill date is required.'); if(_submitBtn){_submitBtn.disabled=false;_submitBtn.innerHTML='📝 Submit Drill Report';} return; }
+
+  function _drillError(msg, fieldId) {
+    if (_submitBtn) { _submitBtn.disabled=false; _submitBtn.innerHTML='&#128221; Submit Drill Report'; }
+    showToast('\u26a0\ufe0f ' + msg);
+    // Inline error banner right above submit button so user can't miss it
+    var eb = document.getElementById('_drillErrBanner');
+    if (!eb) {
+      eb = document.createElement('div');
+      eb.id = '_drillErrBanner';
+      eb.style.cssText = 'background:#2A0000;border:2px solid #E74C3C;border-radius:8px;padding:12px 16px;font-size:14px;font-weight:700;color:#E74C3C;margin:8px 0;text-align:center;';
+      if (_submitBtn && _submitBtn.parentNode) _submitBtn.parentNode.insertBefore(eb, _submitBtn);
+    }
+    eb.textContent = '\u26a0\ufe0f ' + msg;
+    setTimeout(function(){ var e=document.getElementById('_drillErrBanner'); if(e) e.remove(); }, 6000);
+    if (fieldId) _highlightDrillField(fieldId);
+  }
+  if (!drillDate) { _drillError('Drill date is required.', 'drillDate'); return; }
   if (!reportBy) reportBy = state.currentUserId || '';
-  if (!reportBy) { showToast('⚠️ Could not determine reporter — please re-open the Training tab.'); return; }
-  if (!drillTypeVal) { _highlightDrillField('drillType'); showToast('⚠️ Please select a drill type.'); if(_submitBtn){_submitBtn.disabled=false;_submitBtn.innerHTML='📝 Submit Drill Report';} return; }
-  if (!hours || hours <= 0) { _highlightDrillField('drillHours'); showToast('⚠️ Enter the drill duration in hours.'); if(_submitBtn){_submitBtn.disabled=false;_submitBtn.innerHTML='📝 Submit Drill Report';} return; }
+  if (!reportBy) { _drillError('Could not determine reporter — please re-open Training tab.', null); return; }
+  if (!drillTypeVal) { _drillError('Please select a Drill Type from the dropdown.', 'drillType'); return; }
+  if (!hours || hours <= 0) { _drillError('Enter the drill duration in hours.', 'drillHours'); return; }
 
   var parts = drillTypeVal.split('|');
   var drillCode = parts[0] || '';
@@ -4346,24 +4362,7 @@ function saveDrillReport() {
     var cb = document.getElementById('drill_'+m.id); return cb && cb.checked;
   }).map(function(m){ return m.id; });
 
-  if (members.length === 0) {
-    var mlEl = document.getElementById('drillMemberList');
-    if (mlEl) {
-      mlEl.style.outline = '2px solid #E74C3C';
-      mlEl.style.borderRadius = '8px';
-      setTimeout(function(){ mlEl.style.outline=''; }, 3000);
-      var scrollArea2 = document.getElementById('scrollArea');
-      if (scrollArea2) scrollArea2.scrollTop = Math.max(0, mlEl.offsetTop - 80);
-    }
-    // Show a more prominent inline error message
-    var errMsg = document.createElement('div');
-    errMsg.style.cssText='background:#2A0000;border:1px solid #E74C3C;border-radius:8px;padding:10px 14px;font-size:13px;color:#E74C3C;font-weight:600;margin-top:6px;';
-    errMsg.textContent='\u26A0\uFE0F Select at least one participating member before submitting.';
-    if (mlEl) { mlEl.parentNode.insertBefore(errMsg, mlEl.nextSibling); setTimeout(function(){ if(errMsg.parentNode) errMsg.parentNode.removeChild(errMsg); }, 4000); }
-    showToast('\u26A0\uFE0F Select at least one member.');
-    if(_submitBtn){_submitBtn.disabled=false;_submitBtn.innerHTML='📝 Submit Drill Report';}
-    return;
-  }
+  if (members.length === 0) { _drillError('Select at least one participating member.', null); return; }
 
   var pts = Math.floor(hours / 2); // 1 pt per 2 hrs, AA County rule
   if (pts < 1) pts = 1; // minimum 1 pt for any approved drill
@@ -14981,6 +14980,11 @@ function applyBulkEdit() {
     </div>
   </div>
 </div>
+
+  <!-- Toast notification -->
+  <div id="toast" style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:#1A1A1A;border:1px solid #333;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:600;color:#F0F0F0;z-index:9999;opacity:0;transition:opacity 0.3s,transform 0.3s;pointer-events:none;white-space:nowrap;max-width:90vw;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.6);">
+    <span id="toastMsg"></span>
+  </div>
 
 </body>
 </html>
