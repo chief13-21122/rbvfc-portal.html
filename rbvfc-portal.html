@@ -4381,11 +4381,10 @@ function saveDrillReport() {
   save();
   clearDrillForm();
   renderDrillHistory();
-  // Scroll to the drill history so user can see their submission
+  // Scroll to top of Training tab after submit
   setTimeout(function(){
-    var histCard = document.getElementById('drillHistoryCard');
     var scrollArea = document.getElementById('scrollArea');
-    if (histCard && scrollArea) scrollArea.scrollTop = histCard.offsetTop - 60;
+    if (scrollArea) scrollArea.scrollTop = 0;
   }, 200);
   showToast('✅ Drill report submitted!');
   showSubmitConfirmation('Drill report for '+members.length+' member'+(members.length===1?'':'s')+' submitted — pending approval.', '🔧');
@@ -6900,13 +6899,13 @@ function renderMyShifts() {
       html += '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#181818;'
         + 'border:1px solid ' + border + ';border-left:4px solid ' + border + ';border-radius:10px;margin-bottom:8px;flex-wrap:wrap;">';
       html += dateBox;
-      html += '<div style="flex:1;">'
-        // Show linked Tk13 partner shift inline
-        var _lnk = s.linkedShiftId ? (state.staffingShifts||[]).find(function(x){ return x.id===s.linkedShiftId && x.memberId===uid; }) : null;
-        var _uLbl = UNIT_LABELS[s.unitId] + (_lnk ? ' + ' + (UNIT_LABELS[_lnk.unitId]||_lnk.unitId) : '');
-        var _pLbl = s.position + (_lnk ? ' / ' + _lnk.position : '');
-        + '<div style="font-weight:700;font-size:14px;color:#F0F0F0;">' + _uLbl + '</div>'
-        + '<div style="font-size:12px;color:#888;">' + _pLbl + ' &nbsp;&middot;&nbsp; ' + shiftLabel(s) + '</div>';
+      // Show linked partner shift inline
+      var _lnk = s.linkedShiftId ? (state.staffingShifts||[]).find(function(x){ return x.id===s.linkedShiftId && x.memberId===uid; }) : null;
+      var _uLbl = (UNIT_LABELS[s.unitId]||s.unitId) + (_lnk ? ' + ' + (UNIT_LABELS[_lnk.unitId]||_lnk.unitId) : '');
+      var _pLbl = (s.position||'') + (_lnk ? ' / ' + (_lnk.position||'') : '');
+      html += '<div style="flex:1;min-width:0;">'
+        + '<div style="font-weight:700;font-size:14px;color:#F0F0F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _uLbl + '</div>'
+        + '<div style="font-size:12px;color:#888;margin-top:2px;">' + _pLbl + ' &nbsp;&middot;&nbsp; ' + shiftLabel(s) + '</div>';
       if (isToday && !s.clockedIn) html += '<div style="font-size:11px;color:#F5A623;font-weight:700;margin-top:2px;">&#9888; Shift starts today</div>';
       if (s.clockedIn) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#10003; Clocked In ' + new Date(s.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '</div>';
       html += '</div>';
@@ -10062,7 +10061,6 @@ function changeAdminPin() {
 // ═══════════════════════════════════════════════════
 function renderCompanyStats() {
   var yr = parseInt((document.getElementById('companyYear')||{}).value) || new Date().getFullYear();
-  var _loUid=state.currentUserId,_loMe=_loUid?(state.roster||[]).find(function(x){return x.id===_loUid;}):null,_loOff=_loMe&&(_loMe.appRole==='officer'||_loMe.appRole==='admin');
   var container = document.getElementById('companyStatsContainer');
   if (!container) return;
 
@@ -10124,6 +10122,7 @@ function renderCompanyStats() {
 
 function renderCompanyLOSAP() {
   var yr = parseInt((document.getElementById('companyYear')||{}).value) || new Date().getFullYear();
+  var _loUid=state.currentUserId,_loMe=_loUid?(state.roster||[]).find(function(x){return x.id===_loUid;}):null,_loOff=!!(_loMe&&(_loMe.appRole==='officer'||_loMe.appRole==='admin'));
   populateCompanyYearSelect();
   var container = document.getElementById('companyLosapContainer');
   if (!container) return;
