@@ -4298,6 +4298,9 @@ function showSubmitConfirmation(msg, iconStr) {
 }
 
 function saveDrillReport() {
+  // Visual feedback: disable button immediately so double-tap doesn't double-submit
+  var _submitBtn = document.querySelector('#drillSubmitCard button.btn-primary');
+  if (_submitBtn) { _submitBtn.disabled = true; _submitBtn.textContent = '⏳ Submitting…'; }
   // Re-populate reporter in case Firestore sync cleared it
   if (!(document.getElementById('drillReportBy')||{}).value) {
     try { populateDrillReportBy(); } catch(e){}
@@ -4323,11 +4326,11 @@ function saveDrillReport() {
     var scrollArea = document.getElementById('scrollArea');
     if (scrollArea) scrollArea.scrollTop = Math.max(0, el.offsetTop - 80);
   }
-  if (!drillDate) { _highlightDrillField('drillDate'); showToast('⚠️ Drill date is required.'); return; }
+  if (!drillDate) { _highlightDrillField('drillDate'); showToast('⚠️ Drill date is required.'); if(_submitBtn){_submitBtn.disabled=false;_submitBtn.innerHTML='📝 Submit Drill Report';} return; }
   if (!reportBy) reportBy = state.currentUserId || '';
   if (!reportBy) { showToast('⚠️ Could not determine reporter — please re-open the Training tab.'); return; }
-  if (!drillTypeVal) { _highlightDrillField('drillType'); showToast('⚠️ Please select a drill type.'); return; }
-  if (!hours || hours <= 0) { _highlightDrillField('drillHours'); showToast('⚠️ Enter the drill duration in hours.'); return; }
+  if (!drillTypeVal) { _highlightDrillField('drillType'); showToast('⚠️ Please select a drill type.'); if(_submitBtn){_submitBtn.disabled=false;_submitBtn.innerHTML='📝 Submit Drill Report';} return; }
+  if (!hours || hours <= 0) { _highlightDrillField('drillHours'); showToast('⚠️ Enter the drill duration in hours.'); if(_submitBtn){_submitBtn.disabled=false;_submitBtn.innerHTML='📝 Submit Drill Report';} return; }
 
   var parts = drillTypeVal.split('|');
   var drillCode = parts[0] || '';
@@ -4354,6 +4357,7 @@ function saveDrillReport() {
     errMsg.textContent='\u26A0\uFE0F Select at least one participating member before submitting.';
     if (mlEl) { mlEl.parentNode.insertBefore(errMsg, mlEl.nextSibling); setTimeout(function(){ if(errMsg.parentNode) errMsg.parentNode.removeChild(errMsg); }, 4000); }
     showToast('\u26A0\uFE0F Select at least one member.');
+    if(_submitBtn){_submitBtn.disabled=false;_submitBtn.innerHTML='📝 Submit Drill Report';}
     return;
   }
 
@@ -4362,15 +4366,18 @@ function saveDrillReport() {
 
   if (!Array.isArray(state.trainingSubmissions)) state.trainingSubmissions = [];
 
-  // Create one submission per member (so each can be tracked individually)
-  // But store as a group drill with all member IDs
+  // Admins and officers can self-approve drills
+  var _filer = (state.roster||[]).find(function(m){ return m.id===reportBy; });
+  var _isOfficerFiler = _filer && (_filer.appRole==='officer'||_filer.appRole==='admin');
+  var _drillStatus = _isOfficerFiler ? 'approved' : 'pending';
+
   var drillId = 'drill_'+Date.now();
-  state.trainingSubmissions.push({
+  var _drillEntry = {
     id: drillId,
     type: 'drill',
     submittedBy: reportBy,
-    memberId: reportBy,       // primary filer
-    members: members,         // all participants
+    memberId: reportBy,
+    members: members,
     date: drillDate,
     submittedDate: localDateStr(),
     submittedAt: new Date().toISOString(),
@@ -4380,8 +4387,27 @@ function saveDrillReport() {
     pts: pts,
     location: location,
     notes: notes,
-    status: 'pending'
-  });
+    status: _drillStatus
+  };
+  if (_isOfficerFiler) {
+    _drillEntry.approvedBy = reportBy;
+    _drillEntry.approvedAt = new Date().toISOString();
+    // Add LOSAP activities immediately for all members
+    if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
+    members.forEach(function(mid) {
+      state.losapActivities.unshift({
+        id: 'act_'+Date.now()+'_'+mid,
+        memberId: mid,
+        date: drillDate,
+        category: 'drill',
+        desc: (drillCode ? drillCode+' — ' : '') + drillName + (location ? ' @ '+location : ''),
+        pts: pts,
+        hours: hours,
+        notes: notes||''
+      });
+    });
+  }
+  state.trainingSubmissions.push(_drillEntry);
 
   save();
   clearDrillForm();
@@ -4391,10 +4417,10 @@ function saveDrillReport() {
     if (scrollArea) scrollArea.scrollTop = 0;
   }, 200);
   // Show prominent confirmation modal
-  showDrillConfirmation(drillName, drillDate, members.length, pts);
+  showDrillConfirmation(drillName, drillDate, members.length, pts, _isOfficerFiler);
 }
 
-function showDrillConfirmation(drillName, drillDate, memberCount, pts) {
+function showDrillConfirmation(drillName, drillDate, memberCount, pts, autoApproved) {
   var old = document.getElementById('_drillConfModal'); if(old) old.remove();
   var wrap = document.createElement('div'); wrap.id='_drillConfModal';
   wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:5000;display:flex;align-items:center;justify-content:center;padding:20px;';
@@ -4411,7 +4437,13 @@ function showDrillConfirmation(drillName, drillDate, memberCount, pts) {
   ptsStat.innerHTML='<div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:700;color:#27AE60;">'+pts+'</div><div style="font-size:11px;color:#888;margin-top:2px;">Pts Each</div>';
   statsRow.appendChild(membStat); statsRow.appendChild(ptsStat);
   var pendingNote = document.createElement('div'); pendingNote.style.cssText='font-size:12px;color:#555;margin-bottom:20px;';
-  pendingNote.textContent='Pending officer approval — points post when approved.';
+  if (autoApproved) {
+    pendingNote.textContent = '\u2705 Auto-approved \u2014 LOSAP points posted for all ' + memberCount + ' members.';
+    pendingNote.style.color = '#27AE60';
+    titleEl.textContent = 'DRILL APPROVED';
+  } else {
+    pendingNote.textContent = 'Pending officer approval \u2014 points post when approved.';
+  }
   var closeBtn = document.createElement('button');
   closeBtn.style.cssText='width:100%;background:#E67E22;border:none;color:#111;border-radius:10px;padding:14px;cursor:pointer;font-size:16px;font-weight:700;';
   closeBtn.textContent='Got It';
