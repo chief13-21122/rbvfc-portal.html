@@ -4216,7 +4216,7 @@ function populateDrillMemberList() {
   roster.forEach(function(m) {
     var div = document.createElement('div');
     div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid #1E1E1E;';
-    div.innerHTML = '<input type="checkbox" id="drill_'+m.id+'" value="'+m.id+'" style="width:16px;height:16px;accent-color:#C8102E;flex-shrink:0;">'+
+    div.innerHTML = '<input type="checkbox" id="drill_'+m.id+'" value="'+m.id+'" checked style="width:16px;height:16px;accent-color:#C8102E;flex-shrink:0;">'+
       '<label for="drill_'+m.id+'" style="cursor:pointer;flex:1;font-size:14px;color:#F0F0F0;">'+
         '<strong>'+m.last+'</strong>, '+m.first+
         ((m.ranks&&m.ranks.length?m.ranks:(m.rank?[m.rank]:[])).length?' <span style="font-size:11px;color:#888;">('+(m.ranks&&m.ranks.length?m.ranks.join(' / '):m.rank||'')+')</span>':'')+
@@ -4348,7 +4348,12 @@ function saveDrillReport() {
       var scrollArea2 = document.getElementById('scrollArea');
       if (scrollArea2) scrollArea2.scrollTop = Math.max(0, mlEl.offsetTop - 80);
     }
-    showToast('⚠️ Check at least one participating member.');
+    // Show a more prominent inline error message
+    var errMsg = document.createElement('div');
+    errMsg.style.cssText='background:#2A0000;border:1px solid #E74C3C;border-radius:8px;padding:10px 14px;font-size:13px;color:#E74C3C;font-weight:600;margin-top:6px;';
+    errMsg.textContent='\u26A0\uFE0F Select at least one participating member before submitting.';
+    if (mlEl) { mlEl.parentNode.insertBefore(errMsg, mlEl.nextSibling); setTimeout(function(){ if(errMsg.parentNode) errMsg.parentNode.removeChild(errMsg); }, 4000); }
+    showToast('\u26A0\uFE0F Select at least one member.');
     return;
   }
 
@@ -4381,13 +4386,39 @@ function saveDrillReport() {
   save();
   clearDrillForm();
   renderDrillHistory();
-  // Scroll to top of Training tab after submit
   setTimeout(function(){
     var scrollArea = document.getElementById('scrollArea');
     if (scrollArea) scrollArea.scrollTop = 0;
   }, 200);
-  showToast('✅ Drill report submitted!');
-  showSubmitConfirmation('Drill report for '+members.length+' member'+(members.length===1?'':'s')+' submitted — pending approval.', '🔧');
+  // Show prominent confirmation modal
+  showDrillConfirmation(drillName, drillDate, members.length, pts);
+}
+
+function showDrillConfirmation(drillName, drillDate, memberCount, pts) {
+  var old = document.getElementById('_drillConfModal'); if(old) old.remove();
+  var wrap = document.createElement('div'); wrap.id='_drillConfModal';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:5000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var inner = document.createElement('div');
+  inner.style.cssText = 'background:#1A1A1A;border:2px solid #E67E22;border-radius:16px;padding:28px 24px;width:100%;max-width:380px;text-align:center;';
+  var iconEl = document.createElement('div'); iconEl.style.cssText='font-size:48px;margin-bottom:12px;'; iconEl.textContent='\uD83D\uDD27';
+  var titleEl = document.createElement('div'); titleEl.style.cssText='font-family:Barlow Condensed,sans-serif;font-size:26px;font-weight:700;color:#E67E22;letter-spacing:1px;margin-bottom:8px;'; titleEl.textContent='DRILL SUBMITTED';
+  var nameEl = document.createElement('div'); nameEl.style.cssText='font-size:15px;font-weight:600;color:#F0F0F0;margin-bottom:6px;'; nameEl.textContent=drillName;
+  var dateEl = document.createElement('div'); dateEl.style.cssText='font-size:12px;color:#888;margin-bottom:20px;'; dateEl.textContent=drillDate;
+  var statsRow = document.createElement('div'); statsRow.style.cssText='display:flex;gap:12px;justify-content:center;margin-bottom:20px;';
+  var membStat = document.createElement('div'); membStat.style.cssText='flex:1;background:#222;border:1px solid #333;border-radius:10px;padding:12px 8px;';
+  membStat.innerHTML='<div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:700;color:#E67E22;">'+memberCount+'</div><div style="font-size:11px;color:#888;margin-top:2px;">Member'+(memberCount===1?'':'s')+'</div>';
+  var ptsStat = document.createElement('div'); ptsStat.style.cssText='flex:1;background:#222;border:1px solid #333;border-radius:10px;padding:12px 8px;';
+  ptsStat.innerHTML='<div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:700;color:#27AE60;">'+pts+'</div><div style="font-size:11px;color:#888;margin-top:2px;">Pts Each</div>';
+  statsRow.appendChild(membStat); statsRow.appendChild(ptsStat);
+  var pendingNote = document.createElement('div'); pendingNote.style.cssText='font-size:12px;color:#555;margin-bottom:20px;';
+  pendingNote.textContent='Pending officer approval — points post when approved.';
+  var closeBtn = document.createElement('button');
+  closeBtn.style.cssText='width:100%;background:#E67E22;border:none;color:#111;border-radius:10px;padding:14px;cursor:pointer;font-size:16px;font-weight:700;';
+  closeBtn.textContent='Got It';
+  closeBtn.onclick=function(){ document.getElementById('_drillConfModal').remove(); };
+  [iconEl,titleEl,nameEl,dateEl,statsRow,pendingNote,closeBtn].forEach(function(el){inner.appendChild(el);});
+  wrap.appendChild(inner); document.body.appendChild(wrap);
+  wrap.onclick=function(e){if(e.target===wrap) wrap.remove();};
 }
 
 function clearDrillForm() {
@@ -13928,7 +13959,7 @@ function applyBulkEdit() {
           <label>Participating Members *</label>
           <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
             <button class="btn btn-sm btn-secondary" onclick="drillSelectAll()">Select All</button>
-            <button class="btn btn-sm btn-secondary">Clear All</button>
+            <button class="btn btn-sm btn-secondary" onclick="drillClearAll()">Clear All</button>
           </div>
           <div id="drillMemberList" style="max-height:220px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#181818;"></div>
         </div>
