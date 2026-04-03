@@ -2581,9 +2581,11 @@ function initTrainingTab() {
   // Populate drill form fields for officers
   var ddEl = document.getElementById('drillDate');
   if (ddEl && !ddEl.value) ddEl.value = new Date().toISOString().slice(0,10);
-  // Default hours to 2 so the field is never blank (user can change it)
+  // Reset hours stepper to 2 each time Training tab opens
   var dhEl = document.getElementById('drillHours');
-  if (dhEl && !dhEl.value) { dhEl.value = '2'; dhEl.dataset.lastVal = '2'; }
+  var dhDisp = document.getElementById('drillHoursDisplay');
+  if (dhEl) dhEl.value = '2';
+  if (dhDisp) dhDisp.textContent = '2';
   if (isOfficer) {
     try { populateDrillReportBy(); }   catch(e){}
     try { populateDrillMemberList(); } catch(e){}
@@ -4313,6 +4315,19 @@ function showSubmitConfirmation(msg, iconStr) {
     setTimeout(function(){ if(banner.parentNode) banner.parentNode.removeChild(banner); }, 400); }, 3000);
 }
 
+
+function adjustDrillHours(delta) {
+  var hiddenEl = document.getElementById('drillHours');
+  var dispEl   = document.getElementById('drillHoursDisplay');
+  if (!hiddenEl || !dispEl) return;
+  var cur = parseFloat(hiddenEl.value) || 2;
+  var next = Math.round((cur + delta) * 10) / 10;
+  if (next < 0.5) next = 0.5;
+  if (next > 96) next = 96;
+  hiddenEl.value = next;
+  dispEl.textContent = next % 1 === 0 ? String(next) : next.toFixed(1);
+}
+
 function saveDrillReport() {
   // Visual feedback: disable button immediately so double-tap doesn't double-submit
   var _submitBtn = document.querySelector('#drillSubmitCard button.btn-primary');
@@ -4356,20 +4371,11 @@ function saveDrillReport() {
   }
   console.log('[DRILL] type:', JSON.stringify(drillTypeVal), 'idx:', _drillTypeEl ? _drillTypeEl.selectedIndex : -1, 'method1:', _drillTypeEl ? JSON.stringify(_drillTypeEl.value) : 'n/a');
   // Blur hours field first to commit any in-progress mobile keyboard input
+  // Hours is stored in a hidden input managed by adjustDrillHours() stepper
   var _hoursEl = document.getElementById('drillHours');
-  // Snapshot hours BEFORE any blur (in case blur triggers a reset)
-  var _hoursSnapshot = _hoursEl ? ((_hoursEl.value||'').trim() || (_hoursEl.dataset.lastVal||'').trim()) : '';
-  // Now blur all inputs to commit mobile keyboard input
-  document.querySelectorAll('#drillSubmitCard input, #drillSubmitCard select, #drillSubmitCard textarea').forEach(function(el){ try{el.blur();}catch(e){} });
-  // Re-read after blur, fall back to pre-blur snapshot
-  var _hoursRaw = '';
-  if (_hoursEl) {
-    _hoursRaw = ((_hoursEl.value||'').trim() || (_hoursEl.dataset.lastVal||'').trim() || _hoursSnapshot);
-    _hoursRaw = _hoursRaw.replace(/[^0-9.]/g, '');
-  }
-  var hours = _hoursRaw ? parseFloat(_hoursRaw) : 0;
+  var hours = _hoursEl ? (parseFloat(_hoursEl.value) || 0) : 0;
   if (isNaN(hours) || hours < 0) hours = 0;
-  console.log('[DRILL] hours raw:', JSON.stringify(_hoursRaw), 'parsed:', hours, 'el.value:', _hoursEl ? JSON.stringify(_hoursEl.value) : 'null', 'dataset:', _hoursEl ? JSON.stringify(_hoursEl.dataset.lastVal) : 'null');
+  console.log('[DRILL] hours:', hours, 'from hidden input value:', _hoursEl ? _hoursEl.value : 'MISSING');
   var location     = ((document.getElementById('drillLocation')||{}).value||'').trim();
   var notes        = ((document.getElementById('drillNotes')||{}).value||'').trim();
 
@@ -4521,7 +4527,8 @@ function clearDrillForm() {
   if (drillDate) drillDate.value = localDateStr();
   var drillType = document.getElementById('drillType'); if(drillType) drillType.value='';
   var drillCode = document.getElementById('drillCodeDisplay'); if(drillCode) drillCode.value='';
-  var drillHours = document.getElementById('drillHours'); if(drillHours) { drillHours.value='2'; drillHours.dataset.lastVal='2'; }
+  var drillHours = document.getElementById('drillHours'); if(drillHours) drillHours.value='2';
+  var dhd = document.getElementById('drillHoursDisplay'); if(dhd) dhd.textContent='2';
   var drillLoc = document.getElementById('drillLocation'); if(drillLoc) drillLoc.value='';
   var drillNotes = document.getElementById('drillNotes'); if(drillNotes) drillNotes.value='';
   drillClearAll();
@@ -13461,8 +13468,17 @@ function applyBulkEdit() {
               </select>
             </div>
             <div class="form-group">
-              <label>Hours *</label>
-              <input type="text" inputmode="decimal" id="drillHours" placeholder="e.g. 2 or 2.5" autocomplete="off" oninput="this.dataset.lastVal=this.value" onchange="this.dataset.lastVal=this.value">
+              <label>Duration (Hours) *</label>
+              <div style="display:flex;align-items:center;gap:0;border:1px solid #555;border-radius:8px;overflow:hidden;background:#1E1E1E;">
+                <button type="button" onclick="adjustDrillHours(-0.5)" style="background:#2A2A2A;border:none;color:#F0F0F0;font-size:24px;font-weight:700;padding:10px 20px;cursor:pointer;line-height:1;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">−</button>
+                <div style="flex:1;text-align:center;padding:8px 0;">
+                  <span id="drillHoursDisplay" style="font-size:24px;font-weight:700;color:#F5A623;">2</span>
+                  <span style="font-size:13px;color:#888;margin-left:4px;">hrs</span>
+                </div>
+                <input type="hidden" id="drillHours" value="2">
+                <button type="button" onclick="adjustDrillHours(0.5)" style="background:#2A2A2A;border:none;color:#F0F0F0;font-size:24px;font-weight:700;padding:10px 20px;cursor:pointer;line-height:1;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">+</button>
+              </div>
+              <div style="font-size:11px;color:#555;margin-top:4px;text-align:center;">Tap − or + to adjust (0.5 hr steps)</div>
             </div>
           </div>
         </div>
