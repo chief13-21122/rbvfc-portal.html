@@ -4325,10 +4325,40 @@ function saveDrillReport() {
   }
   var drillDate    = (document.getElementById('drillDate')||{}).value||'';
   var reportBy     = (document.getElementById('drillReportBy')||{}).value||'';
+  // Blur all form fields first so mobile keyboard/picker commits values
+  ['drillDate','drillType','drillHours','drillLocation','drillNotes'].forEach(function(id){
+    var el = document.getElementById(id); if (el) el.blur();
+  });
+  // Read drill type as defensively as possible — iterate options[] directly
+  // (avoids iOS Safari quirks with .value on native picker selects)
   var _drillTypeEl = document.getElementById('drillType');
-  var drillTypeVal = _drillTypeEl ? (_drillTypeEl.value || (_drillTypeEl.selectedIndex > 0 ? _drillTypeEl.options[_drillTypeEl.selectedIndex].value : '')) : '';
-  console.log('[DRILL] drillType el:', _drillTypeEl ? 'found' : 'MISSING', 'value:', JSON.stringify(drillTypeVal), 'selectedIndex:', _drillTypeEl ? _drillTypeEl.selectedIndex : -1);
-  var hours        = parseFloat((document.getElementById('drillHours')||{}).value||0);
+  var drillTypeVal = '';
+  if (_drillTypeEl) {
+    // Method 1: .value property
+    if (_drillTypeEl.value) {
+      drillTypeVal = _drillTypeEl.value;
+    } else {
+      // Method 2: iterate options to find selected
+      for (var _oi = 0; _oi < _drillTypeEl.options.length; _oi++) {
+        if (_drillTypeEl.options[_oi].selected && _drillTypeEl.options[_oi].value) {
+          drillTypeVal = _drillTypeEl.options[_oi].value;
+          break;
+        }
+      }
+    }
+    // Method 3: selectedIndex fallback
+    if (!drillTypeVal && _drillTypeEl.selectedIndex > 0) {
+      drillTypeVal = _drillTypeEl.options[_drillTypeEl.selectedIndex].value || '';
+    }
+  }
+  console.log('[DRILL] type:', JSON.stringify(drillTypeVal), 'idx:', _drillTypeEl ? _drillTypeEl.selectedIndex : -1, 'method1:', _drillTypeEl ? JSON.stringify(_drillTypeEl.value) : 'n/a');
+  // Blur hours field first to commit any in-progress mobile keyboard input
+  var _hoursEl = document.getElementById('drillHours');
+  if (_hoursEl) { _hoursEl.blur(); }
+  var _hoursRaw = _hoursEl ? (_hoursEl.value || '').trim() : '';
+  var hours = _hoursRaw ? parseFloat(_hoursRaw) : 0;
+  if (isNaN(hours) || hours < 0) hours = 0;
+  console.log('[DRILL] hours raw:', JSON.stringify(_hoursRaw), 'parsed:', hours);
   var location     = ((document.getElementById('drillLocation')||{}).value||'').trim();
   var notes        = ((document.getElementById('drillNotes')||{}).value||'').trim();
 
@@ -4362,7 +4392,7 @@ function saveDrillReport() {
   if (!reportBy) reportBy = state.currentUserId || '';
   if (!reportBy) { _drillError('Could not determine reporter — please re-open Training tab.', null); return; }
   if (!drillTypeVal) { _drillError('Please select a Drill Type from the dropdown.', 'drillType'); return; }
-  if (!hours || hours <= 0) { _drillError('Enter the drill duration in hours.', 'drillHours'); return; }
+  if (!hours || hours <= 0) { _drillError('Enter duration in hours (e.g. 2). Tap the hours field and enter a number.', 'drillHours'); return; }
 
   var parts = drillTypeVal.split('|');
   var drillCode = parts[0] || '';
