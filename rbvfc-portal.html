@@ -4353,12 +4353,21 @@ function saveDrillReport() {
   }
   console.log('[DRILL] type:', JSON.stringify(drillTypeVal), 'idx:', _drillTypeEl ? _drillTypeEl.selectedIndex : -1, 'method1:', _drillTypeEl ? JSON.stringify(_drillTypeEl.value) : 'n/a');
   // Blur hours field first to commit any in-progress mobile keyboard input
+  // Blur ALL inputs first so mobile keyboard commits any in-progress value
+  document.querySelectorAll('#drillSubmitCard input, #drillSubmitCard select, #drillSubmitCard textarea').forEach(function(el){ try{el.blur();}catch(e){} });
   var _hoursEl = document.getElementById('drillHours');
-  if (_hoursEl) { _hoursEl.blur(); }
-  var _hoursRaw = _hoursEl ? (_hoursEl.value || '').trim() : '';
+  // Try multiple reading methods for cross-browser compatibility
+  var _hoursRaw = '';
+  if (_hoursEl) {
+    _hoursRaw = (_hoursEl.value || '').trim();
+    // Fallback: dataset backup (set on every input event)
+    if (!_hoursRaw && _hoursEl.dataset.lastVal) _hoursRaw = _hoursEl.dataset.lastVal;
+    // Strip any non-numeric characters except decimal point
+    _hoursRaw = _hoursRaw.replace(/[^0-9.]/g, '');
+  }
   var hours = _hoursRaw ? parseFloat(_hoursRaw) : 0;
   if (isNaN(hours) || hours < 0) hours = 0;
-  console.log('[DRILL] hours raw:', JSON.stringify(_hoursRaw), 'parsed:', hours);
+  console.log('[DRILL] hours raw:', JSON.stringify(_hoursRaw), 'parsed:', hours, 'el.value:', _hoursEl ? JSON.stringify(_hoursEl.value) : 'null', 'dataset:', _hoursEl ? JSON.stringify(_hoursEl.dataset.lastVal) : 'null');
   var location     = ((document.getElementById('drillLocation')||{}).value||'').trim();
   var notes        = ((document.getElementById('drillNotes')||{}).value||'').trim();
 
@@ -13451,7 +13460,7 @@ function applyBulkEdit() {
             </div>
             <div class="form-group">
               <label>Hours *</label>
-              <input type="number" id="drillHours" min="0.5" step="0.5" placeholder="e.g. 2">
+              <input type="text" inputmode="decimal" id="drillHours" placeholder="e.g. 2 or 2.5" autocomplete="off" oninput="this.dataset.lastVal=this.value" onchange="this.dataset.lastVal=this.value">
             </div>
           </div>
         </div>
