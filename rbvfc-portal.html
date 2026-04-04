@@ -408,7 +408,7 @@ main{padding:16px;max-width:900px;margin:0 auto;}
 @keyframes spin{to{transform:rotate(360deg);}}
 
 /* ── TOAST ── */
-#toast{position:fixed;bottom:calc(var(--bottom-nav-h) + var(--safe-bottom) + 12px);left:50%;transform:translateX(-50%) translateY(20px);background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:12px 20px;font-size:13px;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,.5);transition:all .35s cubic-bezier(.175,.885,.32,1.275);z-index:998;opacity:0;pointer-events:none;white-space:nowrap;max-width:calc(100vw - 32px);text-overflow:ellipsis;overflow:hidden;}
+#toast{position:fixed;bottom:calc(var(--bottom-nav-h) + var(--safe-bottom) + 12px);left:16px;right:16px;transform:translateY(20px);background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:12px 16px;font-size:13px;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,.5);transition:all .35s cubic-bezier(.175,.885,.32,1.275);z-index:998;opacity:0;pointer-events:none;white-space:normal;text-align:center;line-height:1.4;}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 @media(min-width:768px){#toast{bottom:24px;}}
 
@@ -717,11 +717,7 @@ function _mergeAndRender(remote) {
     });
     if (_unread.length > _prevCount) {
       // New notification(s) arrived since last sync
-      var _n = _unread[0];
-      var _catEmoji = { drill:'🚒', training:'📚', emergency:'🚨', meeting:'📋', duties:'⚙️' };
-      var _emoji = _catEmoji[_n.category] || '🏅';
-      var _desc = _n.desc ? (_n.desc.length > 40 ? _n.desc.slice(0,40)+'…' : _n.desc) : _n.category;
-      showToast(_emoji + ' +' + (_n.pts||0) + ' LOSAP pt' + ((_n.pts||0)!==1?'s':'') + ' — ' + _desc);
+      showLosapPointsBanner(_unread[0]);
     }
     window._lastLosapNotifCount = _unread.length;
   } catch(e){}
@@ -1100,7 +1096,15 @@ function showTab(id) {
   if (id === 'clock')    { try { renderMyShifts(); } catch(e){} try { renderNotifNudge(); } catch(e){} }
   if (id === 'staffing') initStaffingTab();
   if (id === 'training') initTrainingTab();
-  if (id === 'losap') renderLOSAP();
+  if (id === 'losap') {
+    renderLOSAP();
+    // Show banner for first unread LOSAP notification
+    try {
+      var _losapUid = state.currentUserId;
+      var _losapUnread = (state.losapNotifications||[]).filter(function(n){ return n.memberId===_losapUid && !n.read; });
+      if (_losapUnread.length) showLosapPointsBanner(_losapUnread[0]);
+    } catch(e){}
+  }
   if (id === 'company') { populateCompanyYearSelect(); renderCompanyLOSAP(); renderCompanyStats(); }
   if (id === 'hours') renderHoursLog();
   if (id === 'emergency') initEmergencyTab();
@@ -2037,6 +2041,43 @@ function maybeShowSetupBanner(containerId) {
 //  LOSAP POINT NOTIFICATIONS
 // ═══════════════════════════════════════════════════════════════════
 
+
+function acknowledgeLosapNotif(notifId) {
+  var n = (state.losapNotifications||[]).find(function(x){ return x.id === notifId; });
+  if (n) {
+    n.read = true;
+    n.acknowledgedAt = new Date().toISOString();
+    save();
+  }
+  var el = document.getElementById('losapPointsBanner');
+  if (el) { el.style.display = 'none'; _adjustAppTopPad(); }
+  // Show next unread if any
+  var uid = state.currentUserId;
+  var remaining = (state.losapNotifications||[]).filter(function(x){ return x.memberId===uid && !x.read; });
+  if (remaining.length) showLosapPointsBanner(remaining[0]);
+  else updateLosapNotifBadge();
+}
+
+function showLosapPointsBanner(notif) {
+  if (!notif) return;
+  var uid = state.currentUserId;
+  var unreadCount = (state.losapNotifications||[]).filter(function(x){ return x.memberId===uid && !x.read; }).length;
+  var catEmoji = { drill:'🚒', training:'📚', emergency:'🚨', meeting:'📋', duties:'⚙️' };
+  var catLabel = { drill:'Drill', training:'Training', emergency:'Emergency Response', meeting:'Meeting', duties:'Collateral Duty' };
+  var emoji = catEmoji[notif.category] || '🏅';
+  var label = catLabel[notif.category] || (notif.category||'LOSAP');
+  var countStr = unreadCount > 1 ? ' (' + unreadCount + ' unread)' : '';
+  var bodyText = emoji + ' <strong>+' + (notif.pts||0) + ' LOSAP pt' + ((notif.pts||0)!==1?'s':'') + '</strong> — ' + (notif.desc||label);
+
+  _showTopBanner(
+    'losapPointsBanner',
+    '#0D1000', '#A0C030',
+    '🏅', 'LOSAP Points Awarded' + countStr,
+    bodyText,
+    [{ label:'✓ Acknowledge', fn:"acknowledgeLosapNotif('" + notif.id + "')", bg:'#1A2200', color:'#A0C030', border:'#A0C030' }]
+  );
+}
+
 function _notifyLosapPoints(act) {
   if (!act || !act.memberId) return;
   if (!Array.isArray(state.losapNotifications)) state.losapNotifications = [];
@@ -2057,12 +2098,9 @@ function _notifyLosapPoints(act) {
   // Update badge immediately
   updateLosapNotifBadge();
 
-  // Show a toast if this member is currently logged in
+  // Show persistent banner if this member is currently logged in
   if (state.currentUserId === act.memberId) {
-    var catEmoji = { drill:'🚒', training:'📚', emergency:'🚨', meeting:'📋', duties:'⚙️' };
-    var emoji = catEmoji[act.category] || '🏅';
-    var shortDesc = act.desc ? (act.desc.length > 40 ? act.desc.slice(0,40)+'…' : act.desc) : act.category;
-    showToast(emoji + ' +' + (act.pts||0) + ' LOSAP pt' + ((act.pts||0)!==1?'s':'') + ' — ' + shortDesc);
+    showLosapPointsBanner(notif);
   }
 }
 
@@ -7640,7 +7678,7 @@ function _adjustAppTopPad() {
   // Use requestAnimationFrame to ensure banner has rendered before measuring
   requestAnimationFrame(function() {
     var totalH = 0;
-    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner','classReminderTopBanner'].forEach(function(id){
+    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner','classReminderTopBanner','losapPointsBanner'].forEach(function(id){
       var el = document.getElementById(id);
       if (el && el.style.display !== 'none') totalH += el.offsetHeight;
     });
