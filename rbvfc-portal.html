@@ -5851,7 +5851,14 @@ function renderStaffingBoard() {
             var _m     = (state.roster||[]).find(function(x){ return x.id===s.memberId; });
             var _name  = _m ? _m.last+', '+_m.first : 'Unknown';
             var _isMe  = s.memberId === uid;
-            var _ci    = s.clockedIn && !s.clockedOutAt;
+            // _ci: flagged clocked-in OR an open session exists for this member/shift
+            var _ci    = (s.clockedIn && !s.clockedOutAt) ||
+                         (state.sessions||[]).some(function(ss){
+                           return ss.userId===s.memberId && ss.shiftId===s.id && !ss.end;
+                         }) ||
+                         (!!(state.currentSession && !state.currentSession.end &&
+                             state.currentSession.userId===s.memberId &&
+                             state.currentSession.shiftId===s.id));
             var _label = shiftLabel(s);
             var _namec = _isMe ? '#27AE60' : '#F0F0F0';
             html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;'
@@ -7224,11 +7231,18 @@ function renderMyShifts() {
       if (s.clockedIn) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#10003; Clocked In ' + new Date(s.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '</div>';
       html += '</div>';
       if (isToday && !s.clockedIn) {
-        var _ciWin = _checkShiftClockWindow(s);
-        if (_ciWin.ok) {
-          html += '<button class="btn btn-primary btn-sm" data-id="'+s.id+'" onclick="staffClockIn(this)">⏰ Clock In</button>';
+        // Don't show Clock-In if already in any active session
+        var _myActive = !!(state.currentSession && !state.currentSession.end) ||
+          (state.sessions||[]).some(function(ss){ return ss.userId===state.currentUserId && !ss.end; });
+        if (_myActive) {
+          html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#10003; Already on duty</div>';
         } else {
-          html += '<span style="font-size:10px;color:#555;display:block;margin-top:2px;">' + _ciWin.reason + '</span>';
+          var _ciWin = _checkShiftClockWindow(s);
+          if (_ciWin.ok) {
+            html += '<button class="btn btn-primary btn-sm" data-id="'+s.id+'" onclick="staffClockIn(this)">&#9200; Clock In</button>';
+          } else {
+            html += '<span style="font-size:10px;color:#555;display:block;margin-top:2px;">' + _ciWin.reason + '</span>';
+          }
         }
       }
       if (!s.clockedIn) html += '<button class="btn btn-danger btn-sm" onclick="cancelShift(\'' + s.id + '\')">&#10005;</button>';
@@ -7371,8 +7385,9 @@ function checkStaffingReminders() {
   if (!uid) return;
   var today = localDateStr();
   var hour  = new Date().getHours();
-  // Skip reminders entirely if member is already clocked into any session
-  var alreadyClocked = state.currentSession && state.currentSession.userId === uid && !state.currentSession.end;
+  // Already clocked in if: active currentSession OR any open session in state.sessions for this user
+  var alreadyClocked = (state.currentSession && state.currentSession.userId === uid && !state.currentSession.end) ||
+    (state.sessions||[]).some(function(ss){ return ss.userId === uid && !ss.end; });
   if (alreadyClocked) { if (hour >= 6) checkClassReminders(uid, today); return; }
   (state.staffingShifts||[]).forEach(function(s) {
     if (s.memberId!==uid || s.date!==today || s.clockedIn || s.reminded) return;
@@ -7478,16 +7493,27 @@ function _adjustAppTopPad() {
 }
 
 function showStaffingReminder(shift) {
-  _showTopBanner(
-    'staffingReminderBanner',
-    '#1A1200', '#F5A623', '⏰',
-    '⏰ SHIFT REMINDER',
-    UNIT_LABELS[shift.unitId]+' · '+shift.position+' · '+shiftLabel(shift)+' — Please clock in!',
-    [
-      { label:'🟢 Clock In Now', fn:"staffClockInFromBanner('"+shift.id+"')", bg:'#F5A623', color:'#000', border:'#F5A623' },
-      { label:'Acknowledge', fn:"dismissReminder()", bg:'transparent', color:'#F5A623', border:'#F5A623' }
-    ]
-  );
+  var _uid = state.currentUserId;
+  var _onDuty = (state.currentSession && !state.currentSession.end) ||
+    (state.sessions||[]).some(function(ss){ return ss.userId===_uid && !ss.end; });
+  if (_onDuty) {
+    _showTopBanner(
+      'staffingReminderBanner', '#1A1200', '#F5A623', '⏰',
+      '⏰ SHIFT REMINDER',
+      UNIT_LABELS[shift.unitId]+' · '+shift.position+' · '+shiftLabel(shift)+' — You are already on duty.',
+      [{ label:'Acknowledge', fn:"dismissReminder()", bg:'transparent', color:'#F5A623', border:'#F5A623' }]
+    );
+  } else {
+    _showTopBanner(
+      'staffingReminderBanner', '#1A1200', '#F5A623', '⏰',
+      '⏰ SHIFT REMINDER',
+      UNIT_LABELS[shift.unitId]+' · '+shift.position+' · '+shiftLabel(shift)+' — Please clock in!',
+      [
+        { label:'🟢 Clock In Now', fn:"staffClockInFromBanner('"+shift.id+"')", bg:'#F5A623', color:'#000', border:'#F5A623' },
+        { label:'Acknowledge', fn:"dismissReminder()", bg:'transparent', color:'#F5A623', border:'#F5A623' }
+      ]
+    );
+  }
 }
 function staffClockInFromBanner(shiftId) {
   // Clock in directly — no modal. Clamped to shift start, max = now
