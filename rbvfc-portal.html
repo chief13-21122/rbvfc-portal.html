@@ -726,6 +726,11 @@ function _mergeAndRender(remote) {
     window._lastLosapNotifCount = _unread.length;
   } catch(e){}
   try { updateLosapNotifBadge(); } catch(e){}
+  // Refresh company leaderboard if that tab is visible
+  try {
+    var _compSec = document.getElementById('section-company');
+    if (_compSec && _compSec.classList.contains('active')) renderCompanyLOSAP();
+  } catch(e){}
   try { renderUnitToggles(); } catch(e){}
   // Auto-start CAD sync on every state load — no login required
   if (state.cadScriptUrl && !_cadSyncInterval) {
@@ -12473,25 +12478,37 @@ function buildPublicOnDutyColTV(openSessions, todayStr, positionClockedIn) {
   var byUnit = {};
   var unclassified = [];
 
+  // Build set of ALL members on duty (shift clockedIn OR open session)
+  var allOnDutyIds = {};
+
+  // Source A: Shift clock-ins (shift.clockedIn = true, regardless of session)
   (state.staffingShifts||[]).filter(function(s){
     return s.date===todayStr && s.clockedIn && !s.clockedOutAt && s.memberId;
   }).forEach(function(s){
     var uid = s.memberId;
-    if (!openSessions[uid]) return; // filter only clocked-in
+    allOnDutyIds[uid] = true;
     var u = s.unitId;
     if (!byUnit[u]) byUnit[u] = [];
-    // avoid duplicates
     if (byUnit[u].some(function(x){ return x.uid===uid; })) return;
     byUnit[u].push({ uid:uid, shift:s });
   });
 
-  // Members clocked in without a specific shift slot
+  // Source B: Active sessions (general clock-in, not already in a unit slot)
   Object.keys(openSessions).forEach(function(uid){
+    allOnDutyIds[uid] = true;
     var inUnit = Object.keys(byUnit).some(function(u){ return byUnit[u].some(function(x){ return x.uid===uid; }); });
     if (!inUnit) unclassified.push({ uid:uid, shift:null });
   });
 
-  var totalOnDuty = Object.keys(openSessions).length;
+  // Source C: Active state.sessions not covered above (e.g. multi-day sessions)
+  (state.sessions||[]).filter(function(s){ return !s.end && s.userId; }).forEach(function(s){
+    if (allOnDutyIds[s.userId]) return;
+    allOnDutyIds[s.userId] = true;
+    var inUnit = Object.keys(byUnit).some(function(u){ return byUnit[u].some(function(x){ return x.uid===s.userId; }); });
+    if (!inUnit) unclassified.push({ uid:s.userId, shift:null });
+  });
+
+  var totalOnDuty = Object.keys(allOnDutyIds).length;
   var unitOrder = (typeof UNITS !== 'undefined' ? UNITS : Object.keys(byUnit)).filter(function(u){ return byUnit[u] && byUnit[u].length; });
 
   var bodyHtml = '';
