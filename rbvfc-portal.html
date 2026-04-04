@@ -3459,7 +3459,7 @@ function saveUserFromAdmin() {
     var m = state.roster.find(function(r){ return r.id===editId; });
     if (m) {
       m.first=first; m.last=last; m.memberId=badge; m.email=email;
-      m.rank=rank; m.ranks=ranks; m.appRole=role; m.losapPositions=positions;
+      m.rank=rank; m.ranks=ranks; m.appRole=role; m.memberType=memberType; m.losapPositions=positions;
       m.losapPosition = positions[0]||'';
       if (pin) m.pin=pin;
       showToast('✅ '+first+' '+last+' updated.');
@@ -3499,6 +3499,7 @@ function editMemberAdmin(id) {
     umEmail:  (m.email||'').replace(/@rbvfc13\.com$/i,'').replace(/@RBVFC13\.com$/i,''),
     umRole:   m.appRole||'member',
     umRank:   m.rank||'FFI',
+    umMemberType: m.memberType||'operational',
     umPinField: ''
   };
   // Restore ride report radio
@@ -4949,7 +4950,7 @@ function checkStaffingEligibility(member, unitId, posName) {
   var certs  = member.additionalCerts || [];
 
   // ── TIER 1: RANK — Administrative & Auxiliary blocked entirely ──────────
-  var hasBannedRank = ranks.some(function(r){ return STAFFING_BANNED_RANKS.indexOf(r) >= 0; });
+  var hasBannedRank = ranks.some(function(r){ return STAFFING_BANNED_RANKS.indexOf(r) >= 0; }) || isAdminMember(member);
   if (hasBannedRank && posName !== 'Student') {
     return { eligible: false, code: 'BANNED_RANK',
       reason: (ranks[0]||'Your rank') + ' members are not permitted to staff apparatus positions.' };
@@ -5014,6 +5015,8 @@ function memberNameWithBadge(member) {
 
 function isAdminMember(member) {
   if (!member) return false;
+  // Check new memberType field first, then fall back to rank for backward compat
+  if (member.memberType === 'administrative' || member.memberType === 'auxiliary') return true;
   var ranks = member.ranks && member.ranks.length ? member.ranks : (member.rank ? [member.rank] : []);
   return ranks.indexOf('Administrative Member') > -1 || ranks.indexOf('Auxiliary Member') > -1;
 }
@@ -10368,7 +10371,8 @@ function saveMember() {
   var last      = ((document.getElementById('umLast')||{}).value||'').trim();
   var badge     = ((document.getElementById('umMemberId')||{}).value||'').trim();
   var email     = getUmEmail();
-  var rank      = ((document.getElementById('umRank')||{}).value)||'';
+  var rank       = ((document.getElementById('umRank')||{}).value)||'';
+  var memberType = ((document.getElementById('umMemberType')||{}).value)||'operational';
   var role      = ((document.getElementById('umRole')||{}).value)||'member';
   var rideReportEl = document.querySelector('input[name="umRideReport"]:checked');
   var rideReport = rideReportEl ? rideReportEl.value : '';
@@ -10410,7 +10414,7 @@ function saveMember() {
     state.roster.push({
       id: 'mbr_'+Date.now(),
       first:first, last:last, memberId:badge, email:email,
-      rank:rank, ranks:ranks, appRole:role,
+      rank:rank, ranks:ranks, appRole:role, memberType:memberType,
       losapPositions:positions, losapPosition:positions[0]||'',
       additionalCerts:additionalCerts, unitPositions:unitPositions,
       rideReport:rideReport, pin: pin, active: true
@@ -10430,6 +10434,7 @@ function clearUmForm() {
     var el=document.getElementById(id); if(el) el.value='';
   });
   var rank=document.getElementById('umRank'); if(rank) rank.value='FFI';
+  var mtype=document.getElementById('umMemberType'); if(mtype) mtype.value='operational';
   var role=document.getElementById('umRole'); if(role) role.value='member';
   // Uncheck all LOSAP position boxes
   (document.querySelectorAll('#umPositionBoxes input[type=checkbox]')||[]).forEach(function(cb){ cb.checked=false; });
@@ -14586,9 +14591,16 @@ function applyBulkEdit() {
             </div>
             <div class="form-group"><label>PIN</label><input type="password" id="umPinField" placeholder="0000 (leave blank to keep)" maxlength="8" inputmode="numeric"></div>
             <div class="form-group">
+              <label>Member Type</label>
+              <select id="umMemberType" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+                <option value="operational">Operational</option>
+                <option value="administrative">Administrative</option>
+                <option value="auxiliary">Auxiliary</option>
+              </select>
+            </div>
+            <div class="form-group">
               <label>Rank</label>
               <select id="umRank">
-                <option>Administrative Member</option><option>Auxiliary Member</option>
                 <option>Probationary</option><option>Student</option><option>FFI</option><option>FFII</option>
                 <option>EMT-P</option><option>Lieutenant</option><option>Captain</option>
                 <option>Assistant Chief</option><option>Fire Chief</option>
@@ -14676,7 +14688,6 @@ function applyBulkEdit() {
               <div style="display:flex;gap:8px;">
                 <select id="umAddRankSelect" style="flex:1;">
                   <option value="">+ Add rank…</option>
-                  <option>Administrative Member</option><option>Auxiliary Member</option>
                   <option>Life Member</option>
                   <option>Probationary</option><option>Student</option><option>FFI</option><option>FFII</option>
                   <option>EMT-P</option><option>Lieutenant</option><option>Captain</option>
