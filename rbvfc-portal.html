@@ -5545,6 +5545,11 @@ function initStaffingTab() {
   var uid = state.currentUserId;
   var member = (state.roster||[]).find(function(m){ return m.id===uid; });
   var isOfficer = member && (member.appRole==='officer'||member.appRole==='admin');
+  var isAdmin   = member && member.appRole==='admin';
+  var _auCard  = document.getElementById('staffingActiveUnitsCard');
+  var _udfCard = document.getElementById('staffingUnitFilterCard');
+  if (_auCard)  _auCard.style.display  = isAdmin ? '' : 'none';
+  if (_udfCard) _udfCard.style.display = isAdmin ? '' : 'none';
 
   var dateEl = document.getElementById('staffingDate');
   // Always set to local today (not UTC) to avoid timezone off-by-one
@@ -14353,7 +14358,7 @@ function applyBulkEdit() {
         </div>
 
         <!-- Unit Toggles -->
-        <div class="card">
+        <div class="card" id="staffingActiveUnitsCard">
           <div class="card-header" onclick="toggleStaffCard('unitToggleBody','unitToggleChevron')" style="cursor:pointer;user-select:none;">
             <div class="icon">🚒</div><h2>Active Units</h2>
             <span id="unitToggleChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">▼</span>
@@ -14383,7 +14388,7 @@ function applyBulkEdit() {
         </div>
 
         <!-- Unit Display Filter -->
-        <div class="card">
+        <div class="card" id="staffingUnitFilterCard">
           <div class="card-header" onclick="toggleStaffCard('unitFilterBody','unitFilterChevron')" style="cursor:pointer;user-select:none;">
             <div class="icon">🔍</div><h2>Unit Display Filter</h2>
             <span id="unitFilterChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">▼</span>
