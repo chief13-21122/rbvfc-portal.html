@@ -702,6 +702,7 @@ function _mergeAndRender(remote) {
     if (_dc2 && _isOff2 && _dc2.style.display==='none') { _dc2.style.display='block'; }
   } catch(e){}  // rebuilds session from active shifts if needed
   console.log('[RBVFC] Synced from Firestore.');
+  try { updateLosapNotifBadge(); } catch(e){}
   // Auto-start CAD sync on every state load — no login required
   if (state.cadScriptUrl && !_cadSyncInterval) {
     try { startCadAutoSync(); } catch(e){}
@@ -864,6 +865,7 @@ var state = {
   emergencyResponses: [],    // all emergency responses (entered by dispatcher/officer)
   trainingSubmissions: [],   // training awaiting approval
   losapPending: [],          // losap activities submitted for another member, awaiting approval
+  losapNotifications: [],    // unread point-award notifications per member
   memberActivities: {},
   yearlyArchive: {},         // { "2024": { memberId: { pts, hours, responses } } }
   roster: [],
@@ -1536,7 +1538,7 @@ function saveActivity() {
     return;
   }
   if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
-  state.losapActivities.unshift({
+  var _sa_act = {
     id: 'act_'+Date.now(),
     memberId: selectedMemberId,
     date: date,
@@ -1548,8 +1550,10 @@ function saveActivity() {
     cert: certFileData,
     certName: certFileName,
     certMime: certFileMime
-  });
+  };
+  state.losapActivities.unshift(_sa_act);
   save();
+  try { _notifyLosapPoints(_sa_act); } catch(e){}
   clearActivityForm();
   updateStats();
   renderLOSAP();
@@ -1931,8 +1935,110 @@ function maybeShowSetupBanner(containerId) {
   return false;
 }
 
+
+// ═══════════════════════════════════════════════════════════════════
+//  LOSAP POINT NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════════════
+
+function _notifyLosapPoints(act) {
+  if (!act || !act.memberId) return;
+  if (!Array.isArray(state.losapNotifications)) state.losapNotifications = [];
+  var notif = {
+    id:        'lnotif_' + Date.now() + '_' + act.memberId.slice(-4),
+    memberId:  act.memberId,
+    pts:       act.pts || 0,
+    category:  act.category || '',
+    desc:      act.desc || '',
+    date:      act.date || new Date().toISOString().slice(0,10),
+    read:      false,
+    createdAt: new Date().toISOString()
+  };
+  state.losapNotifications.unshift(notif);
+  // Keep last 200 per member
+  state.losapNotifications = state.losapNotifications.slice(0, 200);
+
+  // Update badge immediately
+  updateLosapNotifBadge();
+
+  // Show a toast if this member is currently logged in
+  if (state.currentUserId === act.memberId) {
+    var catEmoji = { drill:'🚒', training:'📚', emergency:'🚨', meeting:'📋', duties:'⚙️' };
+    var emoji = catEmoji[act.category] || '🏅';
+    var shortDesc = act.desc ? (act.desc.length > 40 ? act.desc.slice(0,40)+'…' : act.desc) : act.category;
+    showToast(emoji + ' +' + (act.pts||0) + ' LOSAP pt' + ((act.pts||0)!==1?'s':'') + ' — ' + shortDesc);
+  }
+}
+
+function updateLosapNotifBadge() {
+  var uid   = state.currentUserId;
+  var unread = (state.losapNotifications||[]).filter(function(n){
+    return n.memberId === uid && !n.read;
+  }).length;
+  var badge = document.getElementById('losapNotifBadge');
+  if (badge) {
+    badge.textContent = unread > 9 ? '9+' : String(unread);
+    badge.style.display = unread > 0 ? 'inline-block' : 'none';
+  }
+}
+
+function renderLosapNotifBanner() {
+  var banner = document.getElementById('losapNotifBanner');
+  if (!banner) return;
+  var uid    = state.currentUserId;
+  var unread = (state.losapNotifications||[]).filter(function(n){
+    return n.memberId === uid && !n.read;
+  });
+  if (!unread.length) { banner.style.display = 'none'; return; }
+
+  var catLabel = { drill:'Drill', training:'Training', emergency:'Emergency Response',
+                   meeting:'Meeting', duties:'Collateral Duty' };
+  var catColor = { drill:'#C8102E', training:'#4A90D9', emergency:'#E0A020',
+                   meeting:'#6060B0', duties:'#409040' };
+
+  var itemsHtml = unread.slice(0,5).map(function(n) {
+    var col = catColor[n.category] || '#888';
+    var lbl = catLabel[n.category] || n.category;
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid #1A1A1A;last-child:border-none;">'
+      + '<div style="background:'+col+';border-radius:6px;padding:4px 8px;font-size:12px;font-weight:700;color:#fff;white-space:nowrap;">+'+n.pts+' pt'+(n.pts!==1?'s':'')+'</div>'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div style="font-size:12px;color:#E0E0E0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+n.desc+'</div>'
+      + '<div style="font-size:10px;color:#666;margin-top:1px;">'+lbl+' &nbsp;·&nbsp; '+n.date+'</div>'
+      + '</div></div>';
+  }).join('');
+
+  var moreHtml = unread.length > 5
+    ? '<div style="font-size:11px;color:#666;text-align:center;padding:6px;">+' + (unread.length-5) + ' more — scroll down to see all activity</div>'
+    : '';
+
+  banner.style.display = 'block';
+  banner.innerHTML = '<div style="background:#141414;border:1px solid #F5A623;border-radius:10px;overflow:hidden;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#1A1400;border-bottom:1px solid #2A2000;">'
+    + '<div style="font-size:13px;font-weight:700;color:#F5A623;">🏅 '+unread.length+' new LOSAP point'+(unread.length!==1?'s':'')+'</div>'
+    + '<button onclick="markLosapNotifsRead()" style="background:transparent;border:1px solid #3A2A00;border-radius:5px;color:#C08000;font-size:11px;padding:3px 10px;cursor:pointer;">Mark read</button>'
+    + '</div>'
+    + itemsHtml
+    + moreHtml
+    + '</div>';
+
+  // Auto-mark as read after 5 seconds of being on the tab
+  setTimeout(function() { markLosapNotifsRead(); }, 5000);
+}
+
+function markLosapNotifsRead() {
+  var uid = state.currentUserId;
+  (state.losapNotifications||[]).forEach(function(n) {
+    if (n.memberId === uid) n.read = true;
+  });
+  updateLosapNotifBadge();
+  var banner = document.getElementById('losapNotifBanner');
+  if (banner) banner.style.display = 'none';
+  save();
+}
+
 function renderLOSAP() {
   if (maybeShowSetupBanner('activityHistoryContainer')) return;
+  try { renderLosapNotifBanner(); } catch(e){}
+  try { updateLosapNotifBadge(); } catch(e){}
   var uid = state.currentUserId;
   var yr = new Date().getFullYear();
   var responses = (state.emergencyResponses||[]).filter(function(r){ return r.members&&r.members.includes(uid)&&r.date&&r.date.startsWith(String(yr)); });
@@ -2894,7 +3000,7 @@ function approveTraining(elOrId) {
   s.approvedAt = new Date().toISOString();
   // Add to LOSAP activities
   if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
-  state.losapActivities.unshift({
+  var _at_act = {
     id: 'act_'+Date.now(),
     memberId: s.memberId,
     date: s.date,
@@ -2905,8 +3011,10 @@ function approveTraining(elOrId) {
     notes: s.notes,
     cert: s.cert,
     certName: s.certName
-  });
+  };
+  state.losapActivities.unshift(_at_act);
   save();
+  try { _notifyLosapPoints(_at_act); } catch(e){}
   renderTrainingReview();
   if (document.getElementById('section-approvals') && document.getElementById('section-approvals').classList.contains('active')) initApprovalsTab();
   updateApprovalsBadge();
@@ -4523,7 +4631,7 @@ function saveDrillReport() {
     // Add LOSAP activities immediately for all members
     if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
     members.forEach(function(mid) {
-      state.losapActivities.unshift({
+      var _dr_act = {
         id: 'act_'+Date.now()+'_'+mid,
         memberId: mid,
         date: drillDate,
@@ -4532,7 +4640,9 @@ function saveDrillReport() {
         pts: pts,
         hours: hours,
         notes: notes||''
-      });
+      };
+      state.losapActivities.unshift(_dr_act);
+      try { _notifyLosapPoints(_dr_act); } catch(e){}
     });
   }
   state.trainingSubmissions.push(_drillEntry);
@@ -4681,7 +4791,7 @@ function approveDrill(elOrId) {
   // Add LOSAP activity for each member
   if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
   (s.members||[]).forEach(function(mid) {
-    state.losapActivities.unshift({
+    var _ad_act = {
       id: 'act_'+Date.now()+'_'+mid,
       memberId: mid,
       date: s.date,
@@ -4690,7 +4800,9 @@ function approveDrill(elOrId) {
       pts: s.pts,
       hours: s.hours,
       notes: s.notes||''
-    });
+    };
+    state.losapActivities.unshift(_ad_act);
+    try { _notifyLosapPoints(_ad_act); } catch(e){}
   });
   save();
   renderDrillHistory();
@@ -5287,7 +5399,7 @@ function saveManualActivity() {
   // Add directly to losapActivities (officer-entered = pre-approved)
   if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
   var actId = 'mact_'+Date.now();
-  state.losapActivities.unshift({
+  var _sma_act = {
     id:            actId,
     memberId:      memberId,
     date:          date,
@@ -5303,9 +5415,10 @@ function saveManualActivity() {
     enteredByName: enteredByName,
     manualEntry:   true,
     createdAt:     new Date().toISOString()
-  });
-
+  };
+  state.losapActivities.unshift(_sma_act);
   save();
+  try { _notifyLosapPoints(_sma_act); } catch(e){}
 
   // Clear form (keep member + date for quick multi-entry)
   var catEl = document.getElementById('manualCategory'); if (catEl) catEl.value='';
@@ -8521,7 +8634,7 @@ function approveLosapActivity(elOrId) {
   s.approvedBy = state.currentUserId;
   s.approvedAt = new Date().toISOString();
   if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
-  state.losapActivities.unshift({
+  var _ala_act = {
     id: 'act_'+Date.now(),
     memberId: s.memberId,
     date: s.date,
@@ -8530,8 +8643,10 @@ function approveLosapActivity(elOrId) {
     pts: s.pts,
     hours: s.hours,
     notes: s.notes
-  });
+  };
+  state.losapActivities.unshift(_ala_act);
   save();
+  try { _notifyLosapPoints(_ala_act); } catch(e){}
   initApprovalsTab();
   updateApprovalsBadge();
   showToast('&#10003; LOSAP activity approved — +'+s.pts+' pts added.');
@@ -13381,6 +13496,8 @@ function applyBulkEdit() {
       </div>
 
       <!-- LOSAP progress bar -->
+      
+      <div id="losapNotifBanner" style="display:none;margin-bottom:12px;"></div>
       <div class="card" style="padding:16px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <span style="font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;color:#888;text-transform:uppercase;">Points Progress</span>
@@ -14760,8 +14877,8 @@ function applyBulkEdit() {
     <button class="bnav-btn active" id="bnav-clock" onclick="showTab('clock')">
       <span class="bnav-icon">🕐</span><span class="bnav-label">Clock</span>
     </button>
-    <button class="bnav-btn" id="bnav-losap" onclick="showTab('losap')">
-      <span class="bnav-icon">🏅</span><span class="bnav-label">LOSAP</span>
+    <button class="bnav-btn" id="bnav-losap" onclick="showTab('losap')" style="position:relative;">
+      <span class="bnav-icon">🏅</span><span class="bnav-label">LOSAP</span><span id="losapNotifBadge" style="display:none;position:absolute;top:4px;right:8px;background:#F5A623;color:#000;border-radius:8px;font-size:9px;font-weight:700;padding:1px 5px;line-height:14px;min-width:14px;text-align:center;"></span>
     </button>
     <button class="bnav-btn" id="bnav-emergency" onclick="showTab('emergency')">
       <span class="bnav-icon">🚒</span><span class="bnav-label">Response</span>
