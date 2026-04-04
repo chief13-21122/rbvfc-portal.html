@@ -764,15 +764,18 @@ function initFirebaseMessaging() {
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.register('./firebase-messaging-sw.js')
+  // Explicit path to SW relative to our GitHub Pages subdirectory
+  var swPath = '/rbvfc-portal.html/firebase-messaging-sw.js';
+  navigator.serviceWorker.register(swPath, { scope: '/rbvfc-portal.html/' })
     .then(function(reg) {
-      console.log('Service worker registered:', reg.scope);
+      console.log('[RBVFC] Service worker registered at scope:', reg.scope);
+      window._swRegistration = reg;  // store for getToken()
       fbMessaging.onMessage(function(payload) {
-        console.log('Foreground message:', payload);
+        console.log('[RBVFC] Foreground message:', payload);
         showPushNotificationBanner(payload);
       });
     })
-    .catch(function(err) { console.warn('SW registration failed:', err); });
+    .catch(function(err) { console.warn('[RBVFC] SW registration failed:', err); });
 }
 
 function requestPushPermission() {
@@ -780,7 +783,9 @@ function requestPushPermission() {
   if (FIREBASE_VAPID_KEY === 'YOUR_VAPID_KEY_HERE') { showToast('\u26a0\ufe0f VAPID key not set. See Admin \u2192 Notifications.'); return; }
   Notification.requestPermission().then(function(permission) {
     if (permission !== 'granted') { showToast('\u26a0\ufe0f Notification permission denied.'); return; }
-    fbMessaging.getToken({ vapidKey: FIREBASE_VAPID_KEY })
+    // Use the manually-registered SW so Firebase doesn't look at the root scope
+    var swReg = window._swRegistration || undefined;
+    fbMessaging.getToken({ vapidKey: FIREBASE_VAPID_KEY, serviceWorkerRegistration: swReg })
       .then(function(token) {
         if (!token) { showToast('\u26a0\ufe0f Could not get push token.'); return; }
         var uid = state.currentUserId;
