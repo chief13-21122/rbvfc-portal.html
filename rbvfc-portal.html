@@ -3676,6 +3676,7 @@ function onAdminTabShow() {
   // Render unit config checkboxes (no-op if not present)
   if (typeof renderUnitConfigCard === 'function') renderUnitConfigCard();
   try { renderApparatusAdmin(); } catch(e){}
+  try { renderUnitToggles(); } catch(e){}
 
   // Update monthly email status panel
   updateMonthlyEmailStatus();
@@ -3705,6 +3706,7 @@ function onAdminTabShow() {
     'publicLinkCard',         // Public View Link
     'adminPinCard',              // Change PIN
     'respondingApparatusCard',   // Responding Apparatus defaults
+    'staffingUnitsCard',         // Staffing Unit Visibility
   ];
   _adminOnly.forEach(function(cardId) {
     var el = document.getElementById(cardId);
@@ -15035,7 +15037,7 @@ function applyBulkEdit() {
     
           <!-- Staffing Unit Visibility -->
           <div class="card" id="staffingUnitsCard">
-            <div class="card-header" onclick="toggleAdminCardById('staffingUnitsBody')" style="cursor:pointer;user-select:none;">
+            <div class="card-header" onclick="toggleAdminCardById('staffingUnitsBody');renderUnitToggles();" style="cursor:pointer;user-select:none;">
               <div class="icon">&#128268;</div>
               <h2>Staffing Unit Visibility</h2>
               <span style="font-size:11px;color:#555;margin-left:8px;">Admin</span>
