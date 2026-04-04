@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" id="dynamicFavicon" type="image/png" href="data:,">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -9387,6 +9388,7 @@ function getLogoData() {
 function saveLogoData(dataUrl) {
   // Logo is localStorage-only — base64 images exceed Firestore's 1MB document limit
   try { localStorage.setItem('rbvfc_logo', dataUrl); } catch(e){}
+  try { setFavicon(); } catch(e){}
   // Explicitly remove from state so it never bleeds into a Firestore save
   delete state.companyLogo;
 }
@@ -13219,6 +13221,14 @@ function getUmEmail() {
 document.addEventListener('DOMContentLoaded', boot);
 
 // Safety: wire up clock buttons via addEventListener as backup
+function setFavicon() {
+  try {
+    var logo = localStorage.getItem('rbvfc_logo');
+    var link = document.getElementById('dynamicFavicon');
+    if (!link) { link=document.createElement('link'); link.rel='icon'; link.id='dynamicFavicon'; document.head.appendChild(link); }
+    if (logo) { var m=logo.match(/^data:([^;]+);/); link.type=m?m[1]:'image/png'; link.href=logo; }
+  } catch(e) {}
+}
 document.addEventListener('DOMContentLoaded', function() {
   var inBtn = document.getElementById('clockInBtn');
   var outBtn = document.getElementById('clockOutBtn');
