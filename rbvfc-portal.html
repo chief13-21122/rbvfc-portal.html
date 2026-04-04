@@ -5326,7 +5326,7 @@ function initMeetingForm() {
   if (!sel) return;
   var currentVal = sel.value;
   sel.innerHTML = '<option value="">— Select Member In Charge —</option>';
-  (state.roster||[]).filter(function(m){ return m.active!==false && (m.appRole==='officer'||m.appRole==='admin'); })
+  (state.roster||[]).filter(function(m){ return m.active!==false; })
     .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
     .forEach(function(m){
       var opt = document.createElement('option');
