@@ -13858,13 +13858,32 @@ function applyBulkEdit() {
 
 
 
+      <!-- Response History -->
+      <div class="card" id="erHistoryCard">
+        <div class="card-header"><div class="icon">📋</div><h2>Response History</h2></div>
+        <div style="overflow-x:auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Date</th><th>Location / Incident</th><th>Type</th><th>Box</th><th>Apparatus</th><th>Members</th><th>Approved By</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="erHistoryBody">
+              <tr><td colspan="7" style="text-align:center;padding:24px;color:#666;">No emergency responses logged yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+
+
       <!-- Log Emergency Response -->
       <div class="card" id="erLogCard">
         <div class="card-header">
           <div class="icon">🚒</div>
           <h2>Log Emergency Response</h2>
         </div>
-        <div class="alert info" style="margin-bottom:14px;">ℹ️ It is the responsibility of the <strong>DRIVER</strong> to log emergency responses.</div>
+        <div class="alert info" style="margin-bottom:14px;">ℹ️ Manually log a response <strong>ONLY</strong> if it does not appear in the list above.</div>
         <!-- Logged By banner -->
         <div id="erLoggedByBanner" style="display:flex;align-items:center;gap:10px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
           <span style="font-size:18px;">👤</span>
@@ -13920,25 +13939,6 @@ function applyBulkEdit() {
         </div>
         <button class="btn btn-primary btn-full" onclick="saveEmergencyResponse()">🚒 Log Response</button>
       </div>
-
-      <!-- Response History -->
-      <div class="card" id="erHistoryCard">
-        <div class="card-header"><div class="icon">📋</div><h2>Response History</h2></div>
-        <div style="overflow-x:auto;">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Date</th><th>Location / Incident</th><th>Type</th><th>Box</th><th>Apparatus</th><th>Members</th><th>Approved By</th><th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="erHistoryBody">
-              <tr><td colspan="7" style="text-align:center;padding:24px;color:#666;">No emergency responses logged yet.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-
 
       <!-- Pending CAD Calls -->
       <div class="card" id="cadPendingCard" style="display:none;">
