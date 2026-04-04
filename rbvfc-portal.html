@@ -5665,15 +5665,15 @@ function staffingGoToday() {
 
 // ── UNIT TOGGLES ──────────────────────────────────────────────
 function renderUnitToggles() {
-  var grid = document.getElementById('unitToggleGrid');
-  if (!grid) return;
   var enabled = state.staffingEnabled || {};
-  var html = '';
+  var _html = '';
   UNITS.forEach(function(u) {
     var on = enabled[u] !== false;
-    html += '<button onclick="toggleStaffingUnit(\''+u+'\')" style="padding:6px 12px;border-radius:6px;border:1px solid '+(on?'#27AE60':'#333')+';background:'+(on?'#1A3A1A':'#181818')+';color:'+(on?'#27AE60':'#666')+';font-size:12px;cursor:pointer;transition:all .2s;" id="unitToggle_'+u+'">'+(on?'✓ ':'')+UNIT_LABELS[u]+'</button>';
+    _html += '<button onclick="toggleStaffingUnit(\'' + u + '\')" style="padding:6px 12px;border-radius:6px;border:1px solid ' + (on?'#27AE60':'#333') + ';background:' + (on?'#1A3A1A':'#181818') + ';color:' + (on?'#27AE60':'#666') + ';font-size:12px;cursor:pointer;transition:all .2s;" id="unitToggle_' + u + '">' + (on ? '\u2713 ' : '') + UNIT_LABELS[u] + '</button>';
   });
-  grid.innerHTML = html;
+  ['unitToggleGrid','adminUnitToggleGrid'].forEach(function(gid){
+    var g = document.getElementById(gid); if (g) g.innerHTML = _html;
+  });
 }
 
 function toggleStaffingUnit(unitId) {
@@ -15045,7 +15045,7 @@ function applyBulkEdit() {
             </div>
             <div id="staffingUnitsBody">
               <p style="font-size:12px;color:#666;margin-bottom:12px;">Toggle which apparatus appear on the staffing board. Hidden units still work for responses and LOSAP — they just won&#39;t show as staffing columns.</p>
-              <div id="unitToggleGrid" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+              <div id="adminUnitToggleGrid" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
             </div>
           </div>
 
