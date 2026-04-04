@@ -703,6 +703,7 @@ function _mergeAndRender(remote) {
   } catch(e){}  // rebuilds session from active shifts if needed
   console.log('[RBVFC] Synced from Firestore.');
   try { updateLosapNotifBadge(); } catch(e){}
+  try { renderUnitToggles(); } catch(e){}
   // Auto-start CAD sync on every state load — no login required
   if (state.cadScriptUrl && !_cadSyncInterval) {
     try { startCadAutoSync(); } catch(e){}
@@ -7230,6 +7231,9 @@ function renderMyShifts() {
   if (!container && !clockContainer) return;
   var uid   = state.currentUserId;
   var today = localDateStr();
+  // True if already clocked into any active session — suppresses all Clock-In buttons
+  var _alreadyOnDuty = !!(state.currentSession && !state.currentSession.end) ||
+    (state.sessions||[]).some(function(ss){ return ss.userId===uid && !ss.end; });
 
   // Build a set of shift IDs that are "secondary" linked shifts (Tk13 when linked from E131)
   var _primaryLinkedIds = new Set((state.staffingShifts||[])
@@ -7309,10 +7313,7 @@ function renderMyShifts() {
       if (s.clockedIn) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#10003; Clocked In ' + new Date(s.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '</div>';
       html += '</div>';
       if (isToday && !s.clockedIn) {
-        // Don't show Clock-In if already in any active session
-        var _myActive = !!(state.currentSession && !state.currentSession.end) ||
-          (state.sessions||[]).some(function(ss){ return ss.userId===state.currentUserId && !ss.end; });
-        if (_myActive) {
+        if (_alreadyOnDuty) {
           html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#10003; Already on duty</div>';
         } else {
           var _ciWin = _checkShiftClockWindow(s);
@@ -7355,7 +7356,7 @@ function renderMyShifts() {
         + '</div>'
         + seStaffingBar(ev)
         + sePositionSummary(ev);
-      if (isToday && signup && !isClockedIn) {
+      if (isToday && signup && !isClockedIn && !_alreadyOnDuty) {
         var _evNow=new Date(), _evStart=new Date(ev.date+'T'+(ev.startTime||ev.time||'00:00')+':00');
         var _evEnd=ev.endTime?new Date(ev.date+'T'+ev.endTime+':00'):new Date(_evStart.getTime()+7200000);
         if (_evNow>=new Date(_evStart.getTime()-3600000) && _evNow<=_evEnd) {
@@ -7396,7 +7397,7 @@ function renderMyShifts() {
       html += '<div style="font-size:12px;color:#888;margin-top:2px;">'+(clsTime||'')+(cls.instructor?' · '+cls.instructor:'')+'</div>';
       if (clsIn)        html += '<div style="font-size:11px;color:#3498DB;font-weight:700;margin-top:2px;">In session now</div>';
       else if (clsDone) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">✓ Attended</div>';
-      else if (isToday) {
+      else if (isToday && !_alreadyOnDuty) {
         var _clsId = cls.id, _sessD = sessionDate;
         html += '<button class="btn btn-sm btn-primary" style="margin-top:4px;background:#0D1A2A;border-color:#3498DB;color:#3498DB;font-size:11px;" '
              + 'onclick="clockInMyClass(this)" data-cls-id="'+_clsId+'" data-sess-date="'+_sessD+'">&#128336; Clock In</button>';
@@ -7410,7 +7411,7 @@ function renderMyShifts() {
       var _ms=new Date(_od+'T'+_m.time+':00');
       var _me=new Date(_ms.getTime()+(_m.duration||60)*60000);
       var _ci=_a&&_a.clockedInAt&&!_a.clockedOutAt;
-      var _can=_nw>=new Date(_ms.getTime()-3600000)&&_nw<=_me&&_od===today;
+      var _can=_nw>=new Date(_ms.getTime()-3600000)&&_nw<=_me&&_od===today&&!_alreadyOnDuty;
       var _tp=(function(){ var p=_m.time.split(':'); var h=parseInt(p[0]); return (h%12||12)+':'+p[1]+' '+(h>=12?'PM':'AM'); })();
       var _rl={weekly:'Weekly',biweekly:'Every 2 wks',monthly:'Monthly'};
       html += '<div style="background:#181818;border:2px solid '+(_ci?'#27AE60':'#2A1400')+';border-left:4px solid '+(_ci?'#27AE60':'#F5A623')+';border-radius:12px;padding:14px;display:flex;gap:12px;align-items:stretch;">'
@@ -15031,6 +15032,21 @@ function applyBulkEdit() {
         <button class="btn btn-sm btn-secondary" style="width:100%;" onclick="openPublicView()">👁 Preview</button>
       </div>
 
+    
+          <!-- Staffing Unit Visibility -->
+          <div class="card" id="staffingUnitsCard">
+            <div class="card-header" onclick="toggleAdminCardById('staffingUnitsBody')" style="cursor:pointer;user-select:none;">
+              <div class="icon">&#128268;</div>
+              <h2>Staffing Unit Visibility</h2>
+              <span style="font-size:11px;color:#555;margin-left:8px;">Admin</span>
+              <span id="staffingUnitsChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;">&#9660;</span>
+            </div>
+            <div id="staffingUnitsBody">
+              <p style="font-size:12px;color:#666;margin-bottom:12px;">Toggle which apparatus appear on the staffing board. Hidden units still work for responses and LOSAP — they just won&#39;t show as staffing columns.</p>
+              <div id="unitToggleGrid" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            </div>
+          </div>
+
     </div><!-- end section-admin -->
 
   </div><!-- end contentArea -->
@@ -15392,3 +15408,8 @@ function applyBulkEdit() {
 
 </body>
 </html>
+            <div id="staffingUnitsBody">
+              <p style="font-size:12px;color:#666;margin-bottom:12px;">Toggle which apparatus appear on the staffing board. Hidden units still work for responses and LOSAP — they just don't show as staffing columns.</p>
+              <div id="unitToggleGrid" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            </div>
+          </div>
