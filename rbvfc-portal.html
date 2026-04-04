@@ -1798,6 +1798,15 @@ function saveEmergencyResponse() {
     notes: combinedNotes,
     enteredBy: enteredBy,
     enteredByName: enteredByName,
+    // approvedBy set only when an officer or admin logs the response
+    approvedBy: (function(){
+      var _me = (state.roster||[]).find(function(m){ return m.id===enteredBy; });
+      return (_me && (_me.appRole==='officer'||_me.appRole==='admin')) ? enteredBy : null;
+    })(),
+    approvedAt: (function(){
+      var _me = (state.roster||[]).find(function(m){ return m.id===enteredBy; });
+      return (_me && (_me.appRole==='officer'||_me.appRole==='admin')) ? new Date().toISOString() : null;
+    })(),
     created: new Date().toISOString()
   });
   save();
@@ -1851,9 +1860,13 @@ function renderEmergencyResponses() {
     var needsBadge = r.needsReview ? '<span style="display:inline-block;background:rgba(245,166,35,.15);border:1px solid rgba(245,166,35,.4);color:#F5A623;border-radius:4px;padding:1px 5px;font-size:9px;font-weight:700;letter-spacing:1px;margin-left:4px;">NEEDS REVIEW</span>' : '';
     var editedBadge = r.editedAt ? '<span style="font-size:9px;color:#555;margin-left:4px;">(edited)</span>' : '';
     // "Approved By" = officer who last edited/confirmed, else enteredBy
-    var _approvedId = r.approvedBy || r.editedBy || r.enteredBy;
+    // Only show Approved By when an officer explicitly approved (not just whoever logged it)
+    var _approvedId = r.approvedBy || (r.editedBy && (function(){
+      var _ed = (state.roster||[]).find(function(m){ return m.id===r.editedBy; });
+      return (_ed && (_ed.appRole==='officer'||_ed.appRole==='admin')) ? r.editedBy : null;
+    })()) || null;
     var _approvedMbr = _approvedId ? (state.roster||[]).find(function(x){ return x.id===_approvedId; }) : null;
-    var loggedByStr = _approvedMbr ? _approvedMbr.last+', '+_approvedMbr.first : (_approvedId ? '—' : '—');
+    var loggedByStr = _approvedMbr ? _approvedMbr.last+', '+_approvedMbr.first : (_approvedId ? '—' : '<span style="color:#F5A623;font-weight:700;font-size:10px;">&#9888; PENDING</span>');
     var _approvedAt = r.approvedAt || r.editedAt || r.created || '';
     var loggedAtStr = _approvedAt ? new Date(_approvedAt).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
     var loggedCell = '<div style="font-size:11px;color:#AAA;">'+loggedByStr+'</div>'
@@ -13838,16 +13851,7 @@ function applyBulkEdit() {
     <!-- ══════════════ EMERGENCY TAB ══════════════ -->
     <div id="section-emergency" class="section">
 
-      <!-- Pending CAD Calls -->
-      <div class="card" id="cadPendingCard" style="display:none;">
-        <div class="card-header">
-          <div class="icon">📟</div>
-          <h2>Pending CAD Calls</h2>
-          <button class="btn btn-sm btn-primary" onclick="syncCadFromPortal()" style="margin-left:auto;background:#1A3A5A;border-color:#2980B9;color:#7EC8E3;">🔄 Sync Now</button>
-        </div>
-        <p style="font-size:12px;color:#666;margin-bottom:10px;"><strong style="color:#555;">Drops in automatically every 30 minutes.</strong></p>
-        <div id="cadPendingContainer"></div>
-      </div>
+
 
       <!-- Log Emergency Response -->
       <div class="card" id="erLogCard">
@@ -13929,7 +13933,19 @@ function applyBulkEdit() {
         </div>
       </div>
 
-    </div><!-- end section-emergency -->
+
+
+      <!-- Pending CAD Calls -->
+      <div class="card" id="cadPendingCard" style="display:none;">
+        <div class="card-header">
+          <div class="icon">📟</div>
+          <h2>Pending CAD Calls</h2>
+          <button class="btn btn-sm btn-primary" onclick="syncCadFromPortal()" style="margin-left:auto;background:#1A3A5A;border-color:#2980B9;color:#7EC8E3;">🔄 Sync Now</button>
+        </div>
+        <div id="cadPendingContainer"></div>
+      </div>
+
+        </div><!-- end section-emergency -->
 
     <!-- ══════════════ STAFFING TAB ══════════════ -->
     <div id="section-staffing" class="section">
