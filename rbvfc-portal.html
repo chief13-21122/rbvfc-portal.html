@@ -1871,9 +1871,15 @@ function renderEmergencyResponses() {
     var loggedAtStr = _approvedAt ? new Date(_approvedAt).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
     var loggedCell = '<div style="font-size:11px;color:#AAA;">'+loggedByStr+'</div>'
       +(loggedAtStr?'<div style="font-size:10px;color:#555;">'+loggedAtStr+'</div>':'');
+    var _isPending = !_approvedId;
     var actionCell = isOfficer
-      ? '<button class="btn btn-sm btn-secondary" onclick="openEditResponse(\'' + r.id + '\')" style="margin-right:4px;">&#9998; Edit</button>'
-        + '<button class="btn btn-sm btn-danger" onclick="deleteResponse(\'' + r.id + '\')">&#128465;</button>'
+      ? (_isPending
+          ? '<button class="btn btn-sm" onclick="approveResponse(\'' + r.id + '\')" style="margin-right:4px;background:#0D2D0D;border:1px solid #27AE60;color:#27AE60;">&#10003; Approve</button>'
+            + '<button class="btn btn-sm btn-secondary" onclick="openEditResponse(\'' + r.id + '\')" style="margin-right:4px;">&#9998; Edit</button>'
+            + '<button class="btn btn-sm btn-danger" onclick="deleteResponse(\'' + r.id + '\')">&#128465;</button>'
+          : '<button class="btn btn-sm btn-secondary" onclick="openEditResponse(\'' + r.id + '\')" style="margin-right:4px;">&#9998; Edit</button>'
+            + '<button class="btn btn-sm btn-danger" onclick="deleteResponse(\'' + r.id + '\')">&#128465;</button>'
+        )
       : '';
     var tr = document.createElement('tr');
     var unitPills = (r.units||[]).map(function(u){
@@ -12963,6 +12969,20 @@ function cancelSignUp() {
 }
 
 // 4. Open edit response modal for an existing emergency response
+function approveResponse(responseId) {
+  var r = (state.emergencyResponses||[]).find(function(x){ return x.id===responseId; });
+  if (!r) { showToast('Response not found.'); return; }
+  var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+  if (!me || (me.appRole!=='officer' && me.appRole!=='admin')) {
+    showToast('\u26a0\ufe0f Officers and admins only.'); return;
+  }
+  r.approvedBy = state.currentUserId;
+  r.approvedAt = new Date().toISOString();
+  save();
+  renderEmergencyResponses();
+  showToast('\u2705 Response approved.');
+}
+
 function openEditResponse(responseId) {
   var r = (state.emergencyResponses||[]).find(function(x){ return x.id===responseId; });
   if (!r) { showToast('Response not found.'); return; }
