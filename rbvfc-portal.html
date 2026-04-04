@@ -5325,6 +5325,62 @@ function initMeetingForm() {
     var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
     disp.textContent = me ? me.last+', '+me.first : 'Unknown';
   }
+  // Populate member checklist (all active members, pre-checked by default)
+  populateMtgMemberList([]);
+}
+
+function _mtgCbChange(cb, lbl) {
+  lbl = lbl || cb.closest('label');
+  if (lbl) {
+    lbl.style.background = cb.checked ? 'rgba(200,16,46,0.08)' : 'transparent';
+    lbl.style.borderColor = cb.checked ? 'rgba(200,16,46,0.3)' : 'transparent';
+  }
+}
+
+function populateMtgMemberList(preSelected) {
+  var container = document.getElementById('mtgMemberList');
+  if (!container) return;
+  var members = (state.roster||[]).filter(function(m){ return m.active !== false; })
+    .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); });
+  var usePreSelected = preSelected && preSelected.length > 0;
+  container.innerHTML = '';
+  members.forEach(function(m) {
+    var checked = usePreSelected ? preSelected.indexOf(m.id) >= 0 : true;
+    var lbl = document.createElement('label');
+    lbl.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;margin-bottom:3px;transition:background .15s;background:'
+      + (checked ? 'rgba(200,16,46,0.08)' : 'transparent')
+      + ';border:1px solid ' + (checked ? 'rgba(200,16,46,0.3)' : 'transparent') + ';';
+    lbl.id = 'mtgml_' + m.id;
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.value = m.id; cb.className = 'mtg-member-cb';
+    cb.checked = checked;
+    cb.style.cssText = 'accent-color:#C8102E;width:14px;height:14px;flex-shrink:0;';
+    cb.addEventListener('change', function() { _mtgCbChange(cb, lbl); });
+    var nameSpan = document.createElement('span');
+    nameSpan.style.cssText = 'font-size:13px;color:#D0D0D0;';
+    nameSpan.textContent = m.last + ', ' + m.first;
+    var rankSpan = document.createElement('span');
+    rankSpan.style.cssText = 'font-size:10px;color:#555;margin-left:auto;';
+    rankSpan.textContent = m.rank || m.appRole || '';
+    lbl.appendChild(cb); lbl.appendChild(nameSpan); lbl.appendChild(rankSpan);
+    container.appendChild(lbl);
+  });
+}
+
+function mtgSelectAllMembers() {
+  document.querySelectorAll('#mtgMemberList .mtg-member-cb').forEach(function(cb) {
+    cb.checked = true;
+    var lbl = cb.closest('label');
+    if (lbl) { lbl.style.background='rgba(200,16,46,0.08)'; lbl.style.borderColor='rgba(200,16,46,0.3)'; }
+  });
+}
+
+function mtgClearAllMembers() {
+  document.querySelectorAll('#mtgMemberList .mtg-member-cb').forEach(function(cb) {
+    cb.checked = false;
+    var lbl = cb.closest('label');
+    if (lbl) { lbl.style.background='transparent'; lbl.style.borderColor='transparent'; }
+  });
 }
 
 
@@ -8143,18 +8199,21 @@ function saveMeeting() {
   if (editId) {
     var ex = state.meetings.find(function(m){ return m.id===editId; });
     if (ex) {
+      var _editMembers = Array.from(document.querySelectorAll('#mtgMemberList .mtg-member-cb:checked')).map(function(cb){ return cb.value; });
       ex.title=title; ex.date=date; ex.time=time; ex.duration=duration;
       ex.location=loc; ex.desc=desc; ex.recurrence=recurrence;
-      ex.inCharge=inCharge;
+      ex.inCharge=inCharge; ex.members=_editMembers;
       ex.updatedAt=new Date().toISOString();
       save(); cancelEditMeeting(); renderMeetingsList();
       try { renderMyShifts(); } catch(e){}
       showToast('\u2705 Meeting updated.'); return;
     }
   }
+  var _mtgMembers = Array.from(document.querySelectorAll('#mtgMemberList .mtg-member-cb:checked')).map(function(cb){ return cb.value; });
   state.meetings.push({ id:'mtg_'+Date.now(), title:title, date:date, time:time,
     duration:duration, location:loc, desc:desc, recurrence:recurrence,
-    inCharge:inCharge, createdBy:state.currentUserId, createdAt:new Date().toISOString() });
+    inCharge:inCharge, members:_mtgMembers,
+    createdBy:state.currentUserId, createdAt:new Date().toISOString() });
   save();
   ['mtgTitle','mtgTime','mtgLocation','mtgDesc','mtgUntil','mtgEditId'].forEach(function(id){
     var el=document.getElementById(id); if(el) el.value='';
@@ -8178,6 +8237,8 @@ function cancelEditMeeting() {
   var sb=document.getElementById('mtgSubmitBtn'); if(sb) sb.textContent='\u2713 Schedule';
   var cb=document.getElementById('mtgCancelBtn'); if(cb) cb.style.display='none';
   var de=document.getElementById('mtgDate'); if(de) de.value=localDateStr();
+  // Reset member list to all-checked
+  try { populateMtgMemberList([]); } catch(e){}
 }
 
 function openEditMeeting(mtgId) {
@@ -8192,6 +8253,10 @@ function openEditMeeting(mtgId) {
   toggleMtgRecurrenceOpts(); f('mtgEditId',mtgId);
   // Pre-fill inCharge and refresh the form
   try { initMeetingForm(); } catch(e){}
+  // Restore member selections
+  if (m.members && m.members.length) {
+    try { populateMtgMemberList(m.members); } catch(e){}
+  }
   f('mtgInCharge', m.inCharge||'');
   var sb=document.getElementById('mtgSubmitBtn'); if(sb) sb.textContent='\u2713 Save Changes';
   var cb=document.getElementById('mtgCancelBtn'); if(cb) cb.style.display='inline-flex';
@@ -8469,6 +8534,16 @@ function doSendMtgAlert() {
   showSubmitConfirmation('Meeting alert sent','\uD83D\uDD14');
 }
 
+
+function _togglePastMeetings(hdr) {
+  var body = hdr.parentElement.querySelector('._pmBody');
+  var chev = hdr.querySelector('._pmChev');
+  if (!body) return;
+  var shown = body.style.display !== 'none';
+  body.style.display = shown ? 'none' : 'block';
+  if (chev) chev.innerHTML = shown ? '&#9658;' : '&#9660;';
+}
+
 function renderMeetingsList() {
   var _mUid=state.currentUserId,_mMe=_mUid?(state.roster||[]).find(function(m){return m.id===_mUid;}):null,_mOff=_mMe&&(_mMe.appRole==='officer'||_mMe.appRole==='admin');
   var container=document.getElementById('meetingsListContainer'); if(!container) return;
@@ -8515,10 +8590,15 @@ function renderMeetingsList() {
   var upcoming=mtgs.filter(function(m){ return !!nextMeetingOccurrence(m); });
   var past=mtgs.filter(function(m){ return !nextMeetingOccurrence(m); });
   var h=upcoming.map(function(m){ return mtgCard(m); }).join('');
-  if (past.length) {
-    h+='<div style="margin-top:14px;border-top:1px solid #2A2A2A;padding-top:10px;">'
-       +'<div style="font-size:10px;color:#444;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;">Past Meetings</div>'
-       +past.map(function(m){ return mtgCard(m); }).join('')+'</div>';
+    if (past.length) {
+    h += '<div style="margin-top:14px;border-top:1px solid #2A2A2A;padding-top:10px;">'
+      + '<div onclick="_togglePastMeetings(this)" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:6px;user-select:none;">'
+      + '<span style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:2px;">Past Meetings (' + past.length + ')</span>'
+      + '<span class="_pmChev" style="font-size:10px;color:#444;margin-left:auto;">&#9658;</span>'
+      + '</div>'
+      + '<div class="_pmBody" style="display:none;">'
+      + past.map(function(m){ return mtgCard(m); }).join('')
+      + '</div></div>';
   }
   container.innerHTML=h;
   if(container)container.addEventListener('click',function(e){var b=e.target.closest('._mtgAlertBtn');if(b)openMtgAlert(b.dataset.mid,b.dataset.mdate);});
@@ -14077,6 +14157,14 @@ function applyBulkEdit() {
                 <div id="mtgCreatedByDisplay" style="background:#141414;border:1px solid #2A2A2A;border-radius:8px;padding:10px;font-size:13px;color:#888;height:42px;display:flex;align-items:center;"></div>
               </div>
             </div>
+            <div class="form-group" style="margin-top:8px;">
+              <label>Expected Members</label>
+              <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <button type="button" class="btn btn-sm btn-secondary" onclick="mtgSelectAllMembers()">Select All</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="mtgClearAllMembers()">Clear All</button>
+              </div>
+              <div id="mtgMemberList" style="max-height:200px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#181818;"></div>
+            </div>
             <input type="hidden" id="mtgEditId" value="">
             <div style="display:flex;gap:8px;">
               <button class="btn btn-primary" id="mtgSubmitBtn" onclick="saveMeeting()" style="flex:1;">&#10003; Schedule</button>
@@ -15085,7 +15173,7 @@ function applyBulkEdit() {
     <div style="text-align:center;margin-bottom:28px;">
       <img id="loginLogo" style="display:none;max-width:220px;max-height:180px;width:auto;height:auto;object-fit:contain;margin:0 auto 14px;filter:drop-shadow(0 2px 12px rgba(0,0,0,.6));" alt="Company Logo">
       <div id="loginLogoText" style="font-family:'Barlow Condensed',sans-serif;font-size:36px;font-weight:900;color:#C8102E;letter-spacing:4px;text-transform:uppercase;">RBVFC</div>
-      <div style="font-size:12px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-top:5px;">LOSAP Member Portal</div>
+      <div style="font-size:12px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-top:5px;">Member LOSAP Portal</div>
     </div>
     <div class="form-group">
       <label>Member</label>
