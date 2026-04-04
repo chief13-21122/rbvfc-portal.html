@@ -756,36 +756,53 @@ function stopFbSync() {
 // ── Push to Firestore (for messaging if configured) ──
 function initFirebaseMessaging() {
   if (!_fbInitialized || !fbApp) return;
-  try {
-    fbMessaging = firebase.messaging(fbApp);
-    registerServiceWorker();
-  } catch(e) { console.warn('[RBVFC] Messaging init error:', e); }
-}
-
-function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
-  // Explicit path to SW relative to our GitHub Pages subdirectory
+  // Register our SW FIRST, then init messaging with it.
+  // Must happen before firebase.messaging() — otherwise Firebase
+  // defaults to /firebase-messaging-sw.js at the domain root (404 on GitHub Pages).
   var swPath = '/rbvfc-portal.html/firebase-messaging-sw.js';
   navigator.serviceWorker.register(swPath, { scope: '/rbvfc-portal.html/' })
     .then(function(reg) {
-      console.log('[RBVFC] Service worker registered at scope:', reg.scope);
-      window._swRegistration = reg;  // store for getToken()
-      fbMessaging.onMessage(function(payload) {
-        console.log('[RBVFC] Foreground message:', payload);
-        showPushNotificationBanner(payload);
-      });
+      window._swRegistration = reg;
+      console.log('[RBVFC] SW pre-registered at:', reg.scope);
+      try {
+        fbMessaging = firebase.messaging(fbApp);
+        fbMessaging.onMessage(function(payload) {
+          showPushNotificationBanner(payload);
+        });
+      } catch(e) { console.warn('[RBVFC] Messaging init error:', e); }
     })
-    .catch(function(err) { console.warn('[RBVFC] SW registration failed:', err); });
+    .catch(function(err) {
+      console.warn('[RBVFC] SW pre-registration failed:', err.message,
+        '— Check that firebase-messaging-sw.js is committed to GitHub at /rbvfc-portal.html/');
+      // Still try messaging without custom SW (will fall back to default)
+      try {
+        fbMessaging = firebase.messaging(fbApp);
+      } catch(e) {}
+    });
+}
+
+function registerServiceWorker() {
+  // SW is now pre-registered in initFirebaseMessaging() before firebase.messaging() is called.
+  // This function kept for compatibility but is no longer the primary registration path.
+  if (window._swRegistration && fbMessaging) {
+    fbMessaging.onMessage(function(payload) { showPushNotificationBanner(payload); });
+  }
 }
 
 function requestPushPermission() {
-  if (!fbMessaging) { showToast('\u26a0\ufe0f Firebase not configured. See Admin \u2192 Notifications.'); return; }
-  if (FIREBASE_VAPID_KEY === 'YOUR_VAPID_KEY_HERE') { showToast('\u26a0\ufe0f VAPID key not set. See Admin \u2192 Notifications.'); return; }
+  if (!fbMessaging) { showToast('\u26a0\ufe0f Firebase not configured.'); return; }
+  if (!('serviceWorker' in navigator)) { showToast('\u26a0\ufe0f Service workers not supported.'); return; }
   Notification.requestPermission().then(function(permission) {
     if (permission !== 'granted') { showToast('\u26a0\ufe0f Notification permission denied.'); return; }
-    // Use the manually-registered SW so Firebase doesn't look at the root scope
-    var swReg = window._swRegistration || undefined;
-    fbMessaging.getToken({ vapidKey: FIREBASE_VAPID_KEY, serviceWorkerRegistration: swReg })
+    // Register SW inline then chain to getToken — prevents Firebase defaulting to root scope
+    var swPath = '/rbvfc-portal.html/firebase-messaging-sw.js';
+    navigator.serviceWorker.register(swPath, { scope: '/rbvfc-portal.html/' })
+      .then(function(reg) {
+        window._swRegistration = reg;
+        console.log('[RBVFC] SW registered:', reg.scope);
+        return fbMessaging.getToken({ vapidKey: FIREBASE_VAPID_KEY, serviceWorkerRegistration: reg });
+      })
       .then(function(token) {
         if (!token) { showToast('\u26a0\ufe0f Could not get push token.'); return; }
         var uid = state.currentUserId;
@@ -797,10 +814,16 @@ function requestPushPermission() {
           save(); sheetSyncDebounce();
         }
         try { localStorage.setItem('rbvfc_fcm_token', token); } catch(e) {}
+        // Register token with Apps Script for server-side trigger pushes
+        var sUrl = state.cadScriptUrl;
+        if (sUrl) fetch(sUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'registerToken',token:token}) }).catch(function(){});
         showToast('\u2705 Push notifications enabled!');
         renderPushStatus();
       })
-      .catch(function(err) { showToast('\u26a0\ufe0f Could not enable: '+err.message); });
+      .catch(function(err) {
+        console.error('[RBVFC] Push enable error:', err);
+        showToast('\u26a0\ufe0f Could not enable: ' + (err.message||String(err)));
+      });
   });
 }
 
