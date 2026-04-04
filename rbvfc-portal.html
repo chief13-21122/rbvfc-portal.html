@@ -907,7 +907,7 @@ var certFileData = null, certFileName = '', certFileMime = '';
 var sheetSyncTimer = null;
 var isSyncing = false;
 
-const UNITS = ['e131','e132','Tk13','a139','Mu13','U13','Br13','RB13','FB13','CH13'];
+const UNITS = ['e131','e132','e133','Tk13','a139','Mu13','U13','Br13','B13','RB13','FB13','CH13'];
 const EMS_UNITS = ['a139','Mu13'];
 const FIRE_UNITS = ['e131','e132','Tk13','U13','Br13','RB13','FB13','CH13'];
 
@@ -4704,10 +4704,10 @@ function approveDrill(elOrId) {
 // ═══════════════════════════════════════════════════════════════
 
 var UNIT_LABELS = {
-  'e131': 'Engine 131',  'e132': 'Engine 132',  'Tk13': 'Truck 13',
-  'a139': 'Ambulance 139', 'Mu13': 'Medic Unit 13', 'U13': 'Utility 13',
-  'Br13': 'Brush 13',    'RB13': 'Rescue Boat 13', 'FB13': 'Fire Boat 13',
-  'CH13': 'Chief 13'
+  'e131': 'Engine 131',  'e132': 'Engine 132',  'e133': 'Engine 133',
+  'Tk13': 'Truck 13',    'a139': 'Ambulance 139', 'Mu13': 'Medic Unit 13',
+  'U13':  'Utility 13',  'Br13': 'Brush 13',    'B13':  'Boat 13',
+  'RB13': 'Rescue Boat 13', 'FB13': 'Fire Boat 13', 'CH13': 'Chief 13'
 };
 // ── Local date helper — always returns YYYY-MM-DD in the browser's local timezone ──
 function localDateStr(d) {
