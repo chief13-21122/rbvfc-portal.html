@@ -708,6 +708,23 @@ function _mergeAndRender(remote) {
     if (_dc2 && _isOff2 && _dc2.style.display==='none') { _dc2.style.display='block'; }
   } catch(e){}  // rebuilds session from active shifts if needed
   console.log('[RBVFC] Synced from Firestore.');
+  // Check for newly arrived LOSAP notifications — compare unread count before/after sync
+  try {
+    var _uid = state.currentUserId;
+    var _prevCount = window._lastLosapNotifCount || 0;
+    var _unread = (state.losapNotifications||[]).filter(function(n){
+      return n.memberId === _uid && !n.read;
+    });
+    if (_unread.length > _prevCount) {
+      // New notification(s) arrived since last sync
+      var _n = _unread[0];
+      var _catEmoji = { drill:'🚒', training:'📚', emergency:'🚨', meeting:'📋', duties:'⚙️' };
+      var _emoji = _catEmoji[_n.category] || '🏅';
+      var _desc = _n.desc ? (_n.desc.length > 40 ? _n.desc.slice(0,40)+'…' : _n.desc) : _n.category;
+      showToast(_emoji + ' +' + (_n.pts||0) + ' LOSAP pt' + ((_n.pts||0)!==1?'s':'') + ' — ' + _desc);
+    }
+    window._lastLosapNotifCount = _unread.length;
+  } catch(e){}
   try { updateLosapNotifBadge(); } catch(e){}
   try { renderUnitToggles(); } catch(e){}
   // Auto-start CAD sync on every state load — no login required
