@@ -10979,7 +10979,11 @@ function _fetchCadCalls(url, fromAdmin) {
       if (card) card.style.display = '';
       renderCadPendingCalls();
       var n = calls.length;
-      showToast('✅ CAD sync complete — ' + n + ' new call' + (n !== 1 ? 's' : '') + ' received.');
+      // Only notify admins — officers and members don't need to see CAD sync status
+      var _cadMe = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+      if (_cadMe && _cadMe.appRole === 'admin') {
+        showToast('✅ CAD sync complete — ' + n + ' new call' + (n !== 1 ? 's' : '') + ' received.');
+      }
       return n;
     })
     .catch(function(err) {
