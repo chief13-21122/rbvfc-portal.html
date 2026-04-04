@@ -109,6 +109,7 @@ main{padding:16px;max-width:900px;margin:0 auto;}
   align-items:center;
   gap:10px;
   padding:10px 14px;
+  padding-top:calc(10px + env(safe-area-inset-top, 0px));
   background:linear-gradient(135deg,#8B0000 0%,#0A0A0A 70%);
   border-bottom:1px solid #2A2A2A;
   min-height:52px;
@@ -7595,7 +7596,7 @@ function _showTopBanner(id, bgColor, accentColor, icon, title, body, buttons) {
   var btnHtml = buttons.map(function(b){
     return '<button onclick="'+b.fn+'" style="flex-shrink:0;background:'+b.bg+';color:'+b.color+';border:1px solid '+b.border+';padding:8px 14px;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;letter-spacing:.3px;line-height:1.2;">'+b.label+'</button>';
   }).join('');
-  el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:'+bgColor+';border-bottom:3px solid '+accentColor+';color:#F0F0F0;padding:10px 14px;box-shadow:0 4px 24px rgba(0,0,0,.7);box-sizing:border-box;';
+  el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:'+bgColor+';border-bottom:3px solid '+accentColor+';color:#F0F0F0;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top, 0px));box-shadow:0 4px 24px rgba(0,0,0,.7);box-sizing:border-box;';
   el.innerHTML =
     // Top row: icon + label
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">'
