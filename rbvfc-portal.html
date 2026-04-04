@@ -510,7 +510,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // ══════════════════════════════════════════════════════════════
 
 // ── Firebase Configuration (populated from Admin settings) ─────────────
-var FIREBASE_VAPID_KEY = "YOUR_VAPID_KEY_HERE";
+var FIREBASE_VAPID_KEY = "BHAUt77lz1V-JiejHzwrwRdF98rPKPvblDD2ud9U4GBVBOebkvjD4vbOm3WiuhtCFNrzBftUPF784I4GCPtWeZc";
 var fbApp = null, fbDb = null, fbAuth = null, fbMessaging = null;
 var _fbSyncUnsubscribe = null;   // real-time listener handle
 var _fbSyncing = false;
@@ -549,6 +549,7 @@ function initFirebase(onReady) {
   var CDN = 'https://www.gstatic.com/firebasejs/9.23.0/';
   _loadSdk(CDN + 'firebase-app-compat.js', function() {
     _loadSdk(CDN + 'firebase-auth-compat.js', function() {
+      _loadSdk(CDN + 'firebase-messaging-compat.js', function() {
       _loadSdk(CDN + 'firebase-firestore-compat.js', function() {
         try {
           var cfg = getFirebaseConfig();
@@ -566,17 +567,20 @@ function initFirebase(onReady) {
             console.log('[RBVFC] Firebase + Firestore ready (anonymous auth).');
             if (onReady) onReady(fbApp);
             _startFbSync();
+            try { initFirebaseMessaging(); } catch(e){}
           }).catch(function(authErr) {
             // Anonymous auth failed (may be disabled) — try without auth
             console.warn('[RBVFC] Anonymous auth failed, trying without auth:', authErr.code);
             _fbInitialized = true;
             if (onReady) onReady(fbApp);
             _startFbSync();
+            try { initFirebaseMessaging(); } catch(e){}
           });
         } catch(e) { console.error('[RBVFC] Firebase init error:', e); }
-      });
-    });
-  });
+      });  // firestore
+      }); // messaging
+    });  // auth
+  }); // app
 }
 
 // ── Company document path ─────────────────────────────────
@@ -809,6 +813,19 @@ function disablePushNotifications() {
   renderPushStatus();
 }
 
+
+function renderNotifNudge() {
+  var el = document.getElementById('notifNudge');
+  if (!el) return;
+  if (!('Notification' in window) || !_fbInitialized) { el.style.display='none'; return; }
+  var perm = Notification.permission;
+  var localToken = '';
+  try { localToken = localStorage.getItem('rbvfc_fcm_token') || ''; } catch(e){}
+  if (perm === 'granted' && localToken) { el.style.display='none'; return; }
+  if (perm === 'denied') { el.style.display='none'; return; }
+  el.style.display = 'flex';
+}
+
 function renderPushStatus() {
   var el = document.getElementById('pushStatusText');
   if (!el) return;
@@ -838,9 +855,9 @@ function showPushNotificationBanner(payload) {
 }
 
 function sendPushToMembers(targetMemberIds, title, body, alertId) {
-  var serverKey = state.fcmServerKey || '';
-  var url = state.sheetWebhookUrl;
-  if (!serverKey || !url) return;
+  // Relay through Google Apps Script which uses FCM HTTP v1 API with its own OAuth token
+  var url = state.cadScriptUrl;  // same Apps Script handles CAD + push
+  if (!url) return;
   var tokens = [];
   targetMemberIds.forEach(function(uid) {
     var m = (state.roster||[]).find(function(x){ return x.id===uid; });
@@ -850,10 +867,18 @@ function sendPushToMembers(targetMemberIds, title, body, alertId) {
   });
   if (!tokens.length) return;
   fetch(url, {
-    method: 'POST', mode: 'no-cors',
+    method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ action: 'sendPush', serverKey: serverKey, tokens: tokens, title: title, body: body, data: { alertId: alertId||'', url:'/' } })
-  }).catch(function(e){ console.warn('Push send failed:', e); });
+    body: JSON.stringify({
+      action: 'sendPush',
+      tokens: tokens,
+      title: title,
+      body: body,
+      data: { alertId: alertId||'', url: window.location.href.split('?')[0] }
+    })
+  }).then(function(r){ return r.json(); })
+    .then(function(d){ console.log('[RBVFC] Push sent:', JSON.stringify(d)); })
+    .catch(function(e){ console.warn('[RBVFC] Push relay failed:', e); });
 }
 
 
@@ -1021,7 +1046,7 @@ function showTab(id) {
   // Refresh hooks
   if (id === 'admin') onAdminTabShow();
   if (id === 'drill') initDrillTab();
-  if (id === 'clock')    { try { renderMyShifts(); } catch(e){} }
+  if (id === 'clock')    { try { renderMyShifts(); } catch(e){} try { renderNotifNudge(); } catch(e){} }
   if (id === 'staffing') initStaffingTab();
   if (id === 'training') initTrainingTab();
   if (id === 'losap') renderLOSAP();
@@ -3708,6 +3733,7 @@ function onAdminTabShow() {
     'adminPinCard',              // Change PIN
     'respondingApparatusCard',   // Responding Apparatus defaults
     'staffingUnitsCard',         // Staffing Unit Visibility
+    'notificationsCard',         // Push Notifications
   ];
   _adminOnly.forEach(function(cardId) {
     var el = document.getElementById(cardId);
@@ -13831,6 +13857,11 @@ function applyBulkEdit() {
       </div>
 
       <!-- Clock In/Out Card -->
+      
+      <div id="notifNudge" style="display:none;align-items:center;justify-content:space-between;background:#1A1200;border:1px solid #3A2800;border-radius:10px;padding:12px 14px;margin-bottom:12px;gap:12px;">
+        <div style="font-size:13px;color:#F5A623;">&#128276; Enable push notifications to get shift reminders &amp; alerts on your phone.</div>
+        <button class="btn btn-sm" style="background:#F5A623;color:#000;border:none;white-space:nowrap;" onclick="requestPushPermission()">Enable</button>
+      </div>
       <div class="card" id="clockCard" style="padding:0;overflow:hidden;">
 
         <!-- Live wall clock display -->
@@ -15298,17 +15329,27 @@ function applyBulkEdit() {
       </div>
 
       <!-- Notifications -->
-      <div class="card">
-        <div class="card-header"><div class="icon">🔔</div><h2>Push Notifications</h2></div>
-        <div class="form-group">
-          <label>Firebase Server Key</label>
-          <input type="password" id="fcmServerKey" placeholder="FCM Server Key from Firebase Console">
+      <div class="card" id="notificationsCard">
+        <div class="card-header" onclick="toggleAdminCardById('notificationsBody')" style="cursor:pointer;user-select:none;">
+          <div class="icon">🔔</div><h2>Push Notifications</h2>
+          <span style="font-size:11px;color:#555;margin-left:8px;">Admin</span>
+          <span id="notificationsChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;">&#9660;</span>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn btn-secondary btn-sm" onclick="saveFcmKey()">💾 Save Key</button>
-          <button class="btn btn-secondary btn-sm" onclick="sendTestPush()">🔔 Send Test</button>
+        <div id="notificationsBody">
+          <p style="font-size:12px;color:#666;margin-bottom:12px;">Push notifications send to members' phones even when the portal is closed. Uses your existing CAD Apps Script — no server key required.</p>
+          <div style="background:#0D1A0D;border:1px solid #1A3A1A;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#7BE07B;">
+            &#10003; Routes through your Google Apps Script (FCM HTTP v1). Make sure your CAD Script URL is configured above and the Apps Script is deployed.
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+            <button class="btn btn-secondary btn-sm" onclick="sendTestPush()">🔔 Send Test Push</button>
+          </div>
+          <div id="notifStatus" style="font-size:12px;color:#888;margin-bottom:10px;"></div>
+          <div style="border-top:1px solid #1E1E1E;padding-top:10px;">
+            <div style="font-size:12px;color:#888;margin-bottom:6px;">Your device status:</div>
+            <div id="pushStatusText" style="font-size:12px;margin-bottom:8px;"></div>
+            <button class="btn btn-secondary btn-sm" onclick="requestPushPermission()">🔔 Enable on This Device</button>
+          </div>
         </div>
-        <div id="notifStatus" style="margin-top:8px;font-size:12px;color:#888;"></div>
       </div>
 
       <!-- Logo Management (admin only) -->
