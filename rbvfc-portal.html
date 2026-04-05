@@ -3207,7 +3207,6 @@ function uploadCertToDrive(submissionId, onComplete) {
       memberName:lastName+', '+firstName, courseName:s.name, date:s.date })
   })
   .then(function(r){ return r.text(); })
-  .then(function(r){ return r.text(); })
   .then(function(text){
     // Detect non-JSON "Connected OK" — script not yet redeployed with uploadCert handler
     if (text.indexOf('Connected OK') >= 0 || text.indexOf('Unknown action') >= 0) {
