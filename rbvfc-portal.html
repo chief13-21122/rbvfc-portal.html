@@ -3721,8 +3721,8 @@ function checkMonthlyEmail() {
 }
 
 function sendMonthlyEmails() {
-  var url = state.sheetWebhookUrl;
-  if (!url) return;
+  var url = state.cadScriptUrl || state.sheetWebhookUrl;
+  if (!url) { showToast('\u26a0\ufe0f CAD Script URL not configured in Admin.'); return; }
   var now = new Date();
   var yr = now.getFullYear();
   // Report on previous month
