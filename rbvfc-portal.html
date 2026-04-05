@@ -3634,39 +3634,43 @@ function sendLosapReportToMember() {
   if (!member || !member.email) { showToast('\u26a0\ufe0f Member has no email address.'); return; }
   if (!state.sheetWebhookUrl) { showToast('\u26a0\ufe0f Apps Script URL not configured.'); return; }
 
-  var yr = new Date().getFullYear();
+  var url = state.sheetWebhookUrl;
+  var now = new Date();
+  var yr  = now.getFullYear();
+  var ytdPts  = calcMemberLOSAP(member.id, yr);
+  // Current-year activities & responses
   var yrS = String(yr);
-  var acts = (state.losapActivities||[]).filter(function(a){ return a.memberId===memberId && a.date && a.date.startsWith(yrS); });
-  var responses = (state.emergencyResponses||[]).filter(function(r){
-    return r.members && r.members.indexOf(memberId)>=0 && r.date && r.date.startsWith(yrS);
-  });
-  var totalPts = calcMemberLOSAP(memberId, yr);
-  var qualified = totalPts >= 50;
+  var monthActs  = (state.losapActivities||[]).filter(function(a){ return a.memberId===member.id && a.date && a.date.startsWith(yrS); });
+  var monthResp  = (state.emergencyResponses||[]).filter(function(r){ return r.members&&r.members.indexOf(member.id)>-1&&r.date&&r.date.startsWith(yrS); }).length;
+  var monthHours = (state.sessions||[]).filter(function(s){ return s.userId===member.id && !s.end; }).reduce(function(a,s){ return a+(parseFloat(s.hours)||0); }, 0);
+  var monthPts   = monthActs.reduce(function(a,x){ return a+(x.pts||0); }, 0) + monthResp * 0.5;
 
-  // Build report lines
-  var lines = ['<b>LOSAP Report — '+member.first+' '+member.last+'</b>','<b>Year: '+yr+'</b>','<b>Total Points: '+totalPts+' '+(qualified?'\u2705 QUALIFIED':'\u274C Not yet qualified')+'</b>',''];
-  var catPts = {};
-  acts.forEach(function(a){ catPts[a.category]=(catPts[a.category]||0)+(a.pts||0); });
-  if (responses.length) catPts['emergency']=(catPts['emergency']||0)+(responses.length*0.5);
-  Object.keys(catPts).forEach(function(cat){
-    var cfg = (typeof CAT_CONFIG!=='undefined')&&CAT_CONFIG[cat];
-    var label = cfg ? cfg.label : cat;
-    lines.push(label+': '+catPts[cat]+' pts');
-  });
+  // Use the same email body builder as monthly reports for consistency
+  var emailBody = (typeof buildMonthlyEmailBody === 'function')
+    ? buildMonthlyEmailBody(member, 'YTD '+yr, yr, monthPts, ytdPts, monthResp, monthHours, monthActs)
+    : ('LOSAP Year-to-Date Report\nMember: '+member.first+' '+member.last+'\nYear: '+yr+'\nTotal Points: '+ytdPts+(ytdPts>=50?' ✅ QUALIFIED':' — '+Math.max(0,50-ytdPts)+' pts to qualify'));
 
-  var body = lines.join('\n');
+  var payload = {
+    action: 'sendEmails',
+    emails: [{
+      to:      member.email,
+      subject: 'Co.13 LOSAP Year-to-Date Report — '+member.first+' '+member.last+' ('+yr+')',
+      body:    emailBody
+    }]
+  };
 
-  fetch(state.sheetWebhookUrl, {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ action:'sendEmail', to:member.email,
-      subject: 'LOSAP Report — '+member.first+' '+member.last+' ('+yr+')',
-      body: body })
-  }).then(function(r){ return r.text(); }).then(function(){
-    showToast('\u2705 Report sent to '+member.email);
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  .then(function(){
+    showToast('\u2705 Report sent to '+member.email+'!');
     var modal = document.getElementById('sendToMemberModal');
     if (modal) modal.remove();
-  }).catch(function(e){
-    showToast('\u26a0\ufe0f Send failed: '+e.message);
+  })
+  .catch(function(err){
+    showToast('\u26a0\ufe0f Send failed: '+(err.message||'check Apps Script URL'));
   });
 }
 
