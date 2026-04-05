@@ -7746,9 +7746,12 @@ function renderMyShifts() {
   if (!container && !clockContainer) return;
   var uid   = state.currentUserId;
   var today = localDateStr();
-  // True if already clocked into any active session — suppresses all Clock-In buttons
+  // True if already clocked into any active session — suppresses all Clock-In buttons.
+  // Three sources: currentSession, sessions array, OR any staffing shift with clockedIn=true today
+  // (the third check catches officer-clocked-in shifts before Firestore session sync arrives)
   var _alreadyOnDuty = !!(state.currentSession && !state.currentSession.end) ||
-    (state.sessions||[]).some(function(ss){ return ss.userId===uid && !ss.end; });
+    (state.sessions||[]).some(function(ss){ return ss.userId===uid && !ss.end; }) ||
+    (state.staffingShifts||[]).some(function(s){ return s.memberId===uid && s.date===today && s.clockedIn && !s.clockedOutAt; });
 
   // Build a set of shift IDs that are "secondary" linked shifts (Tk13 when linked from E131)
   var _primaryLinkedIds = new Set((state.staffingShifts||[])
