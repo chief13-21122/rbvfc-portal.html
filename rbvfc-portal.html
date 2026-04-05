@@ -938,6 +938,7 @@ var state = {
   losapActivities: [],       // personal LOSAP log entries
   emergencyResponses: [],    // all emergency responses (entered by dispatcher/officer)
   trainingSubmissions: [],   // training awaiting approval
+  scheduledDrills: [],        // [{id,date,time,drillCode,drillName,hours,members,location,notes,createdBy,createdAt,reportId}]
   losapPending: [],          // losap activities submitted for another member, awaiting approval
   losapNotifications: [],    // unread point-award notifications per member
   memberActivities: {},
@@ -4579,10 +4580,235 @@ function applyUserSession(m) {
 //  DRILL REPORTS
 // ═══════════════════════════════════════════════════
 
+
+// ═══════════════════════════════════════════════════════════
+//  SCHEDULED DRILLS
+// ═══════════════════════════════════════════════════════════
+
+function renderScheduledDrills() {
+  var container = document.getElementById('scheduledDrillsContainer');
+  if (!container) return;
+  var uid = state.currentUserId;
+  var me = (state.roster||[]).find(function(m){ return m.id===uid; });
+  var isOfficer = me && (me.appRole==='officer'||me.appRole==='admin');
+  var today = localDateStr();
+  var drills = (state.scheduledDrills||[]).slice()
+    .sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
+
+  if (!drills.length) {
+    container.innerHTML = '<div style="text-align:center;padding:20px;color:#555;font-size:13px;">No drills scheduled.</div>';
+    return;
+  }
+
+  container.innerHTML = drills.map(function(d) {
+    var isPast = d.date < today;
+    var hasReport = !!d.reportId;
+    var report = hasReport ? (state.trainingSubmissions||[]).find(function(r){ return r.id===d.reportId; }) : null;
+    var statusColor = hasReport ? (report&&report.status==='approved'?'#27AE60':report&&report.status==='rejected'?'#E74C3C':'#F5A623') : (isPast?'#E74C3C':'#4A90D9');
+    var statusLabel = hasReport ? (report?report.status.toUpperCase():'REPORTED') : (isPast?'NEEDS REPORT':'UPCOMING');
+    var dateObj = new Date(d.date+'T12:00:00');
+    var dateStr = dateObj.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric',year:'numeric'});
+    var timeStr = d.time ? (function(){ var p=d.time.split(':'); var h=parseInt(p[0]); return (h%12||12)+':'+p[1]+' '+(h>=12?'PM':'AM'); })() : '';
+    var drillLabel = (d.drillCode?d.drillCode+' — ':'')+d.drillName;
+
+    var memberNames = (d.members||[]).map(function(mid){
+      var mbr=(state.roster||[]).find(function(x){return x.id===mid;});
+      return mbr ? mbr.last+', '+mbr.first : mid;
+    }).join(' • ');
+
+    var actions = '';
+    if (isOfficer) {
+      if (!hasReport) {
+        actions += '<button class="btn btn-sm btn-primary" onclick="loadDrillFromSchedule(\''+d.id+'\')" style="font-size:11px;">📝 Create Report</button> ';
+        if (!isPast) actions += '<button class="btn btn-sm btn-secondary" onclick="editScheduledDrill(\''+d.id+'\')" style="font-size:11px;">✏️ Edit</button> ';
+      } else {
+        actions += '<button class="btn btn-sm btn-secondary" onclick="editDrillReport(\''+d.reportId+'\')" style="font-size:11px;">✏️ Edit Report</button> ';
+      }
+      actions += '<button class="btn btn-sm" onclick="deleteScheduledDrill(\''+d.id+'\')" style="font-size:11px;background:#2A0000;color:#C8102E;border:1px solid #C8102E;">🗑 Delete</button>';
+    }
+
+    return '<div style="background:#181818;border:1px solid #2A2A2A;border-left:3px solid '+statusColor+';border-radius:10px;padding:14px;margin-bottom:10px;">'
+      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap;">'
+      +   '<div style="flex:1;">'
+      +     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+      +       (d.drillCode?'<span style="font-family:Bebas Neue,sans-serif;font-size:13px;color:#C8102E;background:rgba(200,16,46,.12);padding:2px 7px;border-radius:4px;">'+d.drillCode+'</span>':'')
+      +       '<span style="font-weight:700;font-size:14px;color:#F0F0F0;">'+d.drillName+'</span>'
+      +     '</div>'
+      +     '<div style="font-size:12px;color:#888;">📅 '+dateStr+(timeStr?' · '+timeStr:'')+(d.location?' · 📍 '+d.location:'')+'</div>'
+      +     (d.hours?'<div style="font-size:12px;color:#666;">⏱ '+d.hours+'h planned &nbsp;·&nbsp; 🏅 '+Math.max(1,Math.floor(d.hours/2))+' pt'+(Math.max(1,Math.floor(d.hours/2))!==1?'s':'')+'</div>':'')
+      +     (d.notes?'<div style="font-size:12px;color:#666;margin-top:3px;font-style:italic;">'+d.notes+'</div>':'')
+      +     (memberNames?'<div style="font-size:11px;color:#555;margin-top:5px;">Expected: '+memberNames+'</div>':'')
+      +   '</div>'
+      +   '<span style="font-size:10px;font-weight:700;color:'+statusColor+';padding:3px 8px;border-radius:4px;background:'+statusColor+'22;white-space:nowrap;">'+statusLabel+'</span>'
+      + '</div>'
+      + (actions?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #222;">'+actions+'</div>':'')
+      + '</div>';
+  }).join('');
+}
+
+function saveScheduledDrill() {
+  var g = function(id){ return ((document.getElementById(id)||{}).value||'').trim(); };
+  var date = g('sdDate'), time = g('sdTime'), loc = g('sdLocation'), notes = g('sdNotes');
+  var editId = g('sdEditId');
+  var typeEl = document.getElementById('sdDrillType');
+  var typeVal = typeEl ? typeEl.value : '';
+  if (!date) { showToast('\u26a0\ufe0f Date required.'); return; }
+  if (!typeVal) { showToast('\u26a0\ufe0f Drill type required.'); return; }
+  var parts = typeVal.split('|');
+  var drillCode = parts[0]||'', drillName = parts[1]||typeVal;
+  var hours = parseFloat(g('sdHours')) || 2;
+  // Collect members
+  var members = [];
+  document.querySelectorAll('#sdMemberList input[type=checkbox]:checked').forEach(function(cb){ members.push(cb.value); });
+
+  if (!Array.isArray(state.scheduledDrills)) state.scheduledDrills = [];
+  if (editId) {
+    var ex = state.scheduledDrills.find(function(x){ return x.id===editId; });
+    if (ex) {
+      ex.date=date; ex.time=time; ex.location=loc; ex.notes=notes;
+      ex.drillCode=drillCode; ex.drillName=drillName; ex.hours=hours; ex.members=members;
+      ex.updatedAt = new Date().toISOString();
+    }
+  } else {
+    state.scheduledDrills.push({
+      id: 'sd_'+Date.now(), date:date, time:time, location:loc, notes:notes,
+      drillCode:drillCode, drillName:drillName, hours:hours, members:members,
+      createdBy: state.currentUserId, createdAt: new Date().toISOString(), reportId:null
+    });
+  }
+  save();
+  clearScheduledDrillForm();
+  renderScheduledDrills();
+  showToast('\u2705 Drill '+(editId?'updated':'scheduled')+'!');
+}
+
+function clearScheduledDrillForm() {
+  ['sdDate','sdTime','sdLocation','sdNotes','sdEditId'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.value='';
+  });
+  var th = document.getElementById('sdDrillType'); if(th) th.value='';
+  var hh = document.getElementById('sdHours'); if(hh) hh.value='2';
+  var ft = document.getElementById('sdFormTitle'); if(ft) ft.textContent='Schedule a Drill';
+  document.querySelectorAll('#sdMemberList input[type=checkbox]').forEach(function(cb){ cb.checked=true; });
+}
+
+function populateSdMemberList() {
+  var cont = document.getElementById('sdMemberList');
+  if (!cont) return;
+  var roster = (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); });
+  cont.innerHTML = roster.map(function(m){
+    return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;">'
+      + '<input type="checkbox" value="'+m.id+'" checked style="width:16px;height:16px;accent-color:#C8102E;">'
+      + '<span style="font-size:13px;color:#E0E0E0;">'+m.last+', '+m.first+'</span></label>';
+  }).join('');
+}
+
+function editScheduledDrill(id) {
+  var d = (state.scheduledDrills||[]).find(function(x){ return x.id===id; });
+  if (!d) return;
+  var ft = document.getElementById('sdFormTitle'); if(ft) ft.textContent='Edit Scheduled Drill';
+  var eid = document.getElementById('sdEditId'); if(eid) eid.value=id;
+  var de = document.getElementById('sdDate'); if(de) de.value=d.date||'';
+  var te = document.getElementById('sdTime'); if(te) te.value=d.time||'';
+  var le = document.getElementById('sdLocation'); if(le) le.value=d.location||'';
+  var ne = document.getElementById('sdNotes'); if(ne) ne.value=d.notes||'';
+  var he = document.getElementById('sdHours'); if(he) he.value=d.hours||2;
+  var tye = document.getElementById('sdDrillType');
+  if (tye) tye.value = (d.drillCode&&d.drillName) ? d.drillCode+'|'+d.drillName : '';
+  document.querySelectorAll('#sdMemberList input[type=checkbox]').forEach(function(cb){
+    cb.checked = (d.members||[]).indexOf(cb.value)>=0;
+  });
+  // Scroll to form
+  var card = document.getElementById('schedDrillCard');
+  if (card) { card.scrollIntoView({behavior:'smooth'}); }
+}
+
+function deleteScheduledDrill(id) {
+  if (!confirm('Delete this scheduled drill?')) return;
+  state.scheduledDrills = (state.scheduledDrills||[]).filter(function(x){ return x.id!==id; });
+  save(); renderScheduledDrills();
+  showToast('Scheduled drill deleted.');
+}
+
+function loadDrillFromSchedule(scheduledId) {
+  var d = (state.scheduledDrills||[]).find(function(x){ return x.id===scheduledId; });
+  if (!d) return;
+  // Populate the drill report form
+  var de = document.getElementById('drillDate'); if(de) de.value=d.date||'';
+  var tye = document.getElementById('drillType');
+  if (tye && d.drillCode && d.drillName) {
+    for (var i=0; i<tye.options.length; i++) {
+      if (tye.options[i].value === d.drillCode+'|'+d.drillName) { tye.selectedIndex=i; break; }
+    }
+    drillTypeChanged && drillTypeChanged();
+  }
+  var he = document.getElementById('drillHours'); if(he) he.value=d.hours||2;
+  var hd = document.getElementById('drillHoursDisplay'); if(hd) hd.textContent=d.hours||2;
+  var le = document.getElementById('drillLocation'); if(le) le.value=d.location||'';
+  var ne = document.getElementById('drillNotes'); if(ne) ne.value=d.notes||'';
+  var sid = document.getElementById('drillScheduledId'); if(sid) sid.value=scheduledId;
+  var ft = document.getElementById('drillFormTitle'); if(ft) ft.textContent='Create Drill Report';
+  var sb = document.querySelector('#drillSubmitCard button.btn-primary');
+  if(sb) sb.innerHTML='&#128221; Submit Drill Report';
+  // Pre-check expected members
+  var roster = (state.roster||[]).filter(function(m){ return m.active!==false; });
+  roster.forEach(function(m){
+    var cb = document.getElementById('drill_'+m.id);
+    if (cb) cb.checked = (d.members||[]).indexOf(m.id)>=0;
+  });
+  populateDrillReportBy();
+  // Scroll to form
+  var card = document.getElementById('drillSubmitCard');
+  if (card) { card.scrollIntoView({behavior:'smooth'}); }
+  showToast('\u2139\ufe0f Drill report pre-filled from schedule. Adjust members who actually attended.');
+}
+
+function editDrillReport(reportId) {
+  var r = (state.trainingSubmissions||[]).find(function(x){ return x.id===reportId; });
+  if (!r) return;
+  var uid = state.currentUserId;
+  var me = (state.roster||[]).find(function(m){ return m.id===uid; });
+  var isOfficer = me && (me.appRole==='officer'||me.appRole==='admin');
+  if (!isOfficer) { showToast('\u26a0\ufe0f Officers only.'); return; }
+
+  // Populate form with existing data
+  var de = document.getElementById('drillDate'); if(de) de.value=r.date||'';
+  var tye = document.getElementById('drillType');
+  if (tye && r.drillCode && r.drillName) {
+    for (var i=0; i<tye.options.length; i++) {
+      if (tye.options[i].value === r.drillCode+'|'+r.drillName) { tye.selectedIndex=i; break; }
+    }
+    drillTypeChanged && drillTypeChanged();
+  }
+  var he = document.getElementById('drillHours'); if(he) he.value=r.hours||2;
+  var hd = document.getElementById('drillHoursDisplay'); if(hd) hd.textContent=r.hours||2;
+  var le = document.getElementById('drillLocation'); if(le) le.value=r.location||'';
+  var ne = document.getElementById('drillNotes'); if(ne) ne.value=r.notes||'';
+  var eid = document.getElementById('drillEditId'); if(eid) eid.value=reportId;
+  var ft = document.getElementById('drillFormTitle'); if(ft) ft.textContent='Edit Drill Report';
+  var sb = document.querySelector('#drillSubmitCard button.btn-primary');
+  if(sb) sb.innerHTML='&#9999;&#65039; Save Changes';
+  // Set members
+  var roster = (state.roster||[]).filter(function(m){ return m.active!==false; });
+  roster.forEach(function(m){
+    var cb = document.getElementById('drill_'+m.id);
+    if (cb) cb.checked = (r.members||[]).indexOf(m.id)>=0;
+  });
+  populateDrillReportBy();
+  var card = document.getElementById('drillSubmitCard');
+  if (card) { card.scrollIntoView({behavior:'smooth'}); }
+  showToast('\u270f\ufe0f Editing drill report. Make changes and save.');
+}
+
 function initDrillTab() {
   var uid = state.currentUserId;
   var me = (state.roster||[]).find(function(m){ return m.id===uid; });
   var isOfficer = me && (me.appRole==='officer'||me.appRole==='admin');
+  // Officer/Admin only: show schedule card
+  var schedCard = document.getElementById('schedDrillCard');
+  if (schedCard) schedCard.style.display = isOfficer ? 'block' : 'none';
+  var schedListCard = document.getElementById('schedDrillListCard');
+  if (schedListCard) schedListCard.style.display = isOfficer ? 'block' : 'none';
   // All active members can submit drill reports
   var submitCard = document.getElementById('drillSubmitCard');
   if (submitCard) submitCard.style.display = 'block';
@@ -4592,6 +4818,8 @@ function initDrillTab() {
   // Populate report-by and member list
   populateDrillReportBy();
   populateDrillMemberList();
+  populateSdMemberList();
+  renderScheduledDrills();
   renderDrillHistory();
 }
 
@@ -4840,48 +5068,43 @@ function saveDrillReport() {
 
   if (!Array.isArray(state.trainingSubmissions)) state.trainingSubmissions = [];
 
-  // Admins and officers can self-approve drills
-  var _filer = (state.roster||[]).find(function(m){ return m.id===reportBy; });
-  var _isOfficerFiler = _filer && (_filer.appRole==='officer'||_filer.appRole==='admin');
-  var _drillStatus = _isOfficerFiler ? 'approved' : 'pending';
+  // All drills require explicit officer approval — no self-approval
+  var _editId = ((document.getElementById('drillEditId')||{}).value||'').trim();
+  var _schedId = ((document.getElementById('drillScheduledId')||{}).value||'').trim();
+
+  if (_editId) {
+    // Edit mode: update existing submission
+    var _existing = (state.trainingSubmissions||[]).find(function(x){ return x.id===_editId; });
+    if (_existing) {
+      _existing.drillCode=drillCode; _existing.drillName=drillName;
+      _existing.date=drillDate; _existing.hours=hours; _existing.pts=pts;
+      _existing.location=location; _existing.notes=notes; _existing.members=members;
+      _existing.editedBy=reportBy; _existing.editedAt=new Date().toISOString();
+      if (_existing.status==='approved') {
+        _existing.status='pending';
+        delete _existing.approvedBy; delete _existing.approvedAt;
+      }
+      save(); clearDrillForm(); renderDrillHistory();
+      if (_submitBtn) { _submitBtn.disabled=false; _submitBtn.innerHTML='&#128221; Submit Drill Report'; }
+      showToast('\u2705 Drill report updated — pending re-approval.');
+      updateApprovalsBadge(); return;
+    }
+  }
 
   var drillId = 'drill_'+Date.now();
   var _drillEntry = {
-    id: drillId,
-    type: 'drill',
-    submittedBy: reportBy,
-    memberId: reportBy,
-    members: members,
-    date: drillDate,
-    submittedDate: localDateStr(),
+    id: drillId, type: 'drill',
+    submittedBy: reportBy, memberId: reportBy, members: members,
+    date: drillDate, submittedDate: localDateStr(),
     submittedAt: new Date().toISOString(),
-    drillCode: drillCode,
-    drillName: drillName,
-    hours: hours,
-    pts: pts,
-    location: location,
-    notes: notes,
-    status: _drillStatus
+    drillCode: drillCode, drillName: drillName,
+    hours: hours, pts: pts, location: location, notes: notes,
+    status: 'pending',
+    scheduledDrillId: _schedId || null
   };
-  if (_isOfficerFiler) {
-    _drillEntry.approvedBy = reportBy;
-    _drillEntry.approvedAt = new Date().toISOString();
-    // Add LOSAP activities immediately for all members
-    if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
-    members.forEach(function(mid) {
-      var _dr_act = {
-        id: 'act_'+Date.now()+'_'+mid,
-        memberId: mid,
-        date: drillDate,
-        category: 'drill',
-        desc: (drillCode ? drillCode+' — ' : '') + drillName + (location ? ' @ '+location : ''),
-        pts: pts,
-        hours: hours,
-        notes: notes||''
-      };
-      state.losapActivities.unshift(_dr_act);
-      try { _notifyLosapPoints(_dr_act); } catch(e){}
-    });
+  if (_schedId) {
+    var _sd = (state.scheduledDrills||[]).find(function(x){ return x.id===_schedId; });
+    if (_sd) _sd.reportId = drillId;
   }
   state.trainingSubmissions.push(_drillEntry);
 
@@ -4895,7 +5118,7 @@ function saveDrillReport() {
     if (scrollArea) scrollArea.scrollTop = 0;
   }, 200);
   // Show prominent confirmation modal
-  showDrillConfirmation(drillName, drillDate, members.length, pts, _isOfficerFiler);
+  showDrillConfirmation(drillName, drillDate, members.length, pts, false);
 }
 
 function showDrillConfirmation(drillName, drillDate, memberCount, pts, autoApproved) {
@@ -4945,6 +5168,12 @@ function clearDrillForm() {
   var dhd = document.getElementById('drillHoursDisplay'); if(dhd) dhd.textContent='2';
   var drillLoc = document.getElementById('drillLocation'); if(drillLoc) drillLoc.value='';
   var drillNotes = document.getElementById('drillNotes'); if(drillNotes) drillNotes.value='';
+  // Reset edit/schedule mode
+  var eid = document.getElementById('drillEditId'); if(eid) eid.value='';
+  var sid = document.getElementById('drillScheduledId'); if(sid) sid.value='';
+  var ft = document.getElementById('drillFormTitle'); if(ft) ft.textContent='Submit Drill Report';
+  var sb = document.querySelector('#drillSubmitCard button.btn-primary');
+  if(sb) sb.innerHTML='&#128221; Submit Drill Report';
   drillClearAll();
 }
 
@@ -5006,12 +5235,20 @@ function renderDrillHistory() {
         '</div>'+
       '</div>';
 
-    // Fire Chief approve/reject buttons
+    // Officer/Admin actions
+    var actions_html = '';
+    if (isOfficer && (s.status==='pending'||s.status==='rejected')) {
+      actions_html += '<button class="btn btn-sm btn-secondary _edit-drill-btn" data-id="'+s.id+'" style="font-size:11px;">\u270f\ufe0f Edit</button> ';
+    }
+    if (isOfficer && s.status==='approved') {
+      actions_html += '<button class="btn btn-sm btn-secondary _edit-drill-btn" data-id="'+s.id+'" style="font-size:11px;">\u270f\ufe0f Edit</button> ';
+    }
     if (isChief && s.status==='pending') {
-      html += '<div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #2A2A2A;">'+
-        '<button class="btn btn-success btn-sm" onclick="approveDrill(this)" data-id="'+s.id+'">✓ Approve</button>'+
-        '<button class="btn btn-danger btn-sm" onclick="rejectDrill(this)" data-id="'+s.id+'">✗ Reject</button>'+
-        '</div>';
+      actions_html += '<button class="btn btn-success btn-sm" onclick="approveDrill(this)" data-id="'+s.id+'">✓ Approve</button> '+
+        '<button class="btn btn-danger btn-sm" onclick="rejectDrill(this)" data-id="'+s.id+'">✗ Reject</button>';
+    }
+    if (actions_html) {
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid #2A2A2A;">'+actions_html+'</div>';
     }
     html += '</div>';
   });
@@ -13497,6 +13734,13 @@ document.addEventListener('DOMContentLoaded', function() {
   var outBtn = document.getElementById('clockOutBtn');
   if (inBtn) inBtn.addEventListener('click', function(e) { e.stopPropagation(); clockIn(); });
   if (outBtn) outBtn.addEventListener('click', function(e) { e.stopPropagation(); clockOut(); });
+  // Delegated handlers — avoids inline onclick quoting issues
+  document.addEventListener('click', function(ev) {
+    var lsap = ev.target.closest && ev.target.closest('._lsap-btn');
+    if (lsap) { submitAttendanceLosap(lsap.getAttribute('data-st'), lsap.getAttribute('data-si'), lsap.getAttribute('data-dt'), lsap.getAttribute('data-mb'), lsap.getAttribute('data-ds')); return; }
+    var editD = ev.target.closest && ev.target.closest('._edit-drill-btn');
+    if (editD) { try{ editDrillReport(editD.getAttribute('data-id')); }catch(e){} }
+  });
 });
 
 
