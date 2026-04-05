@@ -10802,10 +10802,8 @@ function launchApp(member) {
 }
 
 function logout() {
-  // Clock out if needed
-  if (state.currentSession) {
-    clockOut();
-  }
+  // Do NOT clock out on sign-out — duty session continues in background.
+  // Member remains on duty and session is restored on next login.
   state.currentUserId = null;
   // Clear impersonation
   state._impersonating = null;
