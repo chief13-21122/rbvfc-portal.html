@@ -1721,6 +1721,11 @@ function initEmergencyTab() {
   // Log form: drivers and officers only (not admin members)
   var logCard = document.getElementById('erLogCard');
   if (logCard) logCard.style.display = (canLog && !isAdmin) ? 'block' : 'none';
+  // Always start collapsed when switching to Response tab
+  var erBody = document.getElementById('erLogBody');
+  var erChev = document.getElementById('erLogChev');
+  if (erBody) erBody.style.display = 'none';
+  if (erChev) erChev.style.transform = 'rotate(-90deg)';
   // History: visible to all (admin members can see logged calls)
   var histCard = document.getElementById('erHistoryCard');
   if (histCard) histCard.style.display = 'block';
@@ -3589,6 +3594,82 @@ function previewMonthlyEmail() {
   document.body.appendChild(modal);
 }
 
+
+function closeSendToMemberModal() { var m=document.getElementById("sendToMemberModal"); if(m) m.remove(); }
+
+function openSendToMemberModal() {
+  // Build member picker modal
+  var existing = document.getElementById('sendToMemberModal');
+  if (existing) existing.remove();
+
+  var roster = (state.roster||[]).filter(function(m){ return m.active!==false && m.email; });
+  if (!roster.length) { showToast('\u26a0\ufe0f No members have email addresses on file.'); return; }
+  if (!state.sheetWebhookUrl) { showToast('\u26a0\ufe0f Configure Apps Script URL first.'); return; }
+
+  var opts = roster.map(function(m){
+    return '<option value="'+m.id+'">'+m.last+', '+m.first+' ('+m.email+')</option>';
+  }).join('');
+
+  var modal = document.createElement('div');
+  modal.id = 'sendToMemberModal';
+  modal.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2100;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML = '<div style="background:#1A1A1A;border:1px solid #333;border-radius:14px;padding:24px;width:100%;max-width:400px;">'
+    + '<div style="font-family:Bebas Neue,sans-serif;font-size:20px;letter-spacing:1px;color:#F0F0F0;margin-bottom:4px;">Send LOSAP Report</div>'
+    + '<div style="font-size:12px;color:#888;margin-bottom:16px;">Send the current year LOSAP summary to one member.</div>'
+    + '<label style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;">Member</label>'
+    + '<select id="stmMemberSelect" style="width:100%;margin-top:6px;margin-bottom:16px;background:#111;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">'
+    + '<option value="">\u2014 Select member \u2014</option>' + opts + '</select>'
+    + '<div style="display:flex;gap:10px;">'
+    + '<button class="btn btn-primary" style="flex:1;" onclick="sendLosapReportToMember()">\uD83D\uDCE7 Send Report</button>'
+    + '<button class="btn btn-secondary" style="flex:1;" onclick="closeSendToMemberModal()">Cancel</button>'
+    + '</div></div>';
+  document.body.appendChild(modal);
+}
+
+function sendLosapReportToMember() {
+  var sel = document.getElementById('stmMemberSelect');
+  if (!sel || !sel.value) { showToast('\u26a0\ufe0f Select a member.'); return; }
+  var memberId = sel.value;
+  var member = (state.roster||[]).find(function(m){ return m.id===memberId; });
+  if (!member || !member.email) { showToast('\u26a0\ufe0f Member has no email address.'); return; }
+  if (!state.sheetWebhookUrl) { showToast('\u26a0\ufe0f Apps Script URL not configured.'); return; }
+
+  var yr = new Date().getFullYear();
+  var yrS = String(yr);
+  var acts = (state.losapActivities||[]).filter(function(a){ return a.memberId===memberId && a.date && a.date.startsWith(yrS); });
+  var responses = (state.emergencyResponses||[]).filter(function(r){
+    return r.members && r.members.indexOf(memberId)>=0 && r.date && r.date.startsWith(yrS);
+  });
+  var totalPts = calcMemberLOSAP(memberId, yr);
+  var qualified = totalPts >= 50;
+
+  // Build report lines
+  var lines = ['<b>LOSAP Report — '+member.first+' '+member.last+'</b>','<b>Year: '+yr+'</b>','<b>Total Points: '+totalPts+' '+(qualified?'\u2705 QUALIFIED':'\u274C Not yet qualified')+'</b>',''];
+  var catPts = {};
+  acts.forEach(function(a){ catPts[a.category]=(catPts[a.category]||0)+(a.pts||0); });
+  if (responses.length) catPts['emergency']=(catPts['emergency']||0)+(responses.length*0.5);
+  Object.keys(catPts).forEach(function(cat){
+    var cfg = (typeof CAT_CONFIG!=='undefined')&&CAT_CONFIG[cat];
+    var label = cfg ? cfg.label : cat;
+    lines.push(label+': '+catPts[cat]+' pts');
+  });
+
+  var body = lines.join('\n');
+
+  fetch(state.sheetWebhookUrl, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ action:'sendEmail', to:member.email,
+      subject: 'LOSAP Report — '+member.first+' '+member.last+' ('+yr+')',
+      body: body })
+  }).then(function(r){ return r.text(); }).then(function(){
+    showToast('\u2705 Report sent to '+member.email);
+    var modal = document.getElementById('sendToMemberModal');
+    if (modal) modal.remove();
+  }).catch(function(e){
+    showToast('\u26a0\ufe0f Send failed: '+e.message);
+  });
+}
+
 function confirmSendMonthlyEmails() {
   var roster = (state.roster||[]).filter(function(m){ return m.email&&m.active!==false; });
   if (!roster.length) { showToast('⚠️ No members have email addresses on file.'); return; }
@@ -3980,6 +4061,7 @@ function onAdminTabShow() {
     'respondingApparatusCard',   // Responding Apparatus defaults
     'staffingUnitsCard',         // Staffing Unit Visibility
     'notificationsCard',         // Push Notifications
+    'monthlyEmailCard',          // Monthly LOSAP Reports
   ];
   _adminOnly.forEach(function(cardId) {
     var el = document.getElementById(cardId);
@@ -14788,10 +14870,12 @@ function applyBulkEdit() {
 
       <!-- Log Emergency Response -->
       <div class="card" id="erLogCard">
-        <div class="card-header">
+        <div class="card-header" onclick="toggleStaffCard('erLogBody','erLogChev')" style="cursor:pointer;user-select:none;">
           <div class="icon">🚒</div>
-          <h2>Log Emergency Response</h2>
+          <h2>Manually Log Emergency Response</h2>
+          <span id="erLogChev" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;transform:rotate(-90deg);">▼</span>
         </div>
+        <div id="erLogBody" style="display:none;">
         <div class="alert info" style="margin-bottom:14px;">ℹ️ Manually log a response <strong>ONLY</strong> if it does not appear in the list above.</div>
         <!-- Logged By banner -->
         <div id="erLoggedByBanner" style="display:flex;align-items:center;gap:10px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
@@ -14853,6 +14937,7 @@ function applyBulkEdit() {
           <textarea id="erNotes" rows="2" placeholder="Additional notes…" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
         </div>
         <button class="btn btn-primary btn-full" onclick="saveEmergencyResponse()">🚒 Log Response</button>
+        </div><!-- end erLogBody -->
       </div>
 
       <!-- Pending CAD Calls -->
@@ -15850,7 +15935,8 @@ function applyBulkEdit() {
         <div id="monthlyEmailStatus" style="font-size:12px;color:#888;margin-bottom:14px;padding:10px;background:#181818;border:1px solid #2A2A2A;border-radius:8px;">Loading&hellip;</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
           <button class="btn btn-secondary btn-sm" onclick="previewMonthlyEmail()">&#128065; Preview My Report</button>
-          <button class="btn btn-primary btn-sm" onclick="confirmSendMonthlyEmails()">&#128140; Send Reports Now</button>
+          <button class="btn btn-primary btn-sm" onclick="confirmSendMonthlyEmails()">&#128140; Send All Reports</button>
+          <button class="btn btn-secondary btn-sm" onclick="openSendToMemberModal()">&#128140; Send to Member&hellip;</button>
         </div>
         <div style="font-size:11px;color:#555;line-height:1.6;border-top:1px solid #2A2A2A;padding-top:10px;">
           <strong style="color:#888;">Requirements:</strong> Apps Script URL must be configured and members must have email addresses on file.<br>
@@ -15994,20 +16080,21 @@ function applyBulkEdit() {
   <div id="moreSheet" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;align-items:flex-end;" onclick="if(event.target===this)closeMoreMenu()">
     <div id="moreSheetPanel" style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:20px;width:100%;box-sizing:border-box;transform:translateY(100%);transition:transform .3s ease;">
       <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 20px;"></div>
-      <button class="btn btn-secondary btn-full" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;position:relative;" id="moreApprovalsBtn" onclick="showTab('approvals');closeMoreMenu()">
+      <button class="btn btn-secondary btn-full" style="position:relative;" id="moreApprovalsBtn" onclick="showTab('approvals');closeMoreMenu()">
         ✅ Approvals
         <span id="approvalsBadge" style="display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);background:#C8102E;color:#FFF;font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;"></span>
       </button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
       <div id="moreAdminTools" style="display:none;border-top:1px solid #2A2A2A;margin-top:12px;padding-top:12px;">
-        <div style="font-size:10px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Data Management</div>
-        <button class="btn btn-secondary btn-full" onclick="exportJSON();closeMoreMenu()">📦 Download Full Backup (.json)</button>
+        <div style="font-size:10px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Admin Tools</div>
+        <button class="btn btn-secondary btn-full" onclick="confirmSendMonthlyEmails();closeMoreMenu()">📧 Email LOSAP Reports (All)</button>
+        <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="openSendToMemberModal();closeMoreMenu()">📧 Email LOSAP Report (Member&hellip;)</button>
+        <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="exportJSON();closeMoreMenu()">📦 Download Full Backup (.json)</button>
         <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="exportCSV();closeMoreMenu()">📊 Export CSV</button>
-  
       </div>
     </div>
   </div>
