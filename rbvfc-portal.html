@@ -13987,27 +13987,79 @@ function fillCadCall(index) {
   if (!call) return;
   showTab('response');
   setTimeout(function() {
-    // Use the actual field IDs from the Log Emergency Response form
-    var fDate      = document.getElementById('erDate');
-    var fNum       = document.getElementById('erIncidentNum');
-    var fAddr      = document.getElementById('erAddress');
-    var fAlarm     = document.getElementById('erAlarmTime');
-    var fApparatus = document.getElementById('erApparatus');
+    // Bug 2 fix: expand the log form (it starts collapsed on tab open)
+    var erBody = document.getElementById('erLogBody');
+    var erChev = document.getElementById('erLogChev');
+    if (erBody) erBody.style.display = 'block';
+    if (erChev) erChev.style.transform = 'rotate(0deg)';
 
-    if (fDate  && call.date)       fDate.value      = call.date;
-    if (fNum   && call.incidentNum) fNum.value       = call.incidentNum;
-    if (fAddr  && (call.address||call.incident)) fAddr.value = _formatCadAddress(call.address || call.incident);
-    if (fAlarm && call.alarmTime)  fAlarm.value     = call.alarmTime;
-    if (fApparatus && (call.units||call.apparatus)) fApparatus.value = call.units || call.apparatus;
-    var fBox = document.getElementById('erBoxArea');
-    if (fBox && (call.boxArea||call.box)) fBox.value = call.boxArea || call.box || '';
+    // Bug 1 fix: populate all available fields
+    var fDate  = document.getElementById('erDate');
+    var fNum   = document.getElementById('erIncidentNum');
+    var fAddr  = document.getElementById('erAddress');
+    var fAlarm = document.getElementById('erAlarmTime');
+    var fBox   = document.getElementById('erBoxArea');
+    var fType  = document.getElementById('erType');
+    var fNotes = document.getElementById('erNotes');
+
+    if (fDate  && call.date)        fDate.value  = call.date;
+    if (fNum   && call.incidentNum) fNum.value   = call.incidentNum;
+    if (fAddr  && (call.address||call.incident))
+      fAddr.value = _formatCadAddress(call.address || call.incident);
+    if (fAlarm && call.alarmTime)   fAlarm.value = call.alarmTime;
+    if (fBox   && (call.boxArea||call.box)) fBox.value = call.boxArea || call.box || '';
+
+    // Incident type — match CAD type string to select option
+    if (fType && call.type) {
+      var typeStr = (call.type || '').toLowerCase();
+      var matched = false;
+      for (var oi = 0; oi < fType.options.length; oi++) {
+        var opt = fType.options[oi].value.toLowerCase();
+        if (opt && (typeStr.indexOf(opt) >= 0 || opt.indexOf(typeStr.split(' ')[0]) >= 0)) {
+          fType.selectedIndex = oi;
+          matched = true;
+          break;
+        }
+      }
+      // If no match, populate notes with the raw type
+      if (!matched && fNotes) {
+        fNotes.value = 'CAD Type: ' + call.type + (fNotes.value ? '\n' + fNotes.value : '');
+      }
+    }
+
+    // Bug 1 fix: pre-check unit checkboxes instead of writing to non-existent erApparatus input
+    var callUnits = _parseCadUnits(call.units || call.apparatus || '');
+    if (callUnits.length) {
+      // First uncheck all units
+      document.querySelectorAll('#erApparatusGrid input[type=checkbox]').forEach(function(cb) {
+        cb.checked = false;
+        var lbl = cb.closest('label');
+        if (lbl) { lbl.style.background = '#1E1E1E'; lbl.style.borderColor = '#333'; }
+      });
+      // Check units that appear in the CAD call
+      callUnits.forEach(function(cu) {
+        var cuClean = cu.toLowerCase().replace(/[-\s]/g, '');
+        Object.keys(UNIT_LABELS).forEach(function(uid) {
+          var lbl = (UNIT_LABELS[uid] || '').toLowerCase().replace(/[-\s]/g, '');
+          var uidClean = uid.toLowerCase().replace(/[-\s]/g, '');
+          if (uidClean === cuClean || lbl === cuClean ||
+              cuClean.indexOf(uidClean) >= 0 || uidClean.indexOf(cuClean) >= 0) {
+            var cb = document.getElementById('unit_' + uid);
+            if (cb) {
+              cb.checked = true;
+              var labelEl = cb.closest('label');
+              if (labelEl) { labelEl.style.background = 'rgba(200,16,46,0.12)'; labelEl.style.borderColor = '#C8102E'; }
+            }
+          }
+        });
+      });
+    }
 
     // Scroll to the form
-    var form = document.getElementById('erDate');
-    if (form) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
+    var logCard = document.getElementById('erLogCard');
+    if (logCard) logCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     showToast('\uD83D\uDCDF CAD call loaded — verify and submit');
-  }, 350);
+  }, 400);
 }
 
 function _cadCallMatchesFilter(call) {
