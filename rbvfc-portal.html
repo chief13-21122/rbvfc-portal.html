@@ -3185,8 +3185,8 @@ function testDriveConnection() {
 function uploadCertToDrive(submissionId, onComplete) {
   var s = (state.trainingSubmissions||[]).find(function(x){ return x.id===submissionId; });
   if (!s || !s.cert) { if(onComplete) onComplete(false, 'No certificate attached.'); return; }
-  var url = state.sheetWebhookUrl;
-  if (!url) { if(onComplete) onComplete(false, 'Apps Script URL not configured.'); return; }
+  var url = state.cadScriptUrl || state.sheetWebhookUrl;
+  if (!url) { if(onComplete) onComplete(false, 'CAD Script URL not configured in Admin.'); return; }
   if (!state.driveFolderId) { if(onComplete) onComplete(false, 'Drive Folder ID not configured.'); return; }
   var member = (state.roster||[]).find(function(m){ return m.id===s.memberId; });
   var lastName  = member ? member.last  : 'Unknown';
@@ -3635,7 +3635,8 @@ function sendLosapReportToMember() {
   if (!member || !member.email) { showToast('\u26a0\ufe0f Member has no email address.'); return; }
   if (!state.sheetWebhookUrl) { showToast('\u26a0\ufe0f Apps Script URL not configured.'); return; }
 
-  var url = state.sheetWebhookUrl;
+  var url = state.cadScriptUrl || state.sheetWebhookUrl;
+  if (!url) { showToast('\u26a0\ufe0f CAD Script URL not configured in Admin.'); return; }
   var now = new Date();
   var yr  = now.getFullYear();
   var ytdPts  = calcMemberLOSAP(member.id, yr);
@@ -3665,10 +3666,18 @@ function sendLosapReportToMember() {
     // No Content-Type — avoids CORS preflight
     body: JSON.stringify(payload)
   })
-  .then(function(){
-    showToast('\u2705 Report sent to '+member.email+'!');
-    var modal = document.getElementById('sendToMemberModal');
-    if (modal) modal.remove();
+  .then(function(r){ return r.text(); })
+  .then(function(txt){
+    var d = {}; try { d = JSON.parse(txt); } catch(e){}
+    if (txt.indexOf('Connected OK') >= 0 || txt.indexOf('Unknown action') >= 0) {
+      showToast('\u26a0\ufe0f Apps Script needs redeployment with email handler.');
+    } else if (d.ok === false) {
+      showToast('\u26a0\ufe0f Send failed: '+(d.error||txt.slice(0,80)));
+    } else {
+      showToast('\u2705 Report sent to '+member.email+'!'+(d.failed?' (check inbox)':''));
+      var modal = document.getElementById('sendToMemberModal');
+      if (modal) modal.remove();
+    }
   })
   .catch(function(err){
     showToast('\u26a0\ufe0f Send failed: '+(err.message||'check Apps Script URL'));
@@ -3690,8 +3699,8 @@ function confirmSendMonthlyEmails() {
 }
 
 function checkMonthlyEmail() {
-  var url = state.sheetWebhookUrl;
-  if (!url) return;
+  var url = state.cadScriptUrl || state.sheetWebhookUrl;
+  if (!url) { showToast('\u26a0\ufe0f CAD Script URL not configured in Admin.'); return; }
   var now = new Date();
   var lastSent = state.lastMonthlyEmail ? new Date(state.lastMonthlyEmail) : null;
   // Send on the last day of the month (or first of next month) if not sent this month
@@ -3736,8 +3745,19 @@ function sendMonthlyEmails() {
     // No Content-Type — avoids CORS preflight
     body: JSON.stringify({ action: 'sendEmails', emails: emails })
   })
-  .then(function(){ state.lastMonthlyEmailMonth = monthKey; save(); updateMonthlyEmailStatus(); showToast('✅ Monthly reports sent to '+_n+' member(s)!'); })
-  .catch(function(err){ showToast('⚠️ Email send failed: '+(err.message||'check Apps Script URL')); });
+  .then(function(r){ return r.text(); })
+  .then(function(txt){
+    var d = {}; try { d = JSON.parse(txt); } catch(e){}
+    if (txt.indexOf('Connected OK') >= 0 || txt.indexOf('Unknown action') >= 0) {
+      showToast('\u26a0\ufe0f Apps Script needs redeployment with email handler. See Admin \u2192 CAD Script.');
+    } else if (d.ok === false) {
+      showToast('\u26a0\ufe0f Email failed: '+(d.error||txt.slice(0,80)));
+    } else {
+      state.lastMonthlyEmailMonth = monthKey; save(); updateMonthlyEmailStatus();
+      showToast('\u2705 Monthly reports sent to '+_n+' member(s)!'+(d.failed?' ('+d.failed+' failed)':''));
+    }
+  })
+  .catch(function(err){ showToast('\u26a0\ufe0f Email send failed: '+(err.message||'check Apps Script URL')); });
   if (!state.lastMonthlyEmailMonth) { state.lastMonthlyEmailMonth = monthKey; save(); }
 }
 
