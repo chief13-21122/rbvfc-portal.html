@@ -9574,22 +9574,12 @@ var _rejectPending = null; // {type, id, name}
 
 
 function switchApprovalTab(tab) {
-  var tabs = ['training','drill','losap','history'];
-  var containers = {
-    training: 'approvalTrainingContainer',
-    drill:    'approvalDrillContainer',
-    losap:    'approvalLosapContainer',
-    history:  'approvalHistoryContainer'
-  };
-  tabs.forEach(function(t) {
-    var btn = document.getElementById('atab-'+t);
-    var cont = document.getElementById(containers[t]);
+  ['training','drill','losap','history'].forEach(function(t) {
+    var pane = document.getElementById('approvalPane-'+t);
+    var btn  = document.getElementById('atab-'+t);
     var active = (t === tab);
-    if (btn) {
-      btn.style.background = active ? '#C8102E' : '#111';
-      btn.style.color = active ? '#FFF' : '#AAA';
-    }
-    if (cont) cont.style.display = active ? 'block' : 'none';
+    if (pane) pane.style.display = active ? 'block' : 'none';
+    if (btn)  { btn.style.background = active ? '#C8102E' : '#111'; btn.style.color = active ? '#FFF' : '#AAA'; }
   });
 }
 
@@ -9697,17 +9687,22 @@ function renderApprovalTraining(canAct) {
     return;
   }
   container.innerHTML = subs.map(function(s) {
-    var mem  = (state.roster||[]).find(function(x){ return x.id===s.memberId; });
-    var mLine = _memberLine(mem) || s.memberId;
-    var subDate = s.submitted ? new Date(s.submitted).toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'}) : '';
-    var meta = mLine+' &nbsp;·&nbsp; '+s.date+' &nbsp;·&nbsp; '+s.hours+'h &nbsp;·&nbsp; <strong style="color:#F0F0F0;">'+s.pts+' pts</strong>';
+    // Support both new format (memberId/pts/name) and legacy format (userId/points/type/description)
+    var _mid = s.memberId || s.userId;
+    var _pts = s.pts != null ? s.pts : (s.points != null ? s.points : 0);
+    var _title = s.name || s.courseName || s.description || s.certName || 'Training';
+    var _submitDate = s.submitted || s.submittedAt || '';
+    var mem  = (state.roster||[]).find(function(x){ return x.id===_mid; });
+    var mLine = _memberLine(mem) || _mid || '—';
+    var subDate = _submitDate ? new Date(_submitDate).toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'}) : '';
+    var meta = mLine+' &nbsp;·&nbsp; '+(s.date||'')+(s.hours?' &nbsp;·&nbsp; '+s.hours+'h':'')+' &nbsp;·&nbsp; <strong style="color:#F0F0F0;">'+_pts+' pts</strong>';
     var sub  = [s.classNum?'Course #: '+s.classNum:'', s.provider?'Provider: '+s.provider:'', subDate?'Submitted: '+subDate:''].filter(Boolean).join(' &nbsp;·&nbsp; ');
     return _approvalCard({
-      title: s.name||s.courseName||'Training',
+      title: _title,
       meta: meta, sub: sub, notes: s.notes||'',
       certData: s.cert||'', certName: s.certName||'', certMime: s.certMime||'',
       canAct: canAct,
-      approveLabel: 'Approve (+'+s.pts+' pts)',
+      approveLabel: 'Approve (+'+_pts+' pts)',
       approveFn: 'approveTrainingFromApprovals',
       rejectFn:  'openRejectModal_training',
       dataId: s.id,
@@ -15421,7 +15416,7 @@ function applyBulkEdit() {
     
 
     <!-- ══════════════ APPROVALS TAB ══════════════ -->
-    <div id="section-history" class="section" style="display:none;">
+    <div id="section-history" class="section">
 
       <!-- Training History -->
       <div class="card">
@@ -15469,9 +15464,9 @@ function applyBulkEdit() {
 
       <!-- Panes -->
       <div id="approvalPane-training"><div id="approvalTrainingContainer"></div></div>
-      <div id="approvalPane-drill"    style="display:none;"><div id="approvalDrillContainer"></div></div>
-      <div id="approvalPane-losap"    style="display:none;"><div id="approvalLosapContainer"></div></div>
-      <div id="approvalPane-history"  style="display:none;"><div id="approvalHistoryContainer"></div></div>
+      <div id="approvalPane-drill"><div id="approvalDrillContainer"></div></div>
+      <div id="approvalPane-losap"><div id="approvalLosapContainer"></div></div>
+      <div id="approvalPane-history"><div id="approvalHistoryContainer"></div></div>
 
     </div><!-- end section-approvals -->
 
