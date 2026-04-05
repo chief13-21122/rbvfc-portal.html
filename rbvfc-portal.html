@@ -4594,7 +4594,7 @@ function applyUserSession(m) {
   var isOfficer=m.appRole==='officer'||m.appRole==='admin';
   var mab=document.getElementById('moreAdminBtn'); if(mab) mab.style.display=isOfficer?'block':'none';
   var ahb=document.getElementById('adminHeaderBtn'); if(ahb) ahb.style.display=isOfficer?'inline-flex':'none';
-  var sub=document.getElementById('switchUserBtn'); if(sub) sub.style.display=isOfficer?'inline-flex':'none';
+  var sub=document.getElementById('switchUserBtn'); if(sub) sub.style.display=(m.appRole==='admin')?'inline-flex':'none';
   var abt=document.getElementById('tab-approvals'); if(abt) abt.style.display=isOfficer?'inline-flex':'none';
   updateApprovalsBadge();
   var tt=document.getElementById('tab-training'); if(tt) tt.style.display='inline-flex';
@@ -6416,12 +6416,7 @@ function renderStaffingBoard() {
         var isPastTime = date === localDateStr() && new Date().getHours() >= 20;
         var _elig = member ? checkStaffingEligibility(member, uId, posName) : { eligible:false, code:'NO_MEMBER', reason:'' };
         // Same-unit rule: member may not hold multiple positions on the same unit simultaneously
-        var hasSameUnitConflict = (state.staffingShifts||[]).some(function(s){
-          return s.date===date && s.unitId===uId && s.memberId===uid &&
-                 s.positionIndex !== posIdx &&
-                 _shiftsOverlap(s.shiftStart||'0700', s.shiftHours||24, _nextStart||'0700', _remHours||24);
-        });
-        var canSignUp = !hasConflict && !adminRestricted && !isPastDate && !isPastTime && _elig.eligible && !alreadyHaveSlot && !isFullyCovered && !hasSameUnitConflict;
+        var canSignUp = !hasConflict && !adminRestricted && !isPastDate && !isPastTime && _elig.eligible && !alreadyHaveSlot && !isFullyCovered;
 
         // Pre-fill values for the Sign Up modal
         var _nextStart = nextOpenStart() || '0700';
@@ -6533,12 +6528,6 @@ function renderStaffingBoard() {
                + 'letter-spacing:0.5px;flex-shrink:0;">'+_btnLabel+'</button>';
         } else if (!canSignUp && !isFullyCovered && !alreadyHaveSlot) {
           // Show why blocked
-          if (hasSameUnitConflict) {
-            html += '<div style="display:inline-flex;align-items:center;gap:6px;background:#1A0A00;border:1px solid #3A2A00;border-radius:6px;padding:5px 10px;">'
-                  + '<span style="font-size:13px;">\u26d4</span>'
-                  + '<div style="font-size:11px;color:#F5A623;line-height:1.3;">Already staffed on this unit — one position per unit only</div>'
-                  + '</div>';
-          }
           var _bIco = {'BANNED_RANK':'\u26d4','RIDE_REPORT':'\ud83d\udecb','MIN_RANK':'\ud83c\udfc5','REQ_CERT':'\ud83d\udcc4'}[_elig.code]||'\u26a0\ufe0f';
           if (!_elig.eligible) {
             html += '<div style="display:inline-flex;align-items:center;gap:6px;background:#1A0A0A;border:1px solid #3A1A1A;border-radius:6px;padding:5px 10px;">'
@@ -6839,12 +6828,11 @@ function confirmSignUp() {
   var _overlapSh = _memberHasOverlappingShift(uid, date, start, hours);
   if (_overlapSh) {
     var _oUnit = (UNIT_LABELS&&UNIT_LABELS[_overlapSh.unitId]) || _overlapSh.unitId;
-    if (_overlapSh.unitId === unitId) {
-      showToast('\u26d4 Already signed up for ' + (_overlapSh.position||'a position') + ' on ' + _oUnit + '. One position per unit only.');
-    } else {
-      showToast('\u26a0\ufe0f Conflict: already on '+ _oUnit +' during that time.');
+    if (_overlapSh.unitId !== unitId) {
+      // Only block cross-unit conflicts — multiple positions on same unit now allowed
+      showToast('\u26a0\ufe0f Conflict: already signed up for ' + _oUnit + ' during that time.');
+      return;
     }
-    return;
   }
   if (!Array.isArray(state.staffingShifts)) state.staffingShifts = [];
   var newShift = {
@@ -10789,7 +10777,7 @@ function launchApp(member) {
   var switchBtn = document.getElementById('switchUserBtn');
   var moreAdminBtn = document.getElementById('moreAdminBtn');
   if (adminBtn) adminBtn.style.display = isOfficer ? 'inline-block' : 'none';
-  if (switchBtn) switchBtn.style.display = isOfficer ? 'inline-block' : 'none';
+  if (switchBtn) switchBtn.style.display = isAdmin ? 'inline-block' : 'none';
   if (moreAdminBtn) moreAdminBtn.style.display = isOfficer ? '' : 'none';
 
   // Show clock as default tab
@@ -12699,7 +12687,7 @@ function renderPublicView() {
 
   // 4-column grid: Today | Tomorrow | Responses | On Duty
   h += '<div style="display:grid;grid-template-columns:1fr 1fr 1.5fr 1fr 0.9fr;gap:0;flex:1;overflow:hidden;">';
-  h += buildPublicStaffingCol(todayStr, now, openSessions, "TODAY\'S STAFFING", '#C8102E', true);
+  h += buildPublicStaffingCol(todayStr, now, openSessions, "STAFFING", '#C8102E', true);
   h += buildPublicStaffingCol(tomorrowStr, tomorrowObj, openSessions, "TOMORROW\'S STAFFING", '#F5A623', false);
   h += buildPublicCombinedRespondersCol(yr, todayStr);
   h += buildPublicOnDutyColTV(openSessions, todayStr, positionClockedIn);
@@ -14896,7 +14884,7 @@ function applyBulkEdit() {
       <div class="card">
         <div class="card-header">
           <div class="icon">🚒</div>
-          <h2>Today's Staffing</h2>
+          <h2>Staffing</h2>
           <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
             <button class="btn btn-sm btn-secondary" onclick="staffingDatePrev()">◀</button>
             <input type="date" id="staffingDate" onchange="renderStaffingBoard()" style="background:#111;border:1px solid #333;color:#F0F0F0;border-radius:6px;padding:4px 8px;font-size:12px;">
