@@ -11238,7 +11238,7 @@ function renderCompanyLOSAP() {
 
   container.innerHTML = '<div style="overflow-x:auto;"><table class="data-table"><thead><tr>' +
     '<th style="width:36px;text-align:center;">#</th>' +
-    '<th>Member</th><th>Rank</th>' +
+    '<th>Member</th><th>Position / Rank</th>' +
     '<th style="text-align:center;">Points</th>' +
     '<th style="text-align:center;">Hours</th>' +
     '<th style="text-align:center;">Calls</th>' +
@@ -11249,6 +11249,18 @@ function renderCompanyLOSAP() {
       var pos = i + 1;
       var m   = row.member;
       var ranks = (m.ranks&&m.ranks.length) ? m.ranks : (m.rank ? [m.rank] : []);
+      // Build Position/Rank display: elected positions first, then ranks (deduped), fallback to memberType
+      var _losapPos  = (m.losapPositions&&m.losapPositions.length) ? m.losapPositions.filter(function(p){
+        // Only show elected officer titles — exclude committee roles from this column
+        return !LOSAP_CHAIR_TITLES.some(function(t){ return p.toLowerCase().indexOf(t.toLowerCase())>=0; }) &&
+               !LOSAP_MEMBER_TITLES.some(function(t){ return p.toLowerCase().indexOf(t.toLowerCase())>=0; });
+      }) : [];
+      var _rankParts = [];
+      if (_losapPos.length) _rankParts = _rankParts.concat(_losapPos);
+      ranks.forEach(function(r){ if (r && _losapPos.indexOf(r)<0) _rankParts.push(r); });
+      var _posRankText = _rankParts.length
+        ? _rankParts.join(' · ')
+        : (m.memberType ? m.memberType : '—');
       var qualified = row.pts >= 50;
       var p = pos <= 3 ? podium[pos] : null;
 
@@ -11281,7 +11293,7 @@ function renderCompanyLOSAP() {
 
       return '<tr style="'+rowStyle+'">'+numCell+
         '<td style="font-weight:'+(p?'700':'600')+';color:'+(p?p.nameColor:'#F0F0F0')+';">'+m.last+', '+m.first+'</td>'+
-        '<td style="color:#AAA;font-size:12px;">'+ranks.join(' / ')+'</td>'+
+        '<td style="color:#AAA;font-size:12px;">'+_posRankText+'</td>'+
         ptsCell+
         '<td style="text-align:center;color:#AAA;">'+(row.hours||0).toFixed(1)+'</td>'+
         '<td style="text-align:center;color:#AAA;">'+row.responses+'</td>'+
