@@ -2078,6 +2078,105 @@ function showLosapPointsBanner(notif) {
   );
 }
 
+
+function _hasLosapAutoEntry(memberId, category, date, sourceId) {
+  return (state.losapActivities||[]).some(function(a) {
+    return a.memberId===memberId && a.category===category && a.date===date
+           && (a.sourceId===sourceId || !sourceId);
+  });
+}
+
+function _autoAwardLosap(memberId, category, date, desc, sourceId) {
+  if (_hasLosapAutoEntry(memberId, category, date, sourceId)) return; // no double-award
+  var catCfg = (typeof CAT_CONFIG!=='undefined' && CAT_CONFIG[category]) || { pts:1 };
+  var pts = catCfg.pts || 1;
+  var act = {
+    id: 'la_auto_' + Date.now() + '_' + memberId.slice(-4),
+    memberId: memberId, category: category, date: date,
+    pts: pts, points: pts, desc: desc,
+    sourceId: sourceId || '',
+    autoAwarded: true,
+    createdAt: new Date().toISOString()
+  };
+  if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
+  state.losapActivities.unshift(act);
+  save();
+  try { _notifyLosapPoints(act); } catch(e){}
+}
+
+
+function _losapSubmitBtn(sourceType, sourceId, date, memberId, desc) {
+  // Use data-attributes to avoid quoting issues in onclick
+  var safe = function(s){ return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;'); };
+  return '<button class="_lsap-btn"'
+    + ' data-st="' + safe(sourceType)  + '"'
+    + ' data-si="' + safe(sourceId)    + '"'
+    + ' data-dt="' + safe(date)        + '"'
+    + ' data-mb="' + safe(memberId)    + '"'
+    + ' data-ds="' + safe(desc)        + '"'
+    + ' style="font-size:9px;padding:1px 6px;background:#1A1000;border:1px solid #555;'
+    + 'color:#AAA;border-radius:3px;cursor:pointer;white-space:nowrap;">Submit LOSAP</button>';
+}
+
+function submitAttendanceLosap(sourceType, sourceId, date, memberId, desc) {
+  // sourceType: 'meeting' | 'event'
+  if (_hasLosapAutoEntry(memberId, sourceType==='meeting'?'meeting':'fundraiser', date, sourceId)) {
+    showToast('\u2139\ufe0f LOSAP already awarded for this member.'); return;
+  }
+  var existing = (state.losapPending||[]).find(function(p){
+    return p.sourceId===sourceId && p.occurrenceDate===date && p.memberId===memberId && p.status==='pending';
+  });
+  if (existing) { showToast('\u2139\ufe0f Already pending approval.'); return; }
+  if (!Array.isArray(state.losapPending)) state.losapPending = [];
+  var category = sourceType==='meeting' ? 'meeting' : 'fundraiser';
+  var catCfg = (typeof CAT_CONFIG!=='undefined' && CAT_CONFIG[category]) || { pts:1 };
+  var pending = {
+    id: 'lp_att_' + Date.now(),
+    status: 'pending',
+    memberId: memberId,
+    submittedBy: state.currentUserId,
+    submittedAt: new Date().toISOString(),
+    pts: catCfg.pts || 1,
+    category: category,
+    desc: desc,
+    date: date,
+    sourceType: sourceType,
+    sourceId: sourceId,
+    occurrenceDate: date,
+    notes: 'Attendance approval — no clock-in/out recorded'
+  };
+  state.losapPending.push(pending);
+  save();
+  updateApprovalsBadge();
+  // Notify MIC/inCharge via targeted staffing alert
+  var mic = null;
+  if (sourceType === 'meeting') {
+    var mtg = (state.meetings||[]).find(function(m){ return m.id===sourceId; });
+    if (mtg && mtg.inCharge) mic = mtg.inCharge;
+  } else {
+    var ev = (state.specialEvents||[]).find(function(e){ return e.id===sourceId; });
+    if (ev && ev.inCharge) mic = ev.inCharge;
+  }
+  if (mic && mic !== state.currentUserId) {
+    var mem = (state.roster||[]).find(function(x){ return x.id===memberId; });
+    var memName = mem ? mem.last+', '+mem.first : 'A member';
+    if (!Array.isArray(state.staffingAlerts)) state.staffingAlerts = [];
+    state.staffingAlerts.push({
+      id: 'alert_mic_' + Date.now(),
+      msg: memName + ' needs LOSAP approval for: ' + desc,
+      sentBy: state.currentUserId,
+      sentAt: new Date().toISOString(),
+      group: 'individual',
+      targetMembers: [mic],
+      clears: []
+    });
+    save();
+    sendPushToMembers([mic], '\uD83C\uDFC5 LOSAP Approval Needed', memName + ' — ' + desc);
+  }
+  var recipient = (state.roster||[]).find(function(x){ return x.id===memberId; });
+  showToast('\u23f3 Submitted for approval — ' + (recipient ? recipient.last+', '+recipient.first : 'member'));
+}
+
 function _notifyLosapPoints(act) {
   if (!act || !act.memberId) return;
   if (!Array.isArray(state.losapNotifications)) state.losapNotifications = [];
@@ -8231,8 +8330,14 @@ function clockOutSpecialEvent(elOrId) {
   if (!signup) return;
   signup.clockedIn = false;
   signup.clockedOutAt = new Date().toISOString();
+  // Auto-award LOSAP if both clock-in and clock-out recorded
+  if (signup.clockedInAt && signup.clockedOutAt) {
+    var _evDate = ev.date || new Date().toISOString().slice(0,10);
+    var _evDesc = ev.title + ' — attendance';
+    try { _autoAwardLosap(uid, 'fundraiser', _evDate, _evDesc, evId); } catch(e){}
+  }
   save(); renderBothSpecialEventViews();
-  showToast('⏹ Clocked out of '+ev.title+'.');
+  showToast('\u23f9 Clocked out of '+ev.title+'. LOSAP point awarded!');
 }
 
 // Officer: create/delete special events
@@ -8502,9 +8607,15 @@ function clockOutMeeting(mtgId, occurrenceDate) {
     }
     try{updateClockUI(false);}catch(e){} try{updateClockStats();}catch(e){}
   }
+  // Auto-award LOSAP if both clock-in and clock-out recorded
+  if (att && att.clockedInAt && att.clockedOutAt) {
+    var _mtgDate = occurrenceDate || att.date;
+    var _mtgDesc = (mtg ? mtg.title : 'Company Meeting') + ' — attendance';
+    try { _autoAwardLosap(uid, 'meeting', _mtgDate, _mtgDesc, mtgId); } catch(e){}
+  }
   save();
   try { renderMyShifts(); } catch(e){}
-  showToast('\u23f9 Clocked out of ' + (mtg?mtg.title:'meeting') + '.');
+  showToast('\u23f9 Clocked out of ' + (mtg?mtg.title:'meeting') + '. LOSAP point awarded!');
 }
 
 
@@ -8718,10 +8829,40 @@ function renderMeetingsList() {
         var names = attendees.map(function(a){
           var mbr = (state.roster||[]).find(function(m){ return m.id===a.memberId; });
           var nm = mbr ? mbr.last+', '+mbr.first : a.memberId;
-          var ci = a.clockedInAt ? ' <span style="color:#27AE60;font-size:10px;">&#10003;</span>' : '';
-          return nm + ci;
+          var hasFullClock = a.clockedInAt && a.clockedOutAt;
+          var hasClock = a.clockedInAt;
+          var awarded = _hasLosapAutoEntry(a.memberId, 'meeting', sd, mtg.id);
+          var pending = (state.losapPending||[]).some(function(p){ return p.sourceId===mtg.id&&p.occurrenceDate===sd&&p.memberId===a.memberId&&p.status==='pending'; });
+          var badge = awarded
+            ? ' <span style="color:#27AE60;font-size:10px;">&#10003; LOSAP</span>'
+            : (pending ? ' <span style="color:#F5A623;font-size:10px;">&#9203; Pending</span>'
+            : (hasClock && !hasFullClock ? ' <span style="color:#888;font-size:10px;">(no clock-out)</span>' : ''));
+          var submitBtn = (!awarded && !pending && _mOff)
+            ? _losapSubmitBtn('meeting', mtg.id, sd, a.memberId, mtg.title+' — attendance')
+            : '';
+          return nm + badge + submitBtn;
         }).join(' &nbsp;&bull;&nbsp; ');
-        return '<div style="font-size:11px;color:#888;margin-top:5px;border-top:1px solid #222;padding-top:5px;">'          +'<span style="color:#555;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:9px;">Attending ('+attendees.length+'):</span> '          +'<span style="color:#AAA;">'+names+'</span></div>';
+        // For officers: show expected members who didn't clock in at all
+        var expectedNoShow = '';
+        if (_mOff && mtg.members && Array.isArray(mtg.members)) {
+          var noShows = mtg.members.filter(function(mid){
+            return !attendees.some(function(a){ return a.memberId===mid; });
+          });
+          if (noShows.length) {
+            var nsNames = noShows.map(function(mid){
+              var mbr = (state.roster||[]).find(function(m){ return m.id===mid; });
+              var nm = mbr ? mbr.last+', '+mbr.first : mid;
+              var awarded = _hasLosapAutoEntry(mid, 'meeting', sd, mtg.id);
+              var pending = (state.losapPending||[]).some(function(p){ return p.sourceId===mtg.id&&p.occurrenceDate===sd&&p.memberId===mid&&p.status==='pending'; });
+              var submitBtn = (!awarded && !pending)
+                ? _losapSubmitBtn('meeting', mtg.id, sd, mid, mtg.title+' — attendance')
+                : (pending ? ' <span style="color:#F5A623;font-size:9px;">&#9203;</span>' : ' <span style="color:#27AE60;font-size:9px;">&#10003;</span>');
+              return nm + submitBtn;
+            }).join(' &nbsp;&bull;&nbsp; ');
+            expectedNoShow = '<div style="font-size:11px;color:#666;margin-top:3px;">Expected (no clock-in): '+nsNames+'</div>';
+          }
+        }
+        return expectedNoShow + '<div style="font-size:11px;color:#888;margin-top:5px;border-top:1px solid #222;padding-top:5px;">'          +'<span style="color:#555;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:9px;">Attending ('+attendees.length+'):</span> '          +'<span style="color:#AAA;">'+names+'</span></div>';
       })()
       +(mtg.inCharge?(function(){ var _ic=(state.roster||[]).find(function(m){ return m.id===mtg.inCharge; }); return _ic?'<div style="font-size:12px;color:#F5A623;font-weight:700;margin-top:3px;">&#128100; In Charge: '+_ic.last+', '+_ic.first+'</div>':''; })():'')
       +(mtg.createdBy?(function(){ var _cb=(state.roster||[]).find(function(m){ return m.id===mtg.createdBy; }); return _cb?'<div style="font-size:11px;color:#555;margin-top:2px;">Scheduled by: '+_cb.last+', '+_cb.first+'</div>':''; })():'')
@@ -9346,7 +9487,7 @@ function renderApprovalLosap(canAct) {
     var meta = 'For: <strong style="color:#F0F0F0;">'+mLine+'</strong> &nbsp;·&nbsp; '+s.date+' &nbsp;·&nbsp; <strong style="color:#F0F0F0;">'+s.pts+' pts</strong>'+(s.hours?' &nbsp;·&nbsp; '+s.hours+'h':'');
     var sub2 = (sByName?'Submitted by '+sByName+(subDate?' on '+subDate:''):'');
     return _approvalCard({
-      title: s.desc||'LOSAP Activity',
+      title: (s.sourceType==='meeting'?'📋 Meeting LOSAP: ':(s.sourceType==='event'?'🎉 Event LOSAP: ':''))+(s.desc||'LOSAP Activity'),
       meta: meta, sub: sub2, notes: s.notes||'',
       certData:'', certName:'', certMime:'',
       canAct: canAct,
