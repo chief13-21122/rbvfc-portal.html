@@ -3089,7 +3089,7 @@ function renderTrainingReview() {
       '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">'+
         '<span style="font-size:12px;font-weight:700;color:'+statusColor+';text-transform:uppercase;letter-spacing:1px;">'+s.status+'</span>'+
         (s.cert?'<button class="btn btn-sm btn-secondary" onclick="viewCert(\''+s.id+'\')" style="font-size:11px;padding:3px 8px;">&#128196; View Cert</button>':'')+
-        (s.cert && isOfficer ? '<button class="btn btn-sm btn-secondary" data-drive-id="'+s.id+'" onclick="sendCertToDriveBtn(\''+s.id+'\')" style="font-size:11px;padding:3px 8px;background:#1A0D23;border-color:#8E44AD;color:'+(s._driveFileId?'#9B59B6':'#888')+';">'+((s._driveFileId?'\u2713 In Drive':'&#128194; Send to Drive'))+'</button>' : '')+
+        (s.cert && isOfficer ? '<button class="btn btn-sm btn-secondary" data-drive-id="'+s.id+'" onclick="sendCertToDriveBtn(\''+s.id+'\')" style="font-size:11px;padding:3px 8px;background:#1A0D23;border-color:#8E44AD;color:'+((s._driveFileId&&s._driveFileId!=='uploaded'&&s._driveLink)?'#9B59B6':'#888')+';">'+(((s._driveFileId&&s._driveFileId!=='uploaded'&&s._driveLink)?'\u2713 In Drive':'&#128194; Send to Drive'))+'</button>' : '')+
       '</div></div>';
     if (isChief && s.status==='pending') {
       html += '<div style="display:flex;gap:8px;margin-top:12px;">'+
@@ -3207,15 +3207,23 @@ function uploadCertToDrive(submissionId, onComplete) {
       memberName:lastName+', '+firstName, courseName:s.name, date:s.date })
   })
   .then(function(r){ return r.text(); })
+  .then(function(r){ return r.text(); })
   .then(function(text){
-    var d = {}; try { d = JSON.parse(text); } catch(e) { d = { ok: true }; }
-    if (d.ok !== false) {
-      s._driveFileId = d.fileId||'uploaded'; s._driveLink = d.fileUrl||'';
+    // Detect non-JSON "Connected OK" — script not yet redeployed with uploadCert handler
+    if (text.indexOf('Connected OK') >= 0 || text.indexOf('Unknown action') >= 0) {
+      if (onComplete) onComplete(false, 'Apps Script needs redeployment — uploadCert handler missing.');
+      return;
+    }
+    var d = {}; try { d = JSON.parse(text); } catch(e) { d = { ok: false, error: 'Bad response: '+text.slice(0,80) }; }
+    if (d.ok !== false && d.fileId) {
+      s._driveFileId = d.fileId; s._driveLink = d.fileUrl||'';
       s._driveUploaded = new Date().toISOString();
       state._driveLastUpload = s._driveUploaded;
       save(); renderTrainingReview(); updateDriveStatusPanel('ok');
       if (onComplete) onComplete(true, d.fileUrl||'');
-    } else { if(onComplete) onComplete(false, d.error||'Upload failed.'); }
+    } else {
+      if (onComplete) onComplete(false, d.error||'Upload failed — check Drive Folder ID and script permissions.');
+    }
   })
   .catch(function(err){ if(onComplete) onComplete(false, err.message||'Network error.'); });
 }
