@@ -1680,30 +1680,29 @@ function initEmergencyTab() {
   var apparatusGrid = document.getElementById('erApparatusGrid');
   if (apparatusGrid && !apparatusGrid.dataset.built) {
     apparatusGrid.dataset.built = '1';
-    var activeU = getActiveUnits();
     Object.keys(UNIT_LABELS).forEach(function(u) {
       var lbl = UNIT_LABELS[u];
-      var checked = activeU.indexOf(u) > -1;
       var btn = document.createElement('label');
       btn.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;background:#1E1E1E;border:1px solid #333;border-radius:7px;padding:8px 12px;transition:background .15s;user-select:none;';
-      btn.innerHTML = '<input type="checkbox" id="unit_'+u+'" value="'+u+'"'+(checked?' checked':'')+' style="accent-color:#C8102E;width:15px;height:15px;cursor:pointer;flex-shrink:0;">'
+      btn.innerHTML = '<input type="checkbox" id="unit_'+u+'" value="'+u+'" style="accent-color:#C8102E;width:15px;height:15px;cursor:pointer;flex-shrink:0;">'
         + '<span style="font-size:13px;font-weight:600;color:#F0F0F0;">'+lbl+'</span>';
-      // Highlight label when checked
       var cb2 = btn.querySelector('input');
       function updateStyle() {
         btn.style.background = cb2.checked ? 'rgba(200,16,46,0.12)' : '#1E1E1E';
         btn.style.borderColor = cb2.checked ? '#C8102E' : '#333';
       }
-      updateStyle();
       cb2.addEventListener('change', updateStyle);
       apparatusGrid.appendChild(btn);
     });
   } else {
-    // Already built — just update checked state
-    var activeU = getActiveUnits();
+    // Re-visit: clear all unit checkboxes — member selects which units responded fresh each time
     Object.keys(UNIT_LABELS).forEach(function(u) {
       var cb = document.getElementById('unit_'+u);
-      if (cb) cb.checked = activeU.indexOf(u) > -1;
+      if (cb) {
+        cb.checked = false;
+        var lbl = cb.closest('label');
+        if (lbl) { lbl.style.background = '#1E1E1E'; lbl.style.borderColor = '#333'; }
+      }
     });
   }
 
@@ -1835,7 +1834,7 @@ function saveEmergencyResponse() {
   if (!date||!addr) { showToast('⚠️ Date and address are required.'); return; }
 
   // Get selected units
-  var units = (function(){ var sel=UNITS.filter(function(u){var cb=document.getElementById('unit_'+u);return cb&&cb.checked;}); return sel.length ? sel : getDefaultApparatus(); })();
+  var units = UNITS.filter(function(u){var cb=document.getElementById('unit_'+u);return cb&&cb.checked;});
   if (units.length===0) { showToast('⚠️ Select at least one responding unit.'); return; }
 
   // Get selected members (manually checked)
@@ -9695,7 +9694,8 @@ function updateApprovalsBadge() {
   if (!m || (m.appRole!=='officer' && m.appRole!=='admin')) return;
   var pendingTraining = (state.trainingSubmissions||[]).filter(function(s){ return s.status==='pending'; }).length;
   var pendingLosap = (state.losapPending||[]).filter(function(s){ return s.status==='pending'; }).length;
-  var pending = pendingTraining + pendingLosap;
+  var pendingER = (state.emergencyResponses||[]).filter(function(r){ return !r.approvedBy; }).length;
+  var pending = pendingTraining + pendingLosap + pendingER;
   // Update badge inside Approvals button in More sheet
   var badge = document.getElementById('approvalsBadge');
   if (badge) {
@@ -9717,7 +9717,7 @@ var _rejectPending = null; // {type, id, name}
 
 
 function switchApprovalTab(tab) {
-  ['training','drill','losap','history'].forEach(function(t) {
+  ['training','drill','losap','er','history'].forEach(function(t) {
     var pane = document.getElementById('approvalPane-'+t);
     var btn  = document.getElementById('atab-'+t);
     var active = (t === tab);
@@ -9740,6 +9740,7 @@ function initApprovalsTab() {
   renderApprovalTraining(canApproveTraining);
   renderApprovalDrills(canApproveDrills);
   renderApprovalLosap(canApproveLosap);
+  renderApprovalER(isOfficer);
   renderApprovalHistory();
   // Init tab display — show Training tab by default
   switchApprovalTab('training');
@@ -9763,12 +9764,14 @@ function renderApprovalsSummary(canApproveTraining, canApproveDrills, canApprove
   var pendingTraining = (state.trainingSubmissions||[]).filter(function(s){ return s.type!=='drill'&&s.status==='pending'; }).length;
   var pendingDrills   = (state.trainingSubmissions||[]).filter(function(s){ return s.type==='drill'&&s.status==='pending'; }).length;
   var pendingLosap    = (state.losapPending||[]).filter(function(s){ return s.status==='pending'; }).length;
-  var total = pendingTraining + pendingDrills + pendingLosap;
+  var pendingER       = (state.emergencyResponses||[]).filter(function(r){ return !r.approvedBy; }).length;
+  var total = pendingTraining + pendingDrills + pendingLosap + pendingER;
 
   var items = [
     { label:'Training', count: pendingTraining, color:'#2980B9', show: true },
     { label:'Drills',   count: pendingDrills,   color:'#8E44AD', show: true },
-    { label:'LOSAP',    count: pendingLosap,     color:'#D4A017', show: true }
+    { label:'LOSAP',    count: pendingLosap,     color:'#D4A017', show: true },
+    { label:'Responses',count: pendingER,        color:'#E67E22', show: true }
   ];
   bar.innerHTML = (total === 0
     ? '<div style="width:100%;text-align:center;padding:12px;background:#1A1A1A;border:1px solid #2A2A2A;border-radius:10px;color:#27AE60;font-size:13px;font-weight:700;">✅ All caught up — no pending approvals</div>'
@@ -9921,6 +9924,54 @@ function renderApprovalLosap(canAct) {
       waitMsg: 'Awaiting Fire Chief or President approval'
     });
   }).join('');
+}
+
+function renderApprovalER(canAct) {
+  var container = document.getElementById('approvalERContainer');
+  var badge     = document.getElementById('approvalERBadge');
+  if (!container) return;
+
+  // Pending = logged by a non-officer member (approvedBy is null)
+  var pending = (state.emergencyResponses||[]).filter(function(r){ return !r.approvedBy; });
+  if (badge) {
+    badge.textContent = pending.length || '';
+    badge.style.display = pending.length ? 'inline' : 'none';
+  }
+
+  if (!canAct) {
+    container.innerHTML = '<p style="color:#555;font-size:13px;padding:12px;">Officers and admins only.</p>';
+    return;
+  }
+  if (!pending.length) {
+    container.innerHTML = '<p style="color:#555;font-size:13px;text-align:center;padding:20px;">No emergency responses pending approval.</p>';
+    return;
+  }
+
+  var html = '';
+  pending.forEach(function(r) {
+    var memberNames = (r.members||[]).map(function(mid){
+      var m=(state.roster||[]).find(function(x){return x.id===mid;});
+      return m ? m.last+', '+m.first : mid;
+    }).join('; ');
+    var unitStr = (r.units||[]).map(function(u){ return UNIT_LABELS[u]||u; }).join(', ');
+    html += '<div style="background:#111;border:1px solid #2A2A2A;border-left:3px solid #E67E22;border-radius:8px;padding:12px;margin-bottom:10px;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">'
+      +   '<div style="flex:1;min-width:0;">'
+      +     '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">🚒 ' + (r.address||'(no address)') + '</div>'
+      +     '<div style="font-size:11px;color:#888;margin-top:3px;">'
+      +       (r.date||'') + (r.incidentNum ? ' · #'+r.incidentNum : '') + (unitStr ? ' · '+unitStr : '')
+      +     '</div>'
+      +     '<div style="font-size:11px;color:#AAA;margin-top:4px;">Members: ' + (memberNames||'—') + '</div>'
+      +     (r.enteredByName ? '<div style="font-size:10px;color:#555;margin-top:2px;">Logged by: '+r.enteredByName+'</div>' : '')
+      +   '</div>'
+      +   '<div style="display:flex;gap:6px;flex-shrink:0;">'
+      +     '<button onclick="approveResponse(\''+r.id+'\')" style="background:#0A2A0A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">✓ Approve</button>'
+      +     '<button onclick="deleteResponse(\''+r.id+'\')" style="background:#2A0A0A;border:1px solid #555;color:#888;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">🗑</button>'
+      +   '</div>'
+      + '</div>'
+      + '</div>';
+  });
+  container.innerHTML = html;
 }
 
 function renderApprovalHistory() {
@@ -13997,6 +14048,8 @@ function approveResponse(responseId) {
   r.approvedAt = new Date().toISOString();
   save();
   renderEmergencyResponses();
+  try { renderApprovalER(true); } catch(e){}
+  updateApprovalsBadge();
   showToast('\u2705 Response approved.');
 }
 
@@ -15654,6 +15707,11 @@ function applyBulkEdit() {
           🏅 LOSAP
           <span id="approvalLosapBadge" style="display:none;position:absolute;top:4px;right:4px;background:#C8102E;color:#FFF;font-size:9px;font-weight:900;border-radius:8px;padding:1px 5px;"></span>
         </button>
+        <button id="atab-er" onclick="switchApprovalTab('er')"
+          style="flex:1;padding:10px 6px;background:#111;border:none;border-left:1px solid #2A2A2A;color:#AAA;font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;position:relative;">
+          🚒 Responses
+          <span id="approvalERBadge" style="display:none;position:absolute;top:4px;right:4px;background:#C8102E;color:#FFF;font-size:9px;font-weight:900;border-radius:8px;padding:1px 5px;"></span>
+        </button>
         <button id="atab-history" onclick="switchApprovalTab('history')" 
           style="flex:1;padding:10px 6px;background:#111;border:none;border-left:1px solid #2A2A2A;color:#AAA;font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;">
           📋 History
@@ -15662,6 +15720,7 @@ function applyBulkEdit() {
 
       <!-- Panes -->
       <div id="approvalPane-training"><div id="approvalTrainingContainer"></div></div>
+      <div id="approvalPane-er"><div id="approvalERContainer"></div></div>
       <div id="approvalPane-drill"><div id="approvalDrillContainer"></div></div>
       <div id="approvalPane-losap"><div id="approvalLosapContainer"></div></div>
       <div id="approvalPane-history"><div id="approvalHistoryContainer"></div></div>
