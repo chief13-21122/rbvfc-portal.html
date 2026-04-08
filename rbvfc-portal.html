@@ -8398,15 +8398,12 @@ function checkStaffingReminders() {
   var hour  = new Date().getHours();
   var now   = new Date();
 
-  var alreadyClocked = (state.currentSession && state.currentSession.userId === uid && !state.currentSession.end) ||
-    (state.sessions||[]).some(function(ss){ return ss.userId === uid && !ss.end; });
+  var alreadyClocked = !!(state.currentSession && state.currentSession.userId === uid && !state.currentSession.end);
 
   // ── Duty session over-time warning + auto-clock-out ──────────────────
   if (alreadyClocked) {
-    // Find the open session for this user
-    var openSess = state.currentSession && !state.currentSession.end && state.currentSession.userId === uid
-      ? state.currentSession
-      : (state.sessions||[]).find(function(ss){ return ss.userId === uid && !ss.end; });
+    // ONLY check state.currentSession — never stale entries in state.sessions
+    var openSess = state.currentSession;
 
     if (openSess && openSess.start) {
       var durHrs = (now - new Date(openSess.start)) / 3600000;
@@ -8478,7 +8475,12 @@ function _showDutyOverTimeWarning(session, warnHrs, autoOutMins) {
   noBtn.textContent = '⏹ Clock out';
   noBtn.onclick = function() {
     wrap.remove();
-    clockOut();
+    // Close currentSession directly — don't call clockOut() which requires state.currentSession
+    if (state.currentSession && !state.currentSession.end) {
+      clockOut();
+    } else {
+      showToast('⏹ Session already ended.');
+    }
   };
   btnRow.appendChild(yesBtn); btnRow.appendChild(noBtn);
   wrap.appendChild(inner);
