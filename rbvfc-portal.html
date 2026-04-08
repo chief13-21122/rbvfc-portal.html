@@ -733,6 +733,8 @@ function _mergeAndRender(remote) {
     try { startCadAutoSync(); } catch(e){}
   }
   try { cleanBadLosapActivities(); } catch(e){}
+  // Start clocked-in reminder poller
+  try { startClockedInReminderPoller(); } catch(e){}
   // Reprocess any pending CAD calls now that staffing data may have updated
   try { reprocessPendingCadCalls(); } catch(e){}
 }
@@ -7370,6 +7372,239 @@ function notifyUnderstaffedDay(date) {
 }
 
 // ── CLOCK IN / CANCEL / REMOVE ────────────────────────────────
+
+// ───────────────────────────────────────────────────────────────
+//  CLOCK-IN REMINDER + AUTO CLOCK-OUT SYSTEM
+// ───────────────────────────────────────────────────────────────
+var _clockedInReminderInterval = null;
+var REMINDER_THRESHOLD_HRS  = 20;   // warn after 20h clocked in
+var AUTO_CLOCKOUT_GRACE_MINS = 30;  // auto-close if no ack in 30 min
+
+function startClockedInReminderPoller() {
+  if (_clockedInReminderInterval) clearInterval(_clockedInReminderInterval);
+  _clockedInReminderInterval = setInterval(checkClockedInReminders, 5 * 60 * 1000); // every 5 min
+  checkClockedInReminders(); // run immediately on load
+}
+
+function checkClockedInReminders() {
+  var uid = state.currentUserId;
+  if (!uid) return;
+
+  // Find any open session for this user
+  var openSess = (state.sessions||[]).find(function(s){ return s.userId===uid && !s.end; });
+  // Also check currentSession
+  if (!openSess && state.currentSession && state.currentSession.userId===uid && !state.currentSession.end) {
+    openSess = state.currentSession;
+  }
+  if (!openSess) {
+    // No open session — dismiss any lingering reminder banner
+    var el = document.getElementById('clockedInReminderBanner');
+    if (el) { el.style.display='none'; _adjustAppTopPad(); }
+    return;
+  }
+
+  var now    = new Date();
+  var start  = new Date(openSess.start);
+  var hrs    = (now - start) / 3600000;
+
+  // ── Auto clock-out check: was a reminder sent and not acknowledged? ───
+  if (openSess._reminderSentAt && !openSess._reminderAckedAt) {
+    var reminderAge = (now - new Date(openSess._reminderSentAt)) / 60000; // minutes
+    if (reminderAge >= AUTO_CLOCKOUT_GRACE_MINS) {
+      // Grace period expired — auto clock-out this member
+      _autoClockOutSession(openSess, 'Auto clocked out — no response to ' + AUTO_CLOCKOUT_GRACE_MINS + '-min reminder.');
+      return;
+    }
+  }
+
+  // ── Send reminder if clocked in too long ─────────────────────────────
+  if (hrs >= REMINDER_THRESHOLD_HRS && !openSess._reminderSentAt) {
+    openSess._reminderSentAt = now.toISOString();
+    save();
+    _showClockedInReminderBanner(openSess, hrs);
+  }
+
+  // ── Re-show banner if still pending ack ──────────────────────────────
+  if (openSess._reminderSentAt && !openSess._reminderAckedAt) {
+    _showClockedInReminderBanner(openSess, hrs);
+  }
+}
+
+function _showClockedInReminderBanner(sess, hrs) {
+  var hrsStr  = hrs.toFixed(1);
+  var sess2   = sess || state.currentSession;
+  var graceLeft = '';
+  if (sess2 && sess2._reminderSentAt) {
+    var minsLeft = Math.max(0, AUTO_CLOCKOUT_GRACE_MINS - (new Date() - new Date(sess2._reminderSentAt))/60000);
+    graceLeft = ' · Auto clock-out in ' + Math.ceil(minsLeft) + ' min if no response';
+  }
+  _showTopBanner(
+    'clockedInReminderBanner', '#1A0000', '#C8102E', '⏰',
+    '⏰ STILL CLOCKED IN',
+    'You have been clocked in for ' + hrsStr + 'h.' + graceLeft + ' — Are you still on duty?',
+    [
+      { label: '✅ Still On Duty',   fn: 'acknowledgeClockedInReminder()',  bg: '#27AE60', color: '#FFF', border: '#27AE60' },
+      { label: '🔴 Clock Me Out', fn: 'clockOutFromReminder()',           bg: 'transparent', color: '#C8102E', border: '#C8102E' }
+    ]
+  );
+}
+
+function acknowledgeClockedInReminder() {
+  var sess = (state.sessions||[]).find(function(s){ return s.userId===state.currentUserId && !s.end; });
+  if (!sess && state.currentSession && state.currentSession.userId===state.currentUserId) sess = state.currentSession;
+  if (sess) {
+    sess._reminderSentAt  = null;  // reset — reminder will re-fire after another REMINDER_THRESHOLD_HRS
+    sess._reminderAckedAt = null;
+    // Bump start time so reminder doesn't immediately re-fire
+    sess._lastAckAt = new Date().toISOString();
+    save();
+  }
+  var el = document.getElementById('clockedInReminderBanner');
+  if (el) { el.style.display='none'; _adjustAppTopPad(); }
+  showToast('✅ Got it — stay safe out there!');
+}
+
+function clockOutFromReminder() {
+  var el = document.getElementById('clockedInReminderBanner');
+  if (el) { el.style.display='none'; _adjustAppTopPad(); }
+  clockOut();
+}
+
+function _autoClockOutSession(sess, reason) {
+  // Close the session at the reminder-sent time (not now — be fair to the member)
+  var endTime = new Date(sess._reminderSentAt || new Date());
+  var startTime = new Date(sess.start);
+
+  sess.end = endTime.toISOString();
+  sess.duration = Math.floor((endTime - startTime) / 1000);
+  sess._autoClosedReason = reason;
+
+  // If it's the currentSession, clear it
+  if (state.currentSession && state.currentSession.id === sess.id) {
+    state.currentSession = null;
+    clearInterval(_clockTimerInterval);
+    _clockTimerInterval = null;
+    updateClockUI(false);
+  }
+
+  // Mark linked staffing shift complete
+  if (sess.shiftId) {
+    var linkedShift = (state.staffingShifts||[]).find(function(s){ return s.id===sess.shiftId; });
+    if (linkedShift) {
+      linkedShift.clockedOut   = true;
+      linkedShift.clockedOutAt = sess.end;
+      linkedShift.clockedIn    = false;
+      linkedShift.status       = 'completed';
+    }
+  }
+  save();
+
+  // Dismiss banner and notify member
+  var el = document.getElementById('clockedInReminderBanner');
+  if (el) { el.style.display='none'; _adjustAppTopPad(); }
+
+  try { renderMyShifts(); }      catch(e){}
+  try { renderRecentSessions(); } catch(e){}
+  try { updateClockStats(); }    catch(e){}
+
+  showToast('🔴 Auto clocked out after ' + AUTO_CLOCKOUT_GRACE_MINS + '-min reminder — ' + formatDuration(sess.duration));
+}
+
+// ── Reminder check override: if acked within last 20h, don't re-fire ──────
+function _shouldFireReminder(sess) {
+  if (!sess) return false;
+  if (sess._reminderSentAt && !sess._reminderAckedAt) return true; // still pending ack
+  var now = new Date();
+  var start = new Date(sess.start);
+  var hrs = (now - start) / 3600000;
+  if (hrs < REMINDER_THRESHOLD_HRS) return false;
+  // Check if acked recently (within same threshold window)
+  if (sess._lastAckAt) {
+    var ackAge = (now - new Date(sess._lastAckAt)) / 3600000;
+    if (ackAge < REMINDER_THRESHOLD_HRS) return false;
+  }
+  return true;
+}
+
+// ───────────────────────────────────────────────────────────────
+//  ADMIN: CLOCK OUT EVERYONE
+// ───────────────────────────────────────────────────────────────
+function adminClockOutAll() {
+  // Find all currently open sessions across ALL members
+  var openSessions = (state.sessions||[]).filter(function(s){ return !s.end; });
+
+  // Also gather any staffing shifts that are clocked in
+  var clockedShifts = (state.staffingShifts||[]).filter(function(s){ return s.clockedIn && !s.clockedOutAt; });
+
+  var affected = {};
+  openSessions.forEach(function(s){ if (s.userId) affected[s.userId] = true; });
+  clockedShifts.forEach(function(s){ if (s.memberId) affected[s.memberId] = true; });
+
+  var affectedIds = Object.keys(affected);
+  if (!affectedIds.length) { showToast('\u2705 No members are currently clocked in.'); return; }
+
+  // Build confirmation list
+  var names = affectedIds.slice(0,8).map(function(uid){
+    var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+    return m ? m.last+', '+m.first : uid;
+  }).join('\n') + (affectedIds.length>8 ? '\n\u2026and '+(affectedIds.length-8)+' more' : '');
+
+  if (!confirm('Clock out ' + affectedIds.length + ' member(s) NOW?\n\n' + names + '\n\nThis will immediately end all open sessions and notify affected members.')) return;
+
+  var now = new Date();
+  var nowISO = now.toISOString();
+  var count = 0;
+
+  // Close all open sessions
+  (state.sessions||[]).forEach(function(s) {
+    if (s.end) return;
+    s.end = nowISO;
+    s.duration = Math.floor((now - new Date(s.start)) / 1000);
+    s._autoClosedReason = 'Admin clock-out all';
+    count++;
+  });
+
+  // Clear currentSession if open
+  if (state.currentSession && !state.currentSession.end) {
+    state.currentSession.end = nowISO;
+    state.currentSession.duration = Math.floor((now - new Date(state.currentSession.start)) / 1000);
+    state.sessions.push(state.currentSession);
+    state.currentSession = null;
+    clearInterval(_clockTimerInterval);
+    _clockTimerInterval = null;
+    updateClockUI(false);
+    count++;
+  }
+
+  // Mark all clocked-in staffing shifts complete
+  (state.staffingShifts||[]).forEach(function(s) {
+    if (!s.clockedIn || s.clockedOutAt) return;
+    s.clockedOut   = true;
+    s.clockedOutAt = nowISO;
+    s.clockedIn    = false;
+    s.status       = 'completed';
+  });
+
+  save();
+
+  // Send push notification to all affected members
+  try {
+    sendPushToMembers(affectedIds,
+      '\uD83D\uDD34 Clocked Out by Admin',
+      'An officer has ended all active duty sessions. Please confirm your clock-out in the portal.',
+      'admin_clockout_all_' + Date.now()
+    );
+  } catch(e){}
+
+  // Refresh UI
+  try { renderMyShifts(); }       catch(e){}
+  try { renderStaffingBoard(); }  catch(e){}
+  try { updateStats(); }          catch(e){}
+  try { renderRecentSessions(); } catch(e){}
+
+  showToast('\uD83D\uDD34 Clocked out ' + affectedIds.length + ' member(s). Push notifications sent.');
+}
+
 function adminCloseStaleSessionsBtn() {
   var cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   var stale = (state.sessions||[]).filter(function(s){ return !s.end && s.start && s.start < cutoff; });
@@ -15273,6 +15508,7 @@ function applyBulkEdit() {
             <textarea id="staffingAlertMsg" rows="3" placeholder="Type your alert message…" style="width:100%;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:10px;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
           </div>
           <button class="btn btn-primary btn-full" onclick="sendStaffingAlert()">📢 Send Alert</button>
+          <button class="btn btn-danger btn-sm" onclick="adminClockOutAll()" style="margin-left:8px;background:#2A0000;border:1px solid #C8102E;color:#C8102E;font-weight:700;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;">🔴 Clock Out All</button>
           <!-- Recent Alerts collapsible -->
           <div id="alertHistoryWrap" style="margin-top:14px;">
             <div onclick="toggleStaffCard('alertHistoryBody','alertHistoryChevron')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;padding:6px 0;border-top:1px solid #222;margin-bottom:4px;">
@@ -16187,6 +16423,7 @@ function applyBulkEdit() {
               <div style="font-size:12px;color:#E74C3C;font-weight:700;margin-bottom:8px;">⚠️ Danger Zone</div>
               <button class="btn btn-danger btn-sm" onclick="confirmClearAllData()">🗑 Clear All Data</button>
               <button class="btn btn-sm" onclick="adminCloseStaleSessionsBtn()" style="margin-top:6px;background:#1A1A00;border-color:#F5A623;color:#F5A623;width:100%;">⏱ Close Stale Sessions</button>
+              <button class="btn btn-sm" onclick="adminClockOutAll()" style="margin-top:6px;background:#2A0000;border-color:#C8102E;color:#C8102E;width:100%;font-weight:700;">🔴 Clock Out Everyone</button>
               <div style="margin-top:12px;padding-top:12px;border-top:1px solid #3A0000;">
                 <div style="font-size:11px;color:#C8102E;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Reset Demo Roster</div>
                 <p style="font-size:11px;color:#666;margin-bottom:8px;">Removes all demo members &amp; data. Keeps admin account and all settings. Requires passkey.</p>
