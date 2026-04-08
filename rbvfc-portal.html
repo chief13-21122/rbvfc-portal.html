@@ -1097,7 +1097,7 @@ function showTab(id) {
   // Refresh hooks
   if (id === 'admin') onAdminTabShow();
   if (id === 'drill') initDrillTab();
-  if (id === 'clock')    { try { renderMyShifts(); } catch(e){} try { renderNotifNudge(); } catch(e){} try { renderRecentSessions(); } catch(e){} }
+  if (id === 'clock')    { try { renderMyShifts(); } catch(e){} try { renderNotifNudge(); } catch(e){} try { renderRecentSessions(); } catch(e){} try { checkAutoClockoutAlert(); } catch(e){} }
   if (id === 'staffing') initStaffingTab();
   if (id === 'training') initTrainingTab();
   if (id === 'losap') {
@@ -8355,23 +8355,172 @@ function startStaffingReminders() {
   staffingReminderInterval = setInterval(checkStaffingReminders, 60000);
   checkStaffingReminders();
 }
+
+function checkAutoClockoutAlert() {
+  // Show a banner if the member's most recent session was auto-clocked-out
+  var uid = state.currentUserId;
+  var alertEl = document.getElementById('autoClockoutAlert');
+  if (!alertEl) return;
+  var lastSess = (state.sessions||[])
+    .filter(function(s){ return s.userId===uid && s.end && s._autoClockoutReason; })
+    .sort(function(a,b){ return (b.end||'').localeCompare(a.end||''); })[0];
+  // Only show if it happened within the last 24 hours and hasn't been dismissed
+  if (lastSess && !lastSess._alertDismissed) {
+    var hoursAgo = (new Date() - new Date(lastSess.end)) / 3600000;
+    if (hoursAgo < 24) {
+      var timeStr = new Date(lastSess.end).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      var dateStr = new Date(lastSess.end).toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      alertEl.style.display = 'block';
+      var msgEl = document.getElementById('autoClockoutMsg');
+      if (msgEl) msgEl.textContent = 'You were automatically clocked out on ' + dateStr + ' at ' + timeStr + ' after not responding to a duty reminder.';
+      alertEl.dataset.sessId = lastSess.id;
+      return;
+    }
+  }
+  alertEl.style.display = 'none';
+}
+
+function dismissAutoClockoutAlert() {
+  var alertEl = document.getElementById('autoClockoutAlert');
+  if (!alertEl) return;
+  var sessId = alertEl.dataset.sessId;
+  if (sessId) {
+    var sess = (state.sessions||[]).find(function(s){ return s.id===sessId; });
+    if (sess) { sess._alertDismissed = true; save(); }
+  }
+  alertEl.style.display = 'none';
+}
+
 function checkStaffingReminders() {
   var uid = state.currentUserId;
   if (!uid) return;
   var today = localDateStr();
   var hour  = new Date().getHours();
-  // Already clocked in if: active currentSession OR any open session in state.sessions for this user
+  var now   = new Date();
+
   var alreadyClocked = (state.currentSession && state.currentSession.userId === uid && !state.currentSession.end) ||
     (state.sessions||[]).some(function(ss){ return ss.userId === uid && !ss.end; });
-  if (alreadyClocked) { if (hour >= 6) checkClassReminders(uid, today); return; }
+
+  // ── Duty session over-time warning + auto-clock-out ──────────────────
+  if (alreadyClocked) {
+    // Find the open session for this user
+    var openSess = state.currentSession && !state.currentSession.end && state.currentSession.userId === uid
+      ? state.currentSession
+      : (state.sessions||[]).find(function(ss){ return ss.userId === uid && !ss.end; });
+
+    if (openSess && openSess.start) {
+      var durHrs = (now - new Date(openSess.start)) / 3600000;
+      var WARN_AFTER_HRS = 8;    // show warning after 8 hours
+      var AUTO_OUT_MINS  = 30;   // auto clock-out 30 min after warning if not acknowledged
+
+      // Has a warning been sent already?
+      if (!openSess._warnedAt && durHrs >= WARN_AFTER_HRS) {
+        // Show the warning modal and record when it was shown
+        openSess._warnedAt = now.toISOString();
+        save();
+        _showDutyOverTimeWarning(openSess, WARN_AFTER_HRS, AUTO_OUT_MINS);
+      } else if (openSess._warnedAt && !openSess._warnAcknowledged) {
+        // Check if grace period has expired
+        var warnedAt = new Date(openSess._warnedAt);
+        var minsElapsed = (now - warnedAt) / 60000;
+        if (minsElapsed >= AUTO_OUT_MINS) {
+          // Auto clock-out — no acknowledgment received
+          _autoClockOutDuty(openSess, 'No acknowledgment after ' + AUTO_OUT_MINS + '-minute reminder');
+        }
+      }
+    }
+    if (hour >= 6) checkClassReminders(uid, today);
+    return;
+  }
+
+  // ── Staffing shift clock-in reminders ────────────────────────────────
   (state.staffingShifts||[]).forEach(function(s) {
     if (s.memberId!==uid || s.date!==today || s.clockedIn || s.reminded) return;
-    // Also skip if shift window hasn't opened yet (before shift start time)
     var win = _checkShiftClockWindow(s);
     if (!win.ok) return;
     if (hour >= 6) { s.reminded = true; save(); showStaffingReminder(s); }
   });
   if (hour >= 6) checkClassReminders(uid, today);
+}
+
+function _showDutyOverTimeWarning(session, warnHrs, autoOutMins) {
+  if (document.getElementById('_dutyOverTimeModal')) return;
+  var startTime = new Date(session.start).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  var durHrs = Math.floor((new Date() - new Date(session.start)) / 3600000);
+  var wrap = document.createElement('div');
+  wrap.id = '_dutyOverTimeModal';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var inner = document.createElement('div');
+  inner.style.cssText = 'background:#1A1A1A;border:2px solid #F5A623;border-radius:16px;padding:24px;width:100%;max-width:380px;text-align:center;';
+  inner.innerHTML =
+    '<div style="font-size:40px;margin-bottom:10px;">⏰</div>'
+    + '<div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:700;color:#F5A623;margin-bottom:8px;letter-spacing:1px;">STILL ON DUTY?</div>'
+    + '<div style="font-size:13px;color:#AAA;margin-bottom:6px;">Clocked in since <strong style="color:#F0F0F0;">' + startTime + '</strong></div>'
+    + '<div style="font-size:13px;color:#AAA;margin-bottom:20px;">That is <strong style="color:#F5A623;">' + durHrs + ' hour' + (durHrs!==1?'s':'') + '</strong>. Still on duty?</div>'
+    + '<div style="font-size:11px;color:#E74C3C;margin-bottom:16px;padding:8px;background:#2A0A0A;border-radius:8px;border:1px solid #E74C3C;">'
+    + '⚠ If you do not respond within <strong>' + autoOutMins + ' minutes</strong>, you will be automatically clocked out.'
+    + '</div>'
+    + '<div style="display:flex;gap:10px;" id="_dutyModalBtns"></div>';
+  var btnRow = inner.querySelector('#_dutyModalBtns');
+  var yesBtn = document.createElement('button');
+  yesBtn.style.cssText = 'flex:1;background:#27AE60;border:none;color:#FFF;border-radius:10px;padding:14px;cursor:pointer;font-size:15px;font-weight:700;';
+  yesBtn.textContent = '✅ Still on duty';
+  yesBtn.onclick = function() {
+    // Acknowledge — cancel auto-clock-out
+    session._warnAcknowledged = true;
+    session._warnedAt = null; // reset so reminder can fire again after another 8 hrs
+    save();
+    wrap.remove();
+    showToast('✅ Got it — stay on duty. Reminder reset.');
+  };
+  var noBtn = document.createElement('button');
+  noBtn.style.cssText = 'flex:1;background:none;border:1px solid #E74C3C;color:#E74C3C;border-radius:10px;padding:14px;cursor:pointer;font-size:15px;font-weight:700;';
+  noBtn.textContent = '⏹ Clock out';
+  noBtn.onclick = function() {
+    wrap.remove();
+    clockOut();
+  };
+  btnRow.appendChild(yesBtn); btnRow.appendChild(noBtn);
+  wrap.appendChild(inner);
+  document.body.appendChild(wrap);
+  // Also send push notification
+  try {
+    sendPushToMembers([session.userId],
+      '⏰ Still on duty?',
+      'You have been clocked in for ' + warnHrs + '+ hours. Open the portal to confirm or clock out.',
+      'duty_warning_' + session.userId + '_' + Date.now()
+    );
+  } catch(e){}
+}
+
+function _autoClockOutDuty(session, reason) {
+  var now = new Date();
+  // Close the session
+  session.end = now.toISOString();
+  session.duration = Math.floor((now - new Date(session.start)) / 1000);
+  session._autoClockoutReason = reason;
+  session._autoClockoutAt = now.toISOString();
+  // Move from currentSession to sessions array if needed
+  if (state.currentSession && !state.currentSession.end && state.currentSession.userId === session.userId) {
+    state.currentSession.end = session.end;
+    state.currentSession.duration = session.duration;
+    state.currentSession._autoClockoutReason = reason;
+    state.currentSession._autoClockoutAt = session._autoClockoutAt;
+    if (!Array.isArray(state.sessions)) state.sessions = [];
+    state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+    state.currentSession = null;
+    clearInterval(_clockTimerInterval);
+    _clockTimerInterval = null;
+    try { updateClockUI(false); } catch(e){}
+  }
+  save();
+  try { renderMyShifts(); } catch(e){}
+  try { renderRecentSessions(); } catch(e){}
+  // Remove warning modal if still showing
+  var modal = document.getElementById('_dutyOverTimeModal');
+  if (modal) modal.remove();
+  showToast('⏹ Auto clocked out — no response to reminder after 30 min.');
+  console.log('[RBVFC] Auto clocked out', session.userId, 'reason:', reason);
 }
 
 function checkClassReminders(uid, today) {
@@ -14950,6 +15099,18 @@ function applyBulkEdit() {
 
       <!-- Stats <!-- Stats moved into clockCard -->
 
+      <!-- Auto clock-out alert -->
+      <div id="autoClockoutAlert" style="display:none;background:#2A1500;border:1px solid #F5A623;border-radius:10px;padding:14px 16px;margin-bottom:12px;display:none;">
+        <div style="display:flex;align-items:flex-start;gap:10px;">
+          <span style="font-size:20px;flex-shrink:0;">⏰</span>
+          <div style="flex:1;">
+            <div style="font-size:13px;font-weight:700;color:#F5A623;margin-bottom:4px;">Auto Clocked Out</div>
+            <div id="autoClockoutMsg" style="font-size:12px;color:#AAA;line-height:1.5;"></div>
+          </div>
+          <button onclick="dismissAutoClockoutAlert()" style="background:none;border:none;color:#888;font-size:18px;cursor:pointer;padding:0;flex-shrink:0;line-height:1;">×</button>
+        </div>
+      </div>
+
       <!-- Year-end archive banner (January only) -->
       <div id="yearEndBanner" style="display:none;" class="alert" style="background:#2A1500;border-color:#F5A623;margin-bottom:14px;">
         📦 <strong>Year-End Archive:</strong> Archive last year's data before entering new year activities.
@@ -15489,6 +15650,9 @@ function applyBulkEdit() {
 
       <!-- Officer Controls (officers/admin only) -->
       <div id="staffingOfficerControls" style="display:none;">
+        <button class="btn btn-danger btn-full" onclick="adminClockOutAll()" style="margin-bottom:10px;background:#2A0000;border-color:#C8102E;color:#C8102E;font-weight:700;letter-spacing:1px;font-family:'Barlow Condensed',sans-serif;font-size:15px;">
+          🔴 CLOCK OUT EVERYONE
+        </button>
 
         <!-- Send Alert -->
         <div class="card">
