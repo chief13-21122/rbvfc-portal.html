@@ -732,6 +732,7 @@ function _mergeAndRender(remote) {
   if (state.cadScriptUrl && !_cadSyncInterval) {
     try { startCadAutoSync(); } catch(e){}
   }
+  try { cleanBadLosapActivities(); } catch(e){}
   // Reprocess any pending CAD calls now that staffing data may have updated
   try { reprocessPendingCadCalls(); } catch(e){}
 }
@@ -7370,7 +7371,7 @@ function notifyUnderstaffedDay(date) {
 
 // ── CLOCK IN / CANCEL / REMOVE ────────────────────────────────
 function adminCloseStaleSessionsBtn() {
-  var cutoff = new Date(Date.now() - 30 * 3600 * 1000).toISOString();
+  var cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   var stale = (state.sessions||[]).filter(function(s){ return !s.end && s.start && s.start < cutoff; });
   if (!stale.length) { showToast('\u2705 No stale sessions found.'); return; }
   var names = stale.slice(0,8).map(function(s){
@@ -7395,7 +7396,7 @@ function clearStaleClockedInFlags() {
     }
   });
   // Also close open sessions older than 30 hours (prevents LOSAP point inflation)
-  var cutoff = new Date(Date.now() - 30 * 3600 * 1000).toISOString();
+  var cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   (state.sessions||[]).forEach(function(s) {
     if (!s.end && s.start && s.start < cutoff) {
       var endOfDay = new Date(s.start.slice(0,10) + 'T23:59:59.000Z');
@@ -7405,6 +7406,18 @@ function clearStaleClockedInFlags() {
     }
   });
   if (hadStale) { save(); }
+}
+
+function cleanBadLosapActivities() {
+  // Remove zero-pts and undefined-desc activities (legacy data corruption)
+  var before = (state.losapActivities||[]).length;
+  state.losapActivities = (state.losapActivities||[]).filter(function(a){
+    if (!a.pts || a.pts <= 0) return false;
+    if (a.desc === 'undefined' || a.desc === 'null' || !a.desc) return false;
+    return true;
+  });
+  var removed = before - state.losapActivities.length;
+  if (removed > 0) { save(); console.log('[RBVFC] Cleaned', removed, 'bad LOSAP activities.'); }
 }
 
 function _canClockInNow(shiftDate, shiftStartHHMM) {
@@ -14833,6 +14846,18 @@ function applyBulkEdit() {
         </div>
       </div>
 
+      <!-- Recent Sessions card — last 3 clock-outs with LOSAP credit -->
+      <div class="card" id="recentSessionsCard" style="padding:0;overflow:hidden;">
+        <div class="card-header" onclick="toggleStaffCard('recentSessionsBody','recentSessionsChev')" style="cursor:pointer;user-select:none;">
+          <div class="icon">🕐</div>
+          <h2>Recent Time Captures</h2>
+          <span id="recentSessionsChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span>
+        </div>
+        <div id="recentSessionsBody" style="padding:0 0 4px;">
+          <div id="recentSessionsContainer"></div>
+        </div>
+      </div>
+
     </div><!-- end section-clock -->
 
     <!-- ══════════════ LOSAP TAB ══════════════ -->
@@ -14849,18 +14874,6 @@ function applyBulkEdit() {
       <!-- LOSAP progress bar -->
       
       <div id="losapNotifBanner" style="display:none;margin-bottom:12px;"></div>
-      <!-- Recent Sessions card — last 3 clock-outs with LOSAP credit -->
-      <div class="card" id="recentSessionsCard" style="padding:0;overflow:hidden;">
-        <div class="card-header" onclick="toggleStaffCard('recentSessionsBody','recentSessionsChev')" style="cursor:pointer;user-select:none;">
-          <div class="icon">🕐</div>
-          <h2>Recent Time Captures</h2>
-          <span id="recentSessionsChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span>
-        </div>
-        <div id="recentSessionsBody" style="padding:0 0 4px;">
-          <div id="recentSessionsContainer"></div>
-        </div>
-      </div>
-
       <div class="card" style="padding:16px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <span style="font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;color:#888;text-transform:uppercase;">Points Progress</span>
