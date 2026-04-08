@@ -1094,7 +1094,7 @@ function showTab(id) {
   // Refresh hooks
   if (id === 'admin') onAdminTabShow();
   if (id === 'drill') initDrillTab();
-  if (id === 'clock')    { try { renderMyShifts(); } catch(e){} try { renderNotifNudge(); } catch(e){} }
+  if (id === 'clock')    { try { renderMyShifts(); } catch(e){} try { renderNotifNudge(); } catch(e){} try { renderRecentSessions(); } catch(e){} }
   if (id === 'staffing') initStaffingTab();
   if (id === 'training') initTrainingTab();
   if (id === 'losap') {
@@ -12202,6 +12202,7 @@ function clockOut() {
   try { updateClockStats(); } catch(e) {}
   try { renderStaffingBoard(); } catch(e) {}
   try { renderMyShifts(); } catch(e) {}
+  try { renderRecentSessions(); } catch(e) {}
   var cdEl=document.getElementById('clockDesc'); if(cdEl) cdEl.value='';
   try { onClockActivityChange(); } catch(e){}
   showToast('🔴 Clocked out — ' + formatDuration(sess.duration));
@@ -12272,6 +12273,81 @@ function updateClockStats() {
   set('statHoursMonth', monthH.toFixed(1));
   set('statHoursYear',  yearH.toFixed(1));
   set('statPoints', pts);
+}
+
+function renderRecentSessions() {
+  var uid = state.currentUserId;
+  var container = document.getElementById('recentSessionsContainer');
+  if (!container) return;
+
+  var sessions = (state.sessions||[])
+    .filter(function(s){ return s.userId===uid && s.end; })
+    .sort(function(a,b){ return (b.start||'').localeCompare(a.start||''); })
+    .slice(0, 3);
+
+  if (!sessions.length) {
+    container.innerHTML = '<p style="color:#555;font-size:13px;text-align:center;padding:16px;">No completed sessions yet.</p>';
+    return;
+  }
+
+  var html = '';
+  sessions.forEach(function(s, i) {
+    var startD = new Date(s.start);
+    var dateStr = startD.toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
+    var timeIn  = startD.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+    var endD    = s.end ? new Date(s.end) : null;
+    var timeOut = endD ? endD.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'}) : '—';
+    var durSecs = s.duration || (endD ? Math.floor((endD - startD)/1000) : 0);
+    var durHrs  = durSecs / 3600;
+    var durStr  = formatDuration(durSecs);
+
+    // LOSAP credit calculation
+    // Duty sessions: 1 pt per 4-hr block (§3c), collateral/standby same rule
+    // Drill sessions: 1 pt flat if >= 2 hrs
+    // Other (meeting, training): 1 pt flat
+    var activity = (s.activity || 'duty').toLowerCase();
+    var pts = 0;
+    var ptsLabel = '';
+    if (activity === 'duty' || activity === 'collateral' || activity === 'standby') {
+      pts = Math.floor(durHrs / 4);
+      ptsLabel = pts > 0
+        ? '+' + pts + ' pt' + (pts !== 1 ? 's' : '') + ' (' + Math.floor(durHrs) + 'h @ 1 pt/4h)'
+        : durHrs >= 1
+          ? 'No pts — need ' + (4 - Math.floor(durHrs % 4)) + 'h more for next pt'
+          : 'No pts — less than 1h';
+    } else if (activity === 'drill') {
+      pts = durHrs >= 2 ? 1 : 0;
+      ptsLabel = pts > 0 ? '+1 pt (drill ≥2h)' : 'No pts — need ' + (2 - durHrs).toFixed(1) + 'h more';
+    } else if (activity === 'meeting') {
+      pts = 1;
+      ptsLabel = '+1 pt (meeting)';
+    } else if (activity === 'training') {
+      pts = durHrs >= 2 ? Math.floor(durHrs / 2) : 0;
+      ptsLabel = pts > 0 ? '+' + pts + ' pt' + (pts !== 1 ? 's' : '') : 'No pts';
+    } else {
+      pts = Math.floor(durHrs / 4);
+      ptsLabel = pts > 0 ? '+' + pts + ' pt' + (pts !== 1 ? 's' : '') : 'No pts';
+    }
+
+    var ptColor  = pts > 0 ? '#27AE60' : '#888';
+    var descText = s.desc || activity.charAt(0).toUpperCase() + activity.slice(1);
+    var border   = i < sessions.length - 1 ? 'border-bottom:1px solid #1A1A1A;' : '';
+
+    html += '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;' + border + '">'
+      + '<div style="flex:1;min-width:0;">'
+      +   '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">' + descText + '</div>'
+      +   '<div style="font-size:11px;color:#888;margin-top:2px;">'
+      +     dateStr + ' &nbsp;·&nbsp; ' + timeIn + ' → ' + timeOut
+      +   '</div>'
+      + '</div>'
+      + '<div style="text-align:right;flex-shrink:0;">'
+      +   '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">' + durStr + '</div>'
+      +   '<div style="font-size:11px;color:' + ptColor + ';margin-top:2px;white-space:nowrap;">' + ptsLabel + '</div>'
+      + '</div>'
+      + '</div>';
+  });
+
+  container.innerHTML = html;
 }
 
 function renderShiftHistory() {
@@ -14773,6 +14849,18 @@ function applyBulkEdit() {
       <!-- LOSAP progress bar -->
       
       <div id="losapNotifBanner" style="display:none;margin-bottom:12px;"></div>
+      <!-- Recent Sessions card — last 3 clock-outs with LOSAP credit -->
+      <div class="card" id="recentSessionsCard" style="padding:0;overflow:hidden;">
+        <div class="card-header" onclick="toggleStaffCard('recentSessionsBody','recentSessionsChev')" style="cursor:pointer;user-select:none;">
+          <div class="icon">🕐</div>
+          <h2>Recent Time Captures</h2>
+          <span id="recentSessionsChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span>
+        </div>
+        <div id="recentSessionsBody" style="padding:0 0 4px;">
+          <div id="recentSessionsContainer"></div>
+        </div>
+      </div>
+
       <div class="card" style="padding:16px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <span style="font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;color:#888;text-transform:uppercase;">Points Progress</span>
