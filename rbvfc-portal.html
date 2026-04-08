@@ -9249,6 +9249,18 @@ function nextMeetingOccurrence(mtg) {
   return dates.length ? dates[0] : null;
 }
 
+
+function showMeetingsSheet() {
+  var sheet = document.getElementById('meetingsSheet');
+  if (!sheet) return;
+  sheet.style.display = 'block';
+  try { initMeetingsCard(); } catch(e){}
+  try { initMeetingForm(); }  catch(e){}
+}
+function closeMeetingsSheet() {
+  var sheet = document.getElementById('meetingsSheet');
+  if (sheet) sheet.style.display = 'none';
+}
 function initMeetingsCard() {
   var canManage = canManageSpecialEvents();
   var card = document.getElementById('meetingsManagerCard');
@@ -15064,6 +15076,66 @@ function applyBulkEdit() {
 
 </script>
 
+    <!-- Meetings Sheet (accessed from More menu) -->
+    <div id="meetingsSheet" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.7);" onclick="if(event.target===this)closeMeetingsSheet()">
+      <div style="position:absolute;bottom:0;left:0;right:0;max-height:90vh;overflow-y:auto;background:#111;border-radius:20px 20px 0 0;padding:20px;box-sizing:border-box;">
+        <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 16px;"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <span style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;letter-spacing:2px;color:#F0F0F0;">📅 MEETINGS</span>
+          <button onclick="closeMeetingsSheet()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:0;">×</button>
+        </div>
+        <div class="card" id="meetingsManagerCard" style="display:none;">
+        <div class="card-header" onclick="toggleStaffCard('meetingsManagerBody','meetingsManagerChevron')" style="cursor:pointer;user-select:none;">
+          <div class="icon">&#128203;</div><h2>Meetings</h2>
+          <span id="meetingsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
+        </div>
+        <div id="meetingsManagerBody">
+          <div id="mtgCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+            <div style="font-size:12px;font-weight:700;color:#27AE60;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">&#128203; Schedule Meeting</div>
+            <div class="form-group"><label>Title *</label><input type="text" id="mtgTitle" placeholder="e.g. Monthly Company Meeting"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div class="form-group"><label>Date *</label><input type="date" id="mtgDate"></div>
+              <div class="form-group"><label>Time *</label><input type="time" id="mtgTime"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div class="form-group"><label>Duration (min)</label><input type="number" id="mtgDuration" value="60" min="15" max="480" step="15"></div>
+              <div class="form-group"><label>Repeats</label><select id="mtgRecurrence" onchange="toggleMtgRecurrenceOpts()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;"><option value="">No repeat</option><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></div>
+            </div>
+            <div id="mtgRecurrenceOpts" style="display:none;margin-bottom:8px;"><div class="form-group"><label>Repeat until (optional)</label><input type="date" id="mtgUntil"></div></div>
+            <div class="form-group"><label>Location</label><input type="text" id="mtgLocation" placeholder="e.g. Station 13 &#8212; Bay Floor"></div>
+            <div class="form-group"><label>Agenda / Notes</label><textarea id="mtgDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div class="form-group">
+                <label>Member In Charge *</label>
+                <select id="mtgInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+                  <option value="">— Select Member In Charge —</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Scheduled By</label>
+                <div id="mtgCreatedByDisplay" style="background:#141414;border:1px solid #2A2A2A;border-radius:8px;padding:10px;font-size:13px;color:#888;height:42px;display:flex;align-items:center;"></div>
+              </div>
+            </div>
+            <div class="form-group" style="margin-top:8px;">
+              <label>Expected Members</label>
+              <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <button type="button" class="btn btn-sm btn-secondary" onclick="mtgSelectAllMembers()">Select All</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="mtgClearAllMembers()">Clear All</button>
+              </div>
+              <div id="mtgMemberList" style="max-height:200px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#181818;"></div>
+            </div>
+            <input type="hidden" id="mtgEditId" value="">
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-primary" id="mtgSubmitBtn" onclick="saveMeeting()" style="flex:1;">&#10003; Schedule</button>
+              <button class="btn btn-secondary" id="mtgCancelBtn" onclick="cancelEditMeeting()" style="display:none;">Cancel</button>
+            </div>
+          </div>
+          <div id="meetingsListContainer"></div>
+        </div>
+      </div>
+      </div>
+    </div>
+
 <!-- ═══ VIEW-AS BANNER ═══ -->
 <div id="viewAsBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#F5A623;color:#111;font-size:12px;font-weight:700;text-align:center;padding:8px 60px;box-sizing:border-box;">
   👁 Viewing as <span id="viewAsName"></span> &nbsp;·&nbsp;
@@ -15626,6 +15698,14 @@ function applyBulkEdit() {
         <div id="myShiftsContainer"><p style="color:#666;font-size:13px;text-align:center;padding:20px;">No upcoming shifts or events.</p></div>
       </div>
 
+      <!-- ═══ APPARATUS STAFFING SECTION ═══ -->
+      <div class="card" id="apparatusStaffingSection" style="padding:0;overflow:visible;margin-bottom:0;border-radius:12px;">
+        <div class="card-header" onclick="toggleStaffCard('apparatusStaffingBody','apparatusStaffingChev')" style="cursor:pointer;user-select:none;background:#1A0000;border-radius:12px 12px 0 0;margin:0;">
+          <div class="icon">🚒</div>
+          <h2 style="font-family:'Barlow Condensed',sans-serif;letter-spacing:2px;text-transform:uppercase;">Apparatus Staffing</h2>
+          <span id="apparatusStaffingChev" style="margin-left:auto;color:#C8102E;font-size:15px;display:inline-block;transition:transform .2s;">▼</span>
+        </div>
+        <div id="apparatusStaffingBody">
       <div class="card">
         <div class="card-header">
           <div class="icon">🚒</div>
@@ -15638,6 +15718,9 @@ function applyBulkEdit() {
         </div>
         <div id="staffingBoardContainer"></div>
       </div>
+        </div>
+      </div><!-- end apparatusStaffingSection -->
+
 
             <!-- Staffing Alerts — visible to all members -->
       <div class="card" id="staffingAlertCard" style="display:none;">
@@ -15814,58 +15897,6 @@ function applyBulkEdit() {
 
       </div><!-- end staffingOfficerControls -->
 
-      <!-- Company Meetings -->
-      <div class="card" id="meetingsManagerCard" style="display:none;">
-        <div class="card-header" onclick="toggleStaffCard('meetingsManagerBody','meetingsManagerChevron')" style="cursor:pointer;user-select:none;">
-          <div class="icon">&#128203;</div><h2>Meetings</h2>
-          <span id="meetingsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
-        </div>
-        <div id="meetingsManagerBody">
-          <div id="mtgCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
-            <div style="font-size:12px;font-weight:700;color:#27AE60;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">&#128203; Schedule Meeting</div>
-            <div class="form-group"><label>Title *</label><input type="text" id="mtgTitle" placeholder="e.g. Monthly Company Meeting"></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              <div class="form-group"><label>Date *</label><input type="date" id="mtgDate"></div>
-              <div class="form-group"><label>Time *</label><input type="time" id="mtgTime"></div>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              <div class="form-group"><label>Duration (min)</label><input type="number" id="mtgDuration" value="60" min="15" max="480" step="15"></div>
-              <div class="form-group"><label>Repeats</label><select id="mtgRecurrence" onchange="toggleMtgRecurrenceOpts()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;"><option value="">No repeat</option><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></div>
-            </div>
-            <div id="mtgRecurrenceOpts" style="display:none;margin-bottom:8px;"><div class="form-group"><label>Repeat until (optional)</label><input type="date" id="mtgUntil"></div></div>
-            <div class="form-group"><label>Location</label><input type="text" id="mtgLocation" placeholder="e.g. Station 13 &#8212; Bay Floor"></div>
-            <div class="form-group"><label>Agenda / Notes</label><textarea id="mtgDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              <div class="form-group">
-                <label>Member In Charge *</label>
-                <select id="mtgInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
-                  <option value="">— Select Member In Charge —</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Scheduled By</label>
-                <div id="mtgCreatedByDisplay" style="background:#141414;border:1px solid #2A2A2A;border-radius:8px;padding:10px;font-size:13px;color:#888;height:42px;display:flex;align-items:center;"></div>
-              </div>
-            </div>
-            <div class="form-group" style="margin-top:8px;">
-              <label>Expected Members</label>
-              <div style="display:flex;gap:8px;margin-bottom:8px;">
-                <button type="button" class="btn btn-sm btn-secondary" onclick="mtgSelectAllMembers()">Select All</button>
-                <button type="button" class="btn btn-sm btn-secondary" onclick="mtgClearAllMembers()">Clear All</button>
-              </div>
-              <div id="mtgMemberList" style="max-height:200px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#181818;"></div>
-            </div>
-            <input type="hidden" id="mtgEditId" value="">
-            <div style="display:flex;gap:8px;">
-              <button class="btn btn-primary" id="mtgSubmitBtn" onclick="saveMeeting()" style="flex:1;">&#10003; Schedule</button>
-              <button class="btn btn-secondary" id="mtgCancelBtn" onclick="cancelEditMeeting()" style="display:none;">Cancel</button>
-            </div>
-          </div>
-          <div id="meetingsListContainer"></div>
-        </div>
-      </div>
-
-      
 
       <!-- Daily Staffing Board -->
 
@@ -15925,7 +15956,15 @@ function applyBulkEdit() {
         </div>
       </div>
 
-      <!-- Special Events Member View -->
+      <!-- ═══ SPECIAL EVENTS SECTION ═══ -->
+      <div class="card" id="specialEventsSection" style="padding:0;overflow:visible;border-radius:12px;">
+        <div class="card-header" onclick="toggleStaffCard('specialEventsSectionBody','specialEventsSectionChev')" style="cursor:pointer;user-select:none;background:#001A1A;border-radius:12px 12px 0 0;margin:0;">
+          <div class="icon">🎪</div>
+          <h2 style="font-family:'Barlow Condensed',sans-serif;letter-spacing:2px;text-transform:uppercase;">Special Events</h2>
+          <span id="specialEventsSectionChev" style="margin-left:auto;color:#27AE60;font-size:15px;display:inline-block;transition:transform .2s;">▼</span>
+        </div>
+        <div id="specialEventsSectionBody">
+          <!-- Special Events Member View -->
       <div class="card" id="specialEventsMemberCard" style="display:none;">
         <div class="card-header" onclick="toggleStaffCard('specialEventsMemberBody','specialEventsMemberChevron')" style="cursor:pointer;user-select:none;">
           <div class="icon">&#127914;</div>
@@ -15936,7 +15975,8 @@ function applyBulkEdit() {
           <div id="specialEventsContainer"></div>
         </div>
       </div>
-
+        </div>
+      </div><!-- end specialEventsSection -->
     </div><!-- end section-staffing -->
 
     <!-- ══════════════ COMPANY TAB ══════════════ -->
@@ -16766,6 +16806,7 @@ function applyBulkEdit() {
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsSheet();closeMoreMenu()">📅 Meetings</button>
       <div id="moreAdminTools" style="display:none;border-top:1px solid #2A2A2A;margin-top:12px;padding-top:12px;">
         <div style="font-size:10px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Admin Tools</div>
         <button class="btn btn-secondary btn-full" onclick="confirmSendMonthlyEmails();closeMoreMenu()">📧 Email LOSAP Reports (All)</button>
