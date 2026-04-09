@@ -10594,18 +10594,40 @@ function rejectTrainingFromApprovals(elOrId) { openRejectModal_training(elOrId);
 // ═══════════════════════════════════════════════════
 //  LOGO / BRANDING
 // ═══════════════════════════════════════════════════
-function getLogoData() {
-  // Logo lives in localStorage only — never in state or Firestore
-  try { return localStorage.getItem('rbvfc_logo') || ''; } catch(e){ return ''; }
+function saveLogoData(dataUrl, onDone) {
+  var img = new Image();
+  img.onload = function() {
+    var MAX_PX = 400;
+    var w = img.naturalWidth, h = img.naturalHeight;
+    var scale = Math.min(1, MAX_PX / Math.max(w, h, 1));
+    var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+    var canvas = document.createElement('canvas');
+    canvas.width = cw; canvas.height = ch;
+    canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+    var compressed = canvas.toDataURL('image/png');
+    if (compressed.length > 150000) compressed = canvas.toDataURL('image/jpeg', 0.82);
+    state.logo = compressed;
+    try { localStorage.setItem('rbvfc_logo', compressed); } catch(e){}
+    delete state.companyLogo;
+    save();
+    try { setFavicon(); } catch(e){}
+    if (onDone) onDone(compressed);
+  };
+  img.onerror = function() {
+    try { localStorage.setItem('rbvfc_logo', dataUrl); } catch(e){}
+    if (onDone) onDone(dataUrl);
+  };
+  img.src = dataUrl;
 }
-function saveLogoData(dataUrl) {
-  // Logo is localStorage-only — base64 images exceed Firestore's 1MB document limit
-  try { localStorage.setItem('rbvfc_logo', dataUrl); } catch(e){}
-  try { setFavicon(); } catch(e){}
-  // Explicitly remove from state so it never bleeds into a Firestore save
-  delete state.companyLogo;
+function getLogoData() {
+  try { var ls = localStorage.getItem('rbvfc_logo'); if (ls) return ls; } catch(e){}
+  return state.logo || '';
 }
 function applyLogo() {
+  // If state.logo synced from Firestore but localStorage is empty, prime the cache
+  if (state.logo && !localStorage.getItem('rbvfc_logo')) {
+    try { localStorage.setItem('rbvfc_logo', state.logo); } catch(e){}
+  }
   var logo = getLogoData();
 
   // ── Login screen ──────────────────────────────
@@ -10668,13 +10690,18 @@ function handleLogoUpload(file) {
 function confirmLogoUpload() {
   var modal = document.getElementById('logoConfirmModal');
   if (!modal || !modal._pendingData) return;
-  saveLogoData(modal._pendingData);
-  applyLogo();
   modal.style.display = 'none';
-  showToast('✅ Logo saved — visible on login screen and header.');
+  showToast('⏳ Saving logo…');
+  saveLogoData(modal._pendingData, function() {
+    applyLogo();
+    showToast('✅ Logo saved — visible on all devices.');
+  });
 }
 function removeLogo() {
   try { localStorage.removeItem('rbvfc_logo'); } catch(e){}
+  delete state.logo;
+  delete state.companyLogo;
+  save();
   applyLogo();
   showToast('Logo removed.');
 }
