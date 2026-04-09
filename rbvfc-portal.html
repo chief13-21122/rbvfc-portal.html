@@ -3894,6 +3894,7 @@ function saveUserFromAdmin() {
   var emailPrefix = ((document.getElementById('umEmail')||{}).value||'').trim().replace(/@.*$/,'');
   var email = emailPrefix ? emailPrefix+'@rbvfc13.com' : '';
   var driveFolderUrl = ((document.getElementById('umDriveFolderUrl')||{}).value||'').trim();
+  var phone = ((document.getElementById('umPhone')||{}).value||'').trim();
   // Collect selected ranks from checkbox grid
   var ranks = [];
   (document.querySelectorAll('#umRanksGrid input[type=checkbox]:checked')||[]).forEach(function(cb){ ranks.push(cb.value); });
@@ -3919,13 +3920,14 @@ function saveUserFromAdmin() {
       if (pin) m.pin=pin;
       if (driveFolderUrl) m.driveFolderUrl=driveFolderUrl;
       else if (driveFolderUrl === '') delete m.driveFolderUrl;
+      m.phone = phone;
       showToast('✅ '+first+' '+last+' updated.');
     }
   } else {
     state.roster.push({ id:'mbr_'+Date.now(), first:first, last:last, memberId:badge,
       email:email, rank:rank, ranks:ranks, appRole:role, losapPositions:positions,
       losapPosition:positions[0]||'', pin:pin, active:true,
-      driveFolderUrl: driveFolderUrl || undefined });
+      driveFolderUrl: driveFolderUrl || undefined, phone: phone || undefined });
     showToast('✅ '+first+' '+last+' added.');
   }
   save();
@@ -3956,6 +3958,7 @@ function editMemberAdmin(id) {
     umMemberId: (m.memberId||'').replace(/^50-/,''),
     umEmail:  (m.email||'').replace(/@rbvfc13\.com$/i,'').replace(/@RBVFC13\.com$/i,''),
     umDriveFolderUrl: m.driveFolderUrl||'',
+    umPhone: m.phone||'',
     umRole:   m.appRole||'member',
     umRank:   m.rank||'FFI',
     umMemberType: m.memberType||'operational',
@@ -11680,7 +11683,7 @@ function saveMember() {
 
 function clearUmForm() {
   _umCerts = []; renderUmCerts();
-  ['umFirst','umEditId','umLast','umMemberId','umEmail','umPinField','umDriveFolderUrl'].forEach(function(id){
+  ['umFirst','umEditId','umLast','umMemberId','umEmail','umPinField','umDriveFolderUrl','umPhone'].forEach(function(id){
     var el=document.getElementById(id); if(el) el.value='';
   });
   var rank=document.getElementById('umRank'); if(rank) rank.value='FFI';
@@ -16414,6 +16417,7 @@ function applyBulkEdit() {
                   autocomplete="off" style="font-size:12px;" oninput="validateUmDriveFolder(this)">
                 <div id="umDriveFolderHint" style="font-size:11px;color:#555;margin-top:4px;display:none;"></div>
               </div>
+              <div class="form-group"><label>Phone Number</label><input type="tel" id="umPhone" placeholder="(555) 555-5555" autocomplete="off" inputmode="tel" oninput="this.value=this.value.replace(/[^0-9()\-+ ]/g,'')"></div>
               <div class="form-group"><label>PIN</label><input type="password" id="umPinField" placeholder="0000 (leave blank to keep)" maxlength="8" inputmode="numeric"></div>
             <div class="form-group">
               <label>Member Type</label>
