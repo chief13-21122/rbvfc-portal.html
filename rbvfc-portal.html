@@ -732,6 +732,7 @@ function _mergeAndRender(remote) {
   if (state.cadScriptUrl && !_cadSyncInterval) {
     try { startCadAutoSync(); } catch(e){}
   }
+  try { clearStaleClockedInFlags(); } catch(e){}
   try { cleanBadLosapActivities(); } catch(e){}
   // Start clocked-in reminder poller
   try { startClockedInReminderPoller(); } catch(e){}
@@ -7689,19 +7690,36 @@ function clearStaleClockedInFlags() {
     if (!s.shiftHours && s.hours) { s.shiftHours = s.hours; }
     if (s.clockedIn && !s.clockedOutAt && s.date < today) {
       s.clockedOutAt = s.date + 'T23:59:59.000Z';
-      s.status = 'complete'; hadStale = true;
+      s.clockedIn = false;
+      s.status = 'completed'; hadStale = true;
     }
   });
-  // Also close open sessions older than 30 hours (prevents LOSAP point inflation)
+  // Also close open sessions older than 24 hours (prevents false clock-in warnings)
   var cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   (state.sessions||[]).forEach(function(s) {
     if (!s.end && s.start && s.start < cutoff) {
       var endOfDay = new Date(s.start.slice(0,10) + 'T23:59:59.000Z');
       s.end = endOfDay.toISOString();
-      s.duration = (endOfDay - new Date(s.start)) / 3600000;
+      s.duration = Math.floor((endOfDay - new Date(s.start)) / 1000);
+      s._autoClosedReason = 'Stale session auto-cleanup';
       hadStale = true;
     }
   });
+  // Clear currentSession if it is stale (> 24h) — prevents false overtime warnings
+  if (state.currentSession && !state.currentSession.end) {
+    var csAge = (Date.now() - new Date(state.currentSession.start)) / 3600000;
+    if (csAge > 24) {
+      var csEnd = new Date(state.currentSession.start.slice(0,10) + 'T23:59:59.000Z');
+      state.currentSession.end = csEnd.toISOString();
+      state.currentSession.duration = Math.floor((csEnd - new Date(state.currentSession.start)) / 1000);
+      state.currentSession._autoClosedReason = 'Stale session auto-cleanup';
+      if (!Array.isArray(state.sessions)) state.sessions = [];
+      state.sessions.push(state.currentSession);
+      state.currentSession = null;
+      try { clearInterval(_clockTimerInterval); _clockTimerInterval = null; updateClockUI(false); } catch(e){}
+      hadStale = true;
+    }
+  }
   if (hadStale) { save(); }
 }
 
