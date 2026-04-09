@@ -649,7 +649,7 @@ var _fbSyncUnsubTrain = null;
 function _mergeAndRender(remote) {
   if (!remote) return;
   // Preserve local fb config so incognito doesn't lose baked-in values
-  // Strip logo from remote — it's localStorage-only; Firestore can't hold it (>1MB)
+  // Note: state.logo (compressed) is allowed to pass through — it syncs the logo to all devices
   if (remote.main) delete remote.main.companyLogo;
   delete remote.companyLogo;
   var _savedCfg = { fbApiKey: state.fbApiKey, fbProjectId: state.fbProjectId,
@@ -738,6 +738,12 @@ function _mergeAndRender(remote) {
   try { startClockedInReminderPoller(); } catch(e){}
   // Reprocess any pending CAD calls now that staffing data may have updated
   try { reprocessPendingCadCalls(); } catch(e){}
+  // Apply logo — primes localStorage from state.logo on fresh devices
+  try { applyLogo(); } catch(e){}
+  // Show member alert banner if one is active
+  try { renderMemberAlertBanner(); } catch(e){}
+  // Update approvals badge with latest data
+  try { updateApprovalsBadge(); } catch(e){}
 }
 
 function _startFbSync() {
@@ -765,6 +771,15 @@ function _startFbSync() {
       state.trainingSubmissions = doc.data().trainingSubmissions;
       try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
       try { renderTrainingReview(); } catch(e){}
+      // Refresh approvals badge so officers see new pending count immediately
+      try { updateApprovalsBadge(); } catch(e){}
+      // If the approvals tab is currently open, re-render it so new submissions appear
+      try {
+        var _appSec = document.getElementById('section-approvals');
+        if (_appSec && _appSec.classList.contains('active')) {
+          initApprovalsTab();
+        }
+      } catch(e){}
     }
   }, function(e){ console.warn('[RBVFC] Train sync error:', e.message); });
 }
@@ -10208,6 +10223,19 @@ function switchApprovalTab(tab) {
     if (pane) pane.style.display = active ? 'block' : 'none';
     if (btn)  { btn.style.background = active ? '#C8102E' : '#111'; btn.style.color = active ? '#FFF' : '#AAA'; }
   });
+  // Re-render the active pane with latest state so data is never stale
+  try {
+    var uid = state.currentUserId;
+    var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+    var isChief   = m && ((m.losapPositions&&m.losapPositions.indexOf('Fire Chief')>-1)||m.appRole==='admin');
+    var isOfficer = m && (m.appRole==='officer'||m.appRole==='admin');
+    var isPresident = m && (m.losapPositions&&m.losapPositions.indexOf('President')>-1);
+    if (tab === 'training') renderApprovalTraining(isChief);
+    if (tab === 'drill')    renderApprovalDrills(isChief || isOfficer);
+    if (tab === 'losap')    renderApprovalLosap(isChief || isPresident);
+    if (tab === 'er')       renderApprovalER(isOfficer);
+    if (tab === 'history')  renderApprovalHistory();
+  } catch(e) {}
 }
 
 function initApprovalsTab() {
@@ -11490,6 +11518,11 @@ function launchApp(member) {
   // Check if currently clocked in
   restoreClockState();
   try { renderMyClassesToday(); } catch(e){}
+  // Start notification systems on login — don't wait for Staffing tab to open
+  try { startStaffingReminders(); } catch(e){}
+  try { startClockedInReminderPoller(); } catch(e){}
+  try { renderMemberAlertBanner(); } catch(e){}
+  try { updateApprovalsBadge(); } catch(e){}
 }
 
 function logout() {
@@ -11498,6 +11531,20 @@ function logout() {
   state.currentUserId = null;
   // Clear impersonation
   state._impersonating = null;
+  // Stop all notification/reminder intervals
+  if (typeof staffingReminderInterval !== 'undefined' && staffingReminderInterval) {
+    clearInterval(staffingReminderInterval); staffingReminderInterval = null;
+  }
+  if (typeof _clockedInReminderInterval !== 'undefined' && _clockedInReminderInterval) {
+    clearInterval(_clockedInReminderInterval); _clockedInReminderInterval = null;
+  }
+  if (typeof _boardClockInterval !== 'undefined' && _boardClockInterval) {
+    clearInterval(_boardClockInterval); _boardClockInterval = null;
+  }
+  // Hide any active top banners
+  ['clockReminderTopBanner','staffingAlertTopBanner','classBanner'].forEach(function(id){
+    var el = document.getElementById(id); if (el) el.style.display = 'none';
+  });
   var banner = document.getElementById('viewAsBanner');
   if (banner) banner.style.display = 'none';
   save();
