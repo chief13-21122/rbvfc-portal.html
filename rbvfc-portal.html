@@ -602,10 +602,15 @@ function _fbDocTrain() { return 'companies/' + (state.fbProjectId||'rbvfc-losap'
 
 function _fbSplitState() {
   var full = JSON.parse(JSON.stringify(state));
-  // Strip base64 cert data from training submissions (stored in Drive)
+  // Strip base64 cert data from training submissions before Firestore save
+  // Cert blobs can be several MB — storing them would blow the 1MB doc limit
   if (full.trainingSubmissions) {
     full.trainingSubmissions = full.trainingSubmissions.map(function(s) {
-      var c = Object.assign({}, s); delete c.certBase64; return c;
+      var c = Object.assign({}, s);
+      if (c.cert) { c._hasCert = true; }  // flag so admin knows cert exists
+      delete c.cert;        // actual base64 data — too large for Firestore
+      delete c.certBase64;  // legacy field name
+      return c;
     });
   }
   // NEVER write device-local fields to Firestore — each device manages its own login
@@ -768,7 +773,18 @@ function _startFbSync() {
 
   _fbSyncUnsubTrain = fbDb.doc(_fbDocTrain()).onSnapshot(function(doc) {
     if (doc.exists && doc.data().trainingSubmissions) {
-      state.trainingSubmissions = doc.data().trainingSubmissions;
+      var _remoteSubs = doc.data().trainingSubmissions;
+      var _localSubs  = state.trainingSubmissions || [];
+      // Firestore never stores cert blobs — restore local cert data so Drive upload still works
+      _remoteSubs.forEach(function(rs) {
+        var ls = _localSubs.find(function(l){ return l.id === rs.id; });
+        if (ls) {
+          if (ls.cert && !rs.cert)       rs.cert     = ls.cert;
+          if (ls.certMime && !rs.certMime) rs.certMime = ls.certMime;
+          if (ls.certName && !rs.certName) rs.certName = ls.certName;
+        }
+      });
+      state.trainingSubmissions = _remoteSubs;
       try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
       try { renderTrainingReview(); } catch(e){}
       // Refresh approvals badge so officers see new pending count immediately
@@ -10305,6 +10321,10 @@ function _approvalCard(opts) {
       'style="display:inline-flex;align-items:center;gap:5px;background:#1A2A1A;border:1px solid #27AE60;'+
       'color:#27AE60;border-radius:6px;padding:5px 10px;font-size:11px;text-decoration:none;font-weight:700;">'+
       (opts.certMime==='application/pdf'?'📄':'🖼️')+' View Certificate</a>';
+  } else if (opts.hasCert || opts.certAttached) {
+    // Cert was submitted but not available on this device (stored locally on submitter's device)
+    certBtn = '<span style="display:inline-flex;align-items:center;gap:5px;background:#1A1A2A;border:1px solid #555;'+
+      'color:#888;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;">📎 Certificate attached</span>';
   }
   var actions = opts.canAct
     ? '<div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #252525;flex-wrap:wrap;">'+
@@ -10359,12 +10379,14 @@ function renderApprovalTraining(canAct) {
       title: _title,
       meta: meta, sub: sub, notes: s.notes||'',
       certData: s.cert||'', certName: s.certName||'', certMime: s.certMime||'',
+      hasCert: !!(s.cert || s._hasCert),
       canAct: canAct,
       approveLabel: 'Approve (+'+_pts+' pts)',
       approveFn: 'approveTrainingFromApprovals',
       rejectFn:  'openRejectModal_training',
       dataId: s.id,
-      waitMsg: 'Awaiting Fire Chief approval'
+      waitMsg: 'Awaiting Fire Chief approval',
+      certAttached: !!(s.cert || s._hasCert)
     });
   }).join('');
 }
