@@ -2683,6 +2683,17 @@ function submitTraining() {
   renderTrainingReview();
 
   showToast('✅ Training submitted for Fire Chief approval.');
+  // Auto-upload cert to Drive immediately while this device has the cert data
+  // (Firestore doesn't store certs; approval-time upload would fail on admin's device)
+  if (tsubFileData && state.driveFolderId && (state.cadScriptUrl || state.sheetWebhookUrl)) {
+    var _newSub = (state.trainingSubmissions||[]).find(function(x){ return x.name===name && x.memberId===uid && x.status==='pending' && !x._driveFileId; });
+    if (_newSub) {
+      uploadCertToDrive(_newSub.id, function(ok, info) {
+        if (ok) showToast('📁 Certificate saved to Drive.');
+        // Silently skip if Drive upload fails — cert is still in local state
+      });
+    }
+  }
   // Show confirmation modal (toast already fired above so user sees feedback regardless)
   try {
     showTrainingConfirmation({ name: name, hours: hours, pts: pts, date: date, hasCert: !!(tsubFileData) });
@@ -3232,21 +3243,9 @@ function uploadCertToDrive(submissionId, onComplete) {
   var fileName  = lastName + firstName.charAt(0) + '_' + safeName + '_' + (s.date||'').replace(/-/g,'') + ext;
   var b64       = s.cert.indexOf(',') >= 0 ? s.cert.split(',')[1] : s.cert;
 
-  // Use member-specific folder if configured, otherwise fall back to company folder
-  var memberFolderUrl = member && member.driveFolderUrl ? member.driveFolderUrl.trim() : '';
-  var folderId = state.driveFolderId; // company folder (always used as fallback)
-
-  // Extract folder ID from a Google Drive URL if a member folder is set
-  // Accepts: https://drive.google.com/drive/folders/FOLDER_ID or just the raw ID
-  var memberFolderId = '';
-  if (memberFolderUrl) {
-    var urlMatch = memberFolderUrl.match(/\/folders\/([a-zA-Z0-9_-]+)/);
-    memberFolderId = urlMatch ? urlMatch[1] : memberFolderUrl.replace(/\s/g,'');
-  }
-
-  // If we have a valid member folder, upload there; otherwise use company folder
-  var targetFolderId = memberFolderId || folderId;
-  var usingMemberFolder = !!memberFolderId;
+  // Resolved folder: member-specific (from profile) or company folder fallback
+  var folderId = state.driveFolderId;
+  var usingMemberFolder = !!_memberFolderId;
 
   fetch(url, {
     method: 'POST',
@@ -3437,10 +3436,20 @@ function approveTraining(elOrId) {
   if (document.getElementById('section-approvals') && document.getElementById('section-approvals').classList.contains('active')) initApprovalsTab();
   updateApprovalsBadge();
   showToast('✅ Training approved — +'+s.pts+' pts added.');
-  if (s.cert && state.driveFolderId && state.sheetWebhookUrl) {
-    uploadCertToDrive(s.id, function(ok, info) {
-      if (ok) showToast('✅ Certificate uploaded to Google Drive!');
-    });
+  // Upload cert to Drive if not already done at submit time
+  // Uses cadScriptUrl (preferred) or sheetWebhookUrl
+  var _driveUrl = state.cadScriptUrl || state.sheetWebhookUrl;
+  if (!s._driveFileId && _driveUrl && state.driveFolderId) {
+    if (s.cert) {
+      // Cert available on this device (admin is on same device as submitter, or cert was cached)
+      uploadCertToDrive(s.id, function(ok, info) {
+        if (ok) showToast('📁 Certificate uploaded to Drive!');
+      });
+    } else if (s._hasCert) {
+      // Cert was submitted but not available on this device (Firestore doesn't store blobs)
+      // It should have auto-uploaded at submit time; if not, admin must use "Send to Drive" manually
+      console.log('[RBVFC] Cert not available on this device — should have auto-uploaded at submit time.');
+    }
   }
 }
 
