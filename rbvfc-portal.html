@@ -845,40 +845,115 @@ function registerServiceWorker() {
 }
 
 function requestPushPermission() {
-  if (!fbMessaging) { showToast('\u26a0\ufe0f Firebase not configured.'); return; }
-  if (!('serviceWorker' in navigator)) { showToast('\u26a0\ufe0f Service workers not supported.'); return; }
+  if (!fbMessaging) { showToast('⚠️ Firebase not configured.'); return; }
+  if (!('serviceWorker' in navigator)) { showToast('⚠️ Service workers not supported in this browser.'); return; }
+  if (!('Notification' in window)) { showToast('⚠️ Notifications not supported in this browser.'); return; }
+
+  // If already denied, browser won't show the prompt — guide user to fix it manually
+  if (Notification.permission === 'denied') {
+    _showPushBlockedModal();
+    return;
+  }
+
+  // If already granted, just re-register and get token
+  if (Notification.permission === 'granted') {
+    _doRegisterPushToken();
+    return;
+  }
+
+  // permission === 'default' — show the browser prompt
   Notification.requestPermission().then(function(permission) {
-    if (permission !== 'granted') { showToast('\u26a0\ufe0f Notification permission denied.'); return; }
-    // Register SW inline then chain to getToken — prevents Firebase defaulting to root scope
-    var swPath = '/rbvfc-portal.html/firebase-messaging-sw.js';
-    navigator.serviceWorker.register(swPath, { scope: '/rbvfc-portal.html/' })
-      .then(function(reg) {
-        window._swRegistration = reg;
-        console.log('[RBVFC] SW registered:', reg.scope);
-        return fbMessaging.getToken({ vapidKey: FIREBASE_VAPID_KEY, serviceWorkerRegistration: reg });
-      })
-      .then(function(token) {
-        if (!token) { showToast('\u26a0\ufe0f Could not get push token.'); return; }
-        var uid = state.currentUserId;
-        var m = (state.roster||[]).find(function(x){ return x.id===uid; });
-        if (m) {
-          if (!m.fcmTokens) m.fcmTokens = [];
-          if (m.fcmTokens.indexOf(token) === -1) m.fcmTokens.push(token);
-          m.fcmTokens = m.fcmTokens.slice(-3);
-          save(); sheetSyncDebounce();
-        }
-        try { localStorage.setItem('rbvfc_fcm_token', token); } catch(e) {}
-        // Register token with Apps Script for server-side trigger pushes
-        var sUrl = state.cadScriptUrl;
-        if (sUrl) fetch(sUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'registerToken',token:token}) }).catch(function(){});
-        showToast('\u2705 Push notifications enabled!');
-        renderPushStatus();
-      })
-      .catch(function(err) {
-        console.error('[RBVFC] Push enable error:', err);
-        showToast('\u26a0\ufe0f Could not enable: ' + (err.message||String(err)));
-      });
+    if (permission === 'granted') {
+      _doRegisterPushToken();
+    } else {
+      // User clicked Block in the prompt
+      _showPushBlockedModal();
+    }
   });
+}
+
+function _showPushBlockedModal() {
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  var isAndroid = /Android/.test(navigator.userAgent);
+  var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+
+  var existing = document.getElementById('_pushBlockedModal');
+  if (existing) existing.remove();
+
+  var instructions = '';
+  if (isIOS && !isStandalone) {
+    instructions =
+      '<div style="background:#1A1A00;border:1px solid #F5A623;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#F5A623;line-height:1.6;">' +
+      '<strong>📱 iPhone / iPad:</strong> Web push requires the app to be installed.<br>' +
+      'Tap <strong>Share → Add to Home Screen</strong>, then open it from your home screen and try again.' +
+      '</div>';
+  } else if (isIOS && isStandalone) {
+    instructions =
+      '<div style="font-size:13px;color:#CCC;line-height:1.8;margin-bottom:14px;">' +
+      '1. Open <strong>Settings → [Safari / this app]</strong><br>' +
+      '2. Tap <strong>Notifications</strong><br>' +
+      '3. Enable <strong>Allow Notifications</strong><br>' +
+      '4. Return here and tap Enable again.' +
+      '</div>';
+  } else if (isAndroid) {
+    instructions =
+      '<div style="font-size:13px;color:#CCC;line-height:1.8;margin-bottom:14px;">' +
+      '1. Tap the <strong>🔒 lock icon</strong> in your browser address bar<br>' +
+      '2. Tap <strong>Permissions → Notifications</strong><br>' +
+      '3. Set to <strong>Allow</strong><br>' +
+      '4. Reload the page and tap Enable again.' +
+      '</div>';
+  } else {
+    instructions =
+      '<div style="font-size:13px;color:#CCC;line-height:1.8;margin-bottom:14px;">' +
+      '1. Click the <strong>🔒 lock icon</strong> in your browser address bar<br>' +
+      '2. Find <strong>Notifications</strong> and set to <strong>Allow</strong><br>' +
+      '3. Reload the page and tap Enable again.' +
+      '</div>';
+  }
+
+  var modal = document.createElement('div');
+  modal.id = '_pushBlockedModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  modal.innerHTML =
+    '<div style="background:#1A1A1A;border:1px solid #C8102E;border-top:4px solid #C8102E;border-radius:14px;padding:24px;width:100%;max-width:360px;">' +
+    '<div style="font-size:32px;text-align:center;margin-bottom:10px;">🔔</div>' +
+    '<div style="font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:700;color:#F0F0F0;letter-spacing:1px;margin-bottom:6px;text-align:center;">Notifications Blocked</div>' +
+    '<div style="font-size:12px;color:#888;margin-bottom:16px;text-align:center;">Your browser has blocked notifications for this site. Follow the steps below to re-enable them.</div>' +
+    instructions +
+    '<button class="btn btn-primary btn-full" onclick="document.getElementById(\'_pushBlockedModal\').remove()">Got It</button>' +
+    '</div>';
+  document.body.appendChild(modal);
+}
+
+function _doRegisterPushToken() {
+  var swPath = '/rbvfc-portal.html/firebase-messaging-sw.js';
+  navigator.serviceWorker.register(swPath, { scope: '/rbvfc-portal.html/' })
+    .then(function(reg) {
+      window._swRegistration = reg;
+      console.log('[RBVFC] SW registered:', reg.scope);
+      return fbMessaging.getToken({ vapidKey: FIREBASE_VAPID_KEY, serviceWorkerRegistration: reg });
+    })
+    .then(function(token) {
+      if (!token) { showToast('⚠️ Could not get push token. Try reloading.'); return; }
+      var uid = state.currentUserId;
+      var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+      if (m) {
+        if (!m.fcmTokens) m.fcmTokens = [];
+        if (m.fcmTokens.indexOf(token) === -1) m.fcmTokens.push(token);
+        m.fcmTokens = m.fcmTokens.slice(-3);
+        save(); sheetSyncDebounce();
+      }
+      try { localStorage.setItem('rbvfc_fcm_token', token); } catch(e) {}
+      var sUrl = state.cadScriptUrl;
+      if (sUrl) fetch(sUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'registerToken',token:token}) }).catch(function(){});
+      showToast('✅ Push notifications enabled!');
+      renderPushStatus();
+    })
+    .catch(function(err) {
+      console.error('[RBVFC] Push enable error:', err);
+      showToast('⚠️ Could not enable: ' + (err.message||String(err)));
+    });
 }
 
 function disablePushNotifications() {
@@ -4236,6 +4311,8 @@ function onAdminTabShow() {
   // ── Officer-only cards (not admin-only) ───────────────────────────────────
   // rawDataCard: visible to officers AND admins
   if (rawCard) rawCard.style.display = isOfficer2 ? '' : 'none';
+  // Populate push test roster whenever admin tab opens
+  try { refreshPushTestRoster(); renderPushStatus(); } catch(e){}
 }
 
 // ═══════════════════════════════════════════════════
@@ -12649,9 +12726,120 @@ function saveFcmKey() {
   state.fcmServerKey=k; save();
   showToast(k?'✅ FCM key saved.':'FCM key cleared.');
 }
-function sendTestPush() {
-  showToast('Test push sent (see Firebase console).');
+function refreshPushTestRoster() {
+  var sel = document.getElementById('pushTestMemberSelect');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Select member to test —</option>';
+  var members = (state.roster||[]).filter(function(m){ return m.active !== false; })
+    .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); });
+  members.forEach(function(m) {
+    var tokenCount = (m.fcmTokens||[]).length;
+    var opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.last + ', ' + m.first + (tokenCount ? ' (' + tokenCount + ' device' + (tokenCount>1?'s':'') + ')' : ' — no token');
+    opt.disabled = !tokenCount;
+    opt.style.color = tokenCount ? '#F0F0F0' : '#555';
+    sel.appendChild(opt);
+  });
+  updatePushTestMemberStatus();
 }
+
+function updatePushTestMemberStatus() {
+  var sel = document.getElementById('pushTestMemberSelect');
+  var statusEl = document.getElementById('pushTestMemberStatus');
+  if (!sel || !statusEl) return;
+  var uid = sel.value;
+  if (!uid) { statusEl.textContent = ''; return; }
+  var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+  if (!m) { statusEl.textContent = ''; return; }
+  var tokens = m.fcmTokens || [];
+  if (!tokens.length) {
+    statusEl.innerHTML = '<span style="color:#C8102E;">❌ No push token — member has not enabled notifications on any device.</span>';
+  } else {
+    statusEl.innerHTML = '<span style="color:#27AE60;">✓ ' + tokens.length + ' device' + (tokens.length>1?'s':'') + ' registered</span>' +
+      '<span style="color:#555;"> · Last token: …' + tokens[tokens.length-1].slice(-8) + '</span>';
+  }
+}
+
+function sendTestPushToMember() {
+  var sel = document.getElementById('pushTestMemberSelect');
+  var resultEl = document.getElementById('pushTestResult');
+  var uid = sel ? sel.value : '';
+  if (!uid) { showToast('⚠️ Select a member first.'); return; }
+  var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+  if (!m) return;
+  if (!m.fcmTokens || !m.fcmTokens.length) {
+    showToast('⚠️ ' + m.first + ' has no push token — they need to enable notifications first.');
+    return;
+  }
+  var url = state.cadScriptUrl;
+  if (!url) { showToast('⚠️ CAD Script URL not configured.'); return; }
+  if (resultEl) { resultEl.textContent = '⏳ Sending…'; resultEl.style.color = '#888'; }
+  var tokens = m.fcmTokens;
+  fetch(url, {
+    method: 'POST',
+    body: JSON.stringify({
+      action: 'sendPush',
+      tokens: tokens,
+      title: '🔔 Co.13 Test Notification',
+      body: 'Test sent to ' + m.first + ' ' + m.last + ' by admin at ' + new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),
+      data: { alertId: 'test_' + Date.now(), url: window.location.href.split('?')[0] }
+    })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    console.log('[RBVFC] Test push result:', JSON.stringify(d));
+    var success = d.successCount > 0 || d.success_count > 0 || (d.results && d.results.some(function(r){ return !r.error; }));
+    var failCount = d.failureCount || d.failure_count || 0;
+    if (success) {
+      if (resultEl) { resultEl.textContent = '✅ Delivered to ' + (d.successCount||d.success_count||'?') + ' device(s)' + (failCount?' · ❌ '+failCount+' failed':'') + '.'; resultEl.style.color = '#27AE60'; }
+      showToast('✅ Test push sent to ' + m.first + ' ' + m.last + '!');
+    } else {
+      if (resultEl) { resultEl.textContent = '❌ Failed — ' + (d.failureCount||d.failure_count||'all') + ' device(s) rejected. Token may be stale.'; resultEl.style.color = '#C8102E'; }
+      showToast('⚠️ Push failed for ' + m.first + '. Token may be expired — ask them to re-enable notifications.');
+    }
+  })
+  .catch(function(e){
+    if (resultEl) { resultEl.textContent = '❌ Network error: ' + e.message; resultEl.style.color = '#C8102E'; }
+    showToast('⚠️ Could not reach CAD Script: ' + e.message);
+  });
+}
+
+function sendTestPushAll() {
+  var url = state.cadScriptUrl;
+  if (!url) { showToast('⚠️ CAD Script URL not configured.'); return; }
+  var tokens = [];
+  var memberCount = 0;
+  (state.roster||[]).forEach(function(m){
+    if (m.active !== false && m.fcmTokens && m.fcmTokens.length) {
+      m.fcmTokens.forEach(function(t){ if (tokens.indexOf(t)===-1) tokens.push(t); });
+      memberCount++;
+    }
+  });
+  if (!tokens.length) { showToast('⚠️ No members have push tokens registered.'); return; }
+  if (!confirm('Send a test push to ' + memberCount + ' member(s) (' + tokens.length + ' device token(s))?')) return;
+  fetch(url, {
+    method: 'POST',
+    body: JSON.stringify({
+      action: 'sendPush',
+      tokens: tokens,
+      title: '🔔 Co.13 Test Notification',
+      body: 'Admin test push — ' + new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),
+      data: { alertId: 'test_all_' + Date.now(), url: window.location.href.split('?')[0] }
+    })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    var s = d.successCount || d.success_count || 0;
+    var f = d.failureCount || d.failure_count || 0;
+    showToast('✅ Test push: ' + s + ' delivered, ' + f + ' failed.');
+    var el = document.getElementById('notifStatus');
+    if (el) { el.textContent = 'Last broadcast: ' + new Date().toLocaleTimeString() + ' — ' + s + ' delivered, ' + f + ' failed.'; el.style.color = s > 0 ? '#27AE60' : '#C8102E'; }
+  })
+  .catch(function(e){ showToast('⚠️ Push relay error: ' + e.message); });
+}
+
+function sendTestPush() { sendTestPushAll(); }
 
 // ═══════════════════════════════════════════════════
 //  MISC STUBS (prevent onclick errors)
@@ -16954,8 +17142,23 @@ function applyBulkEdit() {
           <div style="background:#0D1A0D;border:1px solid #1A3A1A;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#7BE07B;">
             &#10003; Routes through your Google Apps Script (FCM HTTP v1). Make sure your CAD Script URL is configured above and the Apps Script is deployed.
           </div>
+
+          <!-- Per-member push test -->
+          <div style="background:#111;border:1px solid #2A2A2A;border-radius:10px;padding:14px;margin-bottom:12px;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#AAA;margin-bottom:10px;">🔔 Test Push — Per Member</div>
+            <select id="pushTestMemberSelect" onchange="updatePushTestMemberStatus()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:9px 10px;color:#F0F0F0;font-size:13px;margin-bottom:8px;">
+              <option value="">— Select member to test —</option>
+            </select>
+            <div id="pushTestMemberStatus" style="font-size:11px;color:#888;margin-bottom:8px;min-height:16px;"></div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-secondary btn-sm" style="flex:1;" onclick="sendTestPushToMember()">📤 Send Test Push</button>
+              <button class="btn btn-secondary btn-sm" onclick="refreshPushTestRoster()">↺ Refresh</button>
+            </div>
+            <div id="pushTestResult" style="font-size:12px;margin-top:8px;min-height:16px;"></div>
+          </div>
+
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-            <button class="btn btn-secondary btn-sm" onclick="sendTestPush()">🔔 Send Test Push</button>
+            <button class="btn btn-secondary btn-sm" onclick="sendTestPushAll()">🔔 Send Test Push (All Enabled)</button>
           </div>
           <div id="notifStatus" style="font-size:12px;color:#888;margin-bottom:10px;"></div>
           <div style="border-top:1px solid #1E1E1E;padding-top:10px;">
