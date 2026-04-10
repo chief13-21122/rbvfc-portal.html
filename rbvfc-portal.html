@@ -17054,12 +17054,12 @@ function applyBulkEdit() {
         ✅ Approvals
         <span id="approvalsBadge" style="display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);background:#C8102E;color:#FFF;font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;"></span>
       </button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsSheet();closeMoreMenu()">📅 Meetings</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsSheet();closeMoreMenu()">📅 Meetings</button>
       <div id="moreAdminTools" style="display:none;border-top:1px solid #2A2A2A;margin-top:12px;padding-top:12px;">
         <div style="font-size:10px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Admin Tools</div>
         <button class="btn btn-secondary btn-full" onclick="confirmSendMonthlyEmails();closeMoreMenu()">📧 Email LOSAP Reports (All)</button>
