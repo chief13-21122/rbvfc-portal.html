@@ -1466,7 +1466,7 @@ function calcMemberLOSAP(uid, year) {
     var cat = a.category;
     var cfg = CAT_CONFIG[cat];
     if (!cfg) return;
-    var p = a.points || 0;
+    var p = a.pts || a.points || 0;  // handle both field name variants
     catPts[cat] = (catPts[cat]||0) + p;
   });
   // Emergency responses: 0.5 pts each, no maximum (AACVFA §3f)
@@ -4934,7 +4934,21 @@ function applyUserSession(m) {
   var mab=document.getElementById('moreAdminBtn'); if(mab) mab.style.display=isOfficer?'block':'none';
   var mapb=document.getElementById('moreApprovalsBtn'); if(mapb) mapb.style.display=isOfficer?'block':'none';
   var ahb=document.getElementById('adminHeaderBtn'); if(ahb) ahb.style.display=isOfficer?'inline-flex':'none';
-  var sub=document.getElementById('switchUserBtn'); if(sub) sub.style.display=(m.appRole==='admin')?'inline-flex':'none';
+  var sub=document.getElementById('switchUserBtn');
+  if(sub) {
+    if (state._realUserId) {
+      var _rM2 = (state.roster||[]).find(function(x){ return x.id===state._realUserId; });
+      sub.textContent = '↩ Return to ' + (_rM2 ? _rM2.first : 'Me');
+      sub.style.background='#2A1A1A'; sub.style.borderColor='#C8102E'; sub.style.color='#C8102E';
+      sub.setAttribute('onclick','exitImpersonation()');
+      sub.style.display='inline-flex';
+    } else {
+      sub.textContent='👁 View As';
+      sub.style.background='#1A2A1A'; sub.style.borderColor='#27AE60'; sub.style.color='#27AE60';
+      sub.setAttribute('onclick','openSwitchUser()');
+      sub.style.display=(m.appRole==='admin')?'inline-flex':'none';
+    }
+  }
   var abt=document.getElementById('tab-approvals'); if(abt) abt.style.display=isOfficer?'inline-flex':'none';
   updateApprovalsBadge();
   var tt=document.getElementById('tab-training'); if(tt) tt.style.display='inline-flex';
@@ -11656,7 +11670,27 @@ function launchApp(member) {
   var switchBtn = document.getElementById('switchUserBtn');
   var moreAdminBtn = document.getElementById('moreAdminBtn');
   if (adminBtn) adminBtn.style.display = isOfficer ? 'inline-block' : 'none';
-  if (switchBtn) switchBtn.style.display = isAdmin ? 'inline-block' : 'none';
+  // Show switch/view-as btn for admins OR when already impersonating (need to return)
+  if (switchBtn) {
+    if (state._realUserId) {
+      // Currently viewing as someone else — show as "Return" button
+      var _realM = (state.roster||[]).find(function(x){ return x.id===state._realUserId; });
+      var _realName = _realM ? _realM.first : 'Me';
+      switchBtn.textContent = '↩ Return to ' + _realName;
+      switchBtn.style.background = '#2A1A1A';
+      switchBtn.style.borderColor = '#C8102E';
+      switchBtn.style.color = '#C8102E';
+      switchBtn.setAttribute('onclick', 'exitImpersonation()');
+      switchBtn.style.display = 'inline-block';
+    } else {
+      switchBtn.textContent = '👁 View As';
+      switchBtn.style.background = '#1A2A1A';
+      switchBtn.style.borderColor = '#27AE60';
+      switchBtn.style.color = '#27AE60';
+      switchBtn.setAttribute('onclick', 'openSwitchUser()');
+      switchBtn.style.display = isAdmin ? 'inline-block' : 'none';
+    }
+  }
   if (moreAdminBtn) moreAdminBtn.style.display = isOfficer ? '' : 'none';
   var moreApprBtn = document.getElementById('moreApprovalsBtn');
   if (moreApprBtn) moreApprBtn.style.display = isOfficer ? '' : 'none';
@@ -11752,6 +11786,8 @@ function confirmSwitchUser() {
   launchApp(member);
   showToast('👁 Viewing as '+member.first+' '+member.last);
 }
+
+function returnToSelf() { exitImpersonation(); }
 
 function exitImpersonation() {
   if (!state._realUserId) { logout(); return; }
