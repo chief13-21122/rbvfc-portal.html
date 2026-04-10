@@ -2399,7 +2399,7 @@ function renderLOSAP() {
   tbody.innerHTML = '';
   var allItems = [];
   // Add responses
-  responses.forEach(function(r){ allItems.push({date:r.date,cat:'emergency',desc:r.address+' ('+r.incidentType+')',pts:1,units:r.units}); });
+  responses.forEach(function(r){ allItems.push({date:r.date,cat:'emergency',desc:(r.address||'')+(r.type?' ('+r.type+')':''),pts:0.5,units:r.units}); });
   // Add activities — skip zero-pts or 'undefined' desc (corrupt legacy data)
   acts.forEach(function(a){
     if (!a.pts || a.pts <= 0) return;
@@ -2416,7 +2416,7 @@ function renderLOSAP() {
   allItems.forEach(function(item) {
     var tr = document.createElement('tr');
     var certBtn = item.cert ? '<button onclick="viewLosapCert(\'' + (item.id||'') + '\')" style="font-size:11px;color:#3498DB;background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;">📄 Cert</button>' : '';
-    var unitBadges = item.units ? item.units.map(function(u){ return '<span class="pill gray" style="font-size:10px;padding:2px 5px;">'+u+'</span>'; }).join(' ') : '';
+    var unitBadges = item.units ? item.units.map(function(u){ return '<span class="pill gray" style="font-size:10px;padding:2px 5px;">'+(UNIT_LABELS[u]||u)+'</span>'; }).join(' ') : '';
     tr.innerHTML = '<td style="padding:8px;color:#AAA;white-space:nowrap;">'+item.date+'</td>'+
       '<td style="padding:8px;"><span style="'+typePillStyle(item.cat)+'">'+typeLabel(item.cat)+'</span></td>'+
       '<td style="padding:8px;color:#CCC;">'+item.desc+(unitBadges?' <br>'+unitBadges:'')+(certBtn?' '+certBtn:'')+'</td>'+
@@ -2438,7 +2438,7 @@ function renderUnitBreakdown(uid, yr, responses) {
     if (unitCounts[u]===0) return;
     var isEMS = EMS_UNITS.includes(u);
     html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 10px;border-bottom:1px solid #1E1E1E;">'+
-      '<span style="font-size:13px;color:'+(isEMS?'#27AE60':'#3498DB')+';">'+u+'</span>'+
+      '<span style="font-size:13px;color:'+(isEMS?'#27AE60':'#3498DB')+';">'+(UNIT_LABELS[u]||u)+'</span>'+
       '<span style="font-family:Bebas Neue,sans-serif;font-size:16px;color:#F0F0F0;">'+unitCounts[u]+'</span>'+
       '</div>';
   });
