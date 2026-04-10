@@ -983,6 +983,14 @@ function renderNotifNudge() {
   el.style.display = 'flex';
 }
 
+function renderGcalNudge() {
+  var el = document.getElementById('gcalNudge');
+  if (!el) return;
+  if (!state.gcalClientId) { el.style.display='none'; return; }
+  if (gcalIsConnected()) { el.style.display='none'; return; }
+  el.style.display = 'flex';
+}
+
 function renderPushStatus() {
   var el = document.getElementById('pushStatusText');
   if (!el) return;
@@ -1073,6 +1081,7 @@ var state = {
   positionRankOverrides: {},  // admin overrides: {posName: [rank1, rank2, ...]}
   cadPendingCalls: [],         // calls fetched from Gmail sync, pending logging
   loggedIncidentNums: [],      // incident numbers already logged — skip on future syncs
+  gcalClientId: '',              // Google OAuth 2.0 Client ID for Calendar integration
   cadScriptUrl: '',            // separate Apps Script URL just for CAD dispatch sync
   lastCadSync: '',             // ISO timestamp of last successful CAD sync
   // Extended properties (used at runtime, safe to be undefined but declared for clarity)
@@ -1204,7 +1213,7 @@ function showTab(id) {
   // Refresh hooks
   if (id === 'admin') onAdminTabShow();
   if (id === 'drill') initDrillTab();
-  if (id === 'clock')    { try { renderMyShifts(); } catch(e){} try { renderNotifNudge(); } catch(e){} try { renderRecentSessions(); } catch(e){} try { checkAutoClockoutAlert(); } catch(e){} }
+  if (id === 'clock')    { try { renderMyShifts(); } catch(e){} try { renderNotifNudge(); } catch(e){} try { renderGcalNudge(); } catch(e){} try { renderRecentSessions(); } catch(e){} try { checkAutoClockoutAlert(); } catch(e){} }
   if (id === 'staffing') initStaffingTab();
   if (id === 'training') initTrainingTab();
   if (id === 'losap') {
@@ -3081,6 +3090,12 @@ function enrollInClass(classId) {
   var uid = state.currentUserId;
   if (cls.members.indexOf(uid) >= 0) { showToast('Already enrolled.'); return; }
   cls.members.push(uid);
+  // Push class to Google Calendar if connected
+  if (gcalIsConnected()) {
+    gcalPushClass(cls).then(function(id){
+      if(id){ if(!cls._gcalMembers) cls._gcalMembers={}; cls._gcalMembers[uid]=id; save(); }
+    }).catch(function(){});
+  }
   save();
   renderTrainingClasses();
   showToast('\u2705 Enrolled in '+cls.name);
@@ -4328,6 +4343,7 @@ function onAdminTabShow() {
   if (rawCard) rawCard.style.display = isOfficer2 ? '' : 'none';
   // Populate push test roster whenever admin tab opens
   try { refreshPushTestRoster(); renderPushStatus(); } catch(e){}
+  try { initGcalClientIdInput(); } catch(e){}
 }
 
 // ═══════════════════════════════════════════════════
@@ -7069,23 +7085,342 @@ function closeSignUpModal() {
 
 
 // ── CALENDAR INVITES ──────────────────────────────────────────
-function sendCalendarInvite(memberId, details) {
-  // details: { title, date, startTime(HHMM), hours, location, description, calEventId(optional) }
-  var url = state.sheetWebhookUrl;
-  if (!url) return;
-  var m = (state.roster||[]).find(function(x){ return x.id===memberId; });
-  if (!m || !m.email) return;
-  fetch(url, {
+// ═══════════════════════════════════════════════════════════════════════════
+//  GOOGLE CALENDAR OAUTH — Direct API Integration (OAuth 2.0 PKCE)
+//  No server required. Members authorize once; all signups push silently.
+// ═══════════════════════════════════════════════════════════════════════════
+
+var _GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+var _GCAL_TOKEN_KEY = 'rbvfc_gcal_token';
+var _GCAL_EXPIRY_KEY = 'rbvfc_gcal_expiry';
+var _GCAL_VERIFIER_KEY = 'rbvfc_gcal_verifier';
+
+// ── Token management ─────────────────────────────────────────────────────
+
+function _gcalGetToken() {
+  try {
+    var expiry = localStorage.getItem(_GCAL_EXPIRY_KEY);
+    if (expiry && Date.now() > parseInt(expiry)) {
+      localStorage.removeItem(_GCAL_TOKEN_KEY);
+      localStorage.removeItem(_GCAL_EXPIRY_KEY);
+      return null;
+    }
+    return localStorage.getItem(_GCAL_TOKEN_KEY) || null;
+  } catch(e) { return null; }
+}
+
+function _gcalSaveToken(token, expiresIn) {
+  try {
+    localStorage.setItem(_GCAL_TOKEN_KEY, token);
+    localStorage.setItem(_GCAL_EXPIRY_KEY, String(Date.now() + (expiresIn - 60) * 1000));
+  } catch(e) {}
+}
+
+function _gcalClearToken() {
+  try {
+    localStorage.removeItem(_GCAL_TOKEN_KEY);
+    localStorage.removeItem(_GCAL_EXPIRY_KEY);
+  } catch(e) {}
+}
+
+function gcalIsConnected() {
+  return !!_gcalGetToken();
+}
+
+// ── PKCE helpers ──────────────────────────────────────────────────────────
+
+function _gcalRandomString(len) {
+  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  var arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(function(b){ return chars[b % chars.length]; }).join('');
+}
+
+async function _gcalCodeChallenge(verifier) {
+  var data = new TextEncoder().encode(verifier);
+  var digest = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode.apply(null, new Uint8Array(digest)))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+// ── Connect flow ──────────────────────────────────────────────────────────
+
+async function gcalConnect() {
+  var clientId = state.gcalClientId;
+  if (!clientId) {
+    showToast('⚠️ Google Calendar Client ID not configured. Ask your admin.');
+    return;
+  }
+  var verifier = _gcalRandomString(64);
+  try { localStorage.setItem(_GCAL_VERIFIER_KEY, verifier); } catch(e) {}
+  var challenge = await _gcalCodeChallenge(verifier);
+  var redirectUri = window.location.href.split('?')[0].split('#')[0];
+  var params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: _GCAL_SCOPE,
+    access_type: 'offline',
+    prompt: 'consent',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    state: 'gcal_oauth'
+  });
+  window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+}
+
+async function _gcalHandleCallback(code) {
+  var clientId = state.gcalClientId;
+  var verifier = '';
+  try { verifier = localStorage.getItem(_GCAL_VERIFIER_KEY) || ''; } catch(e) {}
+  var redirectUri = window.location.href.split('?')[0].split('#')[0];
+  var resp = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
-    mode: 'no-cors',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({
-      action: 'calendarInvite',
-      email: m.email,
-      name: m.first+' '+m.last,
-      details: details
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code: code,
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      code_verifier: verifier,
+      grant_type: 'authorization_code'
     })
-  }).catch(function(e){ console.warn('Calendar invite failed:', e); });
+  });
+  var data = await resp.json();
+  if (data.access_token) {
+    _gcalSaveToken(data.access_token, data.expires_in || 3600);
+    if (data.refresh_token) {
+      try { localStorage.setItem('rbvfc_gcal_refresh', data.refresh_token); } catch(e) {}
+    }
+    try { localStorage.removeItem(_GCAL_VERIFIER_KEY); } catch(e) {}
+    showToast('✅ Google Calendar connected! Future signups will appear automatically.');
+    renderGcalStatus();
+    // Clean URL
+    window.history.replaceState({}, document.title, window.location.pathname);
+  } else {
+    showToast('⚠️ Calendar connection failed: ' + (data.error_description || data.error || 'Unknown error'));
+  }
+}
+
+async function _gcalRefreshToken() {
+  var refreshToken = '';
+  try { refreshToken = localStorage.getItem('rbvfc_gcal_refresh') || ''; } catch(e) {}
+  if (!refreshToken) return null;
+  var clientId = state.gcalClientId;
+  if (!clientId) return null;
+  var resp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken
+    })
+  });
+  var data = await resp.json();
+  if (data.access_token) {
+    _gcalSaveToken(data.access_token, data.expires_in || 3600);
+    return data.access_token;
+  }
+  return null;
+}
+
+async function _gcalGetValidToken() {
+  var token = _gcalGetToken();
+  if (token) return token;
+  return await _gcalRefreshToken();
+}
+
+function gcalDisconnect() {
+  _gcalClearToken();
+  try { localStorage.removeItem('rbvfc_gcal_refresh'); } catch(e) {}
+  showToast('📅 Google Calendar disconnected.');
+  renderGcalStatus();
+}
+
+// ── Create / Delete calendar events ──────────────────────────────────────
+
+async function _gcalCreateEvent(details) {
+  // details: { title, startISO, endISO, description, location }
+  var token = await _gcalGetValidToken();
+  if (!token) return null;
+  var body = {
+    summary: details.title,
+    description: details.description || '',
+    location: details.location || '',
+    start: { dateTime: details.startISO, timeZone: 'America/New_York' },
+    end:   { dateTime: details.endISO,   timeZone: 'America/New_York' },
+    reminders: { useDefault: false, overrides: [
+      { method: 'popup', minutes: 60 },
+      { method: 'popup', minutes: 15 }
+    ]}
+  };
+  try {
+    var resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    var data = await resp.json();
+    return data.id || null;
+  } catch(e) { console.warn('[RBVFC] GCal create failed:', e); return null; }
+}
+
+async function _gcalDeleteEvent(gcalEventId) {
+  if (!gcalEventId) return;
+  var token = await _gcalGetValidToken();
+  if (!token) return;
+  try {
+    await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + encodeURIComponent(gcalEventId), {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+  } catch(e) { console.warn('[RBVFC] GCal delete failed:', e); }
+}
+
+// ── Date/time helpers ─────────────────────────────────────────────────────
+
+function _gcalShiftISO(date, startHHMM, hours) {
+  // date: 'YYYY-MM-DD', startHHMM: '0700' or '07:00', hours: number
+  var hhmm = String(startHHMM).replace(':','');
+  var hh = parseInt(hhmm.slice(0,2)||'7');
+  var mm = parseInt(hhmm.slice(2,4)||'0');
+  var start = new Date(date + 'T' + String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0') + ':00');
+  var end = new Date(start.getTime() + (hours || 12) * 3600000);
+  return {
+    startISO: start.toISOString().replace('Z', '-05:00').slice(0, 22) + ':00',
+    endISO:   end.toISOString().replace('Z', '-05:00').slice(0, 22) + ':00'
+  };
+}
+
+// ── Public push functions ─────────────────────────────────────────────────
+
+async function gcalPushShift(shift) {
+  if (!gcalIsConnected()) return;
+  var times = _gcalShiftISO(shift.date, shift.start || shift.shiftStart || '0700', parseFloat(shift.hours || shift.shiftHours || 12));
+  var unit = UNIT_LABELS[shift.unitId] || shift.unitId || 'Unit';
+  var gcalId = await _gcalCreateEvent({
+    title: '🚒 Co.13 — ' + unit + ' (' + shift.position + ')',
+    startISO: times.startISO,
+    endISO: times.endISO,
+    description: 'RBVFC Staffing Shift\nUnit: ' + unit + '\nPosition: ' + shift.position + '\n\nPortal: ' + window.location.href,
+    location: 'Station 13, Riviera Beach, MD'
+  });
+  if (gcalId) shift._gcalEventId = gcalId;
+  return gcalId;
+}
+
+async function gcalPushMeeting(mtg, occurrenceDate) {
+  if (!gcalIsConnected()) return;
+  var startTime = mtg.startTime || mtg.time || '19:00';
+  var timeParts = startTime.split(':');
+  var hh = timeParts[0] || '19', mm = timeParts[1] || '00';
+  var durationHrs = (parseInt(mtg.duration || mtg.durationMins || 60)) / 60;
+  var times = _gcalShiftISO(occurrenceDate, hh + mm, durationHrs);
+  var gcalId = await _gcalCreateEvent({
+    title: '📋 Co.13 — ' + (mtg.title || 'Company Meeting'),
+    startISO: times.startISO,
+    endISO: times.endISO,
+    description: (mtg.description || mtg.notes || '') + '\n\nPortal: ' + window.location.href,
+    location: mtg.location || 'Station 13, Riviera Beach, MD'
+  });
+  return gcalId;
+}
+
+async function gcalPushEvent(ev) {
+  if (!gcalIsConnected()) return;
+  var startTime = ev.startTime || ev.time || '12:00';
+  var timeParts = startTime.split(':');
+  var hh = timeParts[0] || '12', mm = (timeParts[1] || '00').replace(/[^0-9]/g,'');
+  var endTime = ev.endTime || '';
+  var hours = 4;
+  if (endTime) {
+    var ep = endTime.split(':');
+    hours = (parseInt(ep[0]||'16') - parseInt(hh)) || 4;
+    if (hours <= 0) hours = 4;
+  }
+  var date = ev.startDate || ev.date || '';
+  var times = _gcalShiftISO(date, hh + mm.slice(0,2), hours);
+  var gcalId = await _gcalCreateEvent({
+    title: '🎉 Co.13 — ' + (ev.title || 'Event'),
+    startISO: times.startISO,
+    endISO: times.endISO,
+    description: (ev.description || ev.desc || '') + '\n\nPortal: ' + window.location.href,
+    location: ev.location || 'Station 13, Riviera Beach, MD'
+  });
+  return gcalId;
+}
+
+async function gcalPushClass(cls) {
+  if (!gcalIsConnected()) return;
+  // Push the full class date range as an all-day multi-day event
+  var start = cls.startDate || '';
+  var end = cls.endDate || cls.startDate || '';
+  if (!start) return;
+  var token = await _gcalGetValidToken();
+  if (!token) return;
+  var startTime = cls.startTime || '08:00';
+  var timeParts = startTime.split(':');
+  var hh = timeParts[0]||'8', mm = timeParts[1]||'00';
+  var times = _gcalShiftISO(start, hh + mm, cls.hoursPerSession || 4);
+  var gcalId = await _gcalCreateEvent({
+    title: '📚 Co.13 — ' + (cls.name || 'Training Class'),
+    startISO: times.startISO,
+    endISO: times.endISO,
+    description: 'Instructor: ' + (cls.instructor || '—') + '\n' + (cls.description || '') + '\n\nPortal: ' + window.location.href,
+    location: cls.location || 'Station 13, Riviera Beach, MD'
+  });
+  return gcalId;
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────
+
+function renderGcalStatus() {
+  var els = document.querySelectorAll('.gcal-status-text');
+  var connected = gcalIsConnected();
+  els.forEach(function(el) {
+    el.textContent = connected ? '✅ Connected' : '⚠️ Not connected';
+    el.style.color = connected ? '#27AE60' : '#F5A623';
+  });
+  var connectBtns = document.querySelectorAll('.gcal-connect-btn');
+  var disconnectBtns = document.querySelectorAll('.gcal-disconnect-btn');
+  connectBtns.forEach(function(b){ b.style.display = connected ? 'none' : ''; });
+  disconnectBtns.forEach(function(b){ b.style.display = connected ? '' : 'none'; });
+}
+
+// Check for OAuth callback on page load
+function _gcalCheckCallback() {
+  var params = new URLSearchParams(window.location.search);
+  var code = params.get('code');
+  var oauthState = params.get('state');
+  if (code && oauthState === 'gcal_oauth') {
+    _gcalHandleCallback(code);
+  }
+}
+
+
+function sendCalendarInvite(memberId, details) {
+  // Legacy stub — now handled by direct Google Calendar API
+  // Only push if the current user is the one signing up (their token is local)
+  if (memberId !== state.currentUserId) return;
+  if (!gcalIsConnected()) return;
+  // Push the event silently based on details
+  var date = details.date || '';
+  var startHH = details.startHH || details.startTime || '07';
+  var hours = details.hours || 12;
+  gcalPushLegacy(date, startHH, hours, details.title || 'Shift', details.location || 'Station 13');
+}
+
+async function gcalPushLegacy(date, startHH, hours, title, location) {
+  if (!date) return;
+  var hhmm = String(startHH).replace(':','').padStart(4,'0');
+  var times = _gcalShiftISO(date, hhmm, hours);
+  await _gcalCreateEvent({
+    title: '🚒 Co.13 — ' + title,
+    startISO: times.startISO,
+    endISO: times.endISO,
+    description: 'RBVFC Portal — ' + window.location.href,
+    location: location
+  });
 }
 
 function deleteCalendarInvite(calEventId) {
@@ -7249,6 +7584,8 @@ function confirmSignUp() {
   renderStaffingBoard();
   renderMyShifts();
   sendCalendarInvite(uid, shiftToCalDetails(newShift));
+  // Also push directly to Google Calendar if connected
+  gcalPushShift(newShift).then(function(id){ if(id){ newShift._gcalEventId=id; save(); } }).catch(function(){});
   if (_didTk13) {
     showToast('\u2705 Signed up for Engine 131 & Truck 13 on ' + date + '!');
     showSubmitConfirmation('Engine 131 (' + posName + ') + Truck 13 (' + (getUnitPositions('Tk13')[_tk13PosIdx]||'') + ') — ' + date, '\ud83d\ude92');
@@ -8276,6 +8613,7 @@ function cancelShift(elOrId) {
   // No blocking confirm — mobile-safe
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
   if (shift && shift.calEventId) deleteCalendarInvite(shift.calEventId);
+  if (shift && shift._gcalEventId) _gcalDeleteEvent(shift._gcalEventId).catch(function(){});
   state.staffingShifts = (state.staffingShifts||[]).filter(function(s){ return s.id!==shiftId; });
   save();
   renderStaffingBoard();
@@ -8288,6 +8626,7 @@ function removeFromShift(elOrId) {
   // No blocking confirm — officer action is reversible
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
   if (shift && shift.calEventId) deleteCalendarInvite(shift.calEventId);
+  if (shift && shift._gcalEventId) _gcalDeleteEvent(shift._gcalEventId).catch(function(){});
   state.staffingShifts = (state.staffingShifts||[]).filter(function(s){ return s.id!==shiftId; });
   save();
   renderStaffingBoard();
@@ -9349,6 +9688,7 @@ function signUpSpecialEvent(elOrId) {
   ev.signups.push({ memberId:uid, position:selectedPos, signedUpAt:new Date().toISOString(), clockedIn:false, clockedInAt:null, clockedOutAt:null });
   save(); renderBothSpecialEventViews();
   sendCalendarInvite(uid, eventToCalDetails(ev));
+  gcalPushEvent(ev).then(function(id){ if(id){ var s=(ev.signups||[]).find(function(x){return x.memberId===uid;}); if(s){s._gcalEventId=id; save();} } }).catch(function(){});
   showToast('\u2705 Signed up for '+ev.title+'! Calendar invite sent!');
 }
 
@@ -9359,6 +9699,7 @@ function cancelSpecialEventSignup(elOrId) {
   if (!ev) return;
   var mySig = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
   if (mySig && mySig.calEventId) deleteCalendarInvite(mySig.calEventId);
+  if (mySig && mySig._gcalEventId) _gcalDeleteEvent(mySig._gcalEventId).catch(function(){});
   ev.signups = (ev.signups||[]).filter(function(s){ return s.memberId!==uid; });
   save(); renderBothSpecialEventViews();
   showToast('Signup cancelled. Calendar event removed.');
@@ -9616,6 +9957,12 @@ function signUpForMeeting(mtgId, occurrenceDate) {
   var mtg=(state.meetings||[]).find(function(m){ return m.id===mtgId; });
   state.meetingAttendance.push({ id:'ma_'+Date.now(), mtgId:mtgId, date:occurrenceDate,
     memberId:uid, signedUpAt:new Date().toISOString(), clockedInAt:null, clockedOutAt:null });
+  // Push to Google Calendar if connected
+  if (gcalIsConnected() && mtg) {
+    gcalPushMeeting(mtg, occurrenceDate).then(function(id){
+      if(id){ var att=(state.meetingAttendance||[]).find(function(a){return a.mtgId===mtgId&&a.date===occurrenceDate&&a.memberId===uid;}); if(att){att._gcalEventId=id; save();} }
+    }).catch(function(){});
+  }
   save();
   try { renderMyShifts(); } catch(e){}
   showToast('\u2705 Signed up for '+(mtg?mtg.title:'meeting')+'.');
@@ -11650,6 +11997,8 @@ function clockOutShiftNow() {
 }
 
 function launchApp(member) {
+  // Check for OAuth callback (Google Calendar connect redirect)
+  try { _gcalCheckCallback(); } catch(e) {}
   document.getElementById('loginOverlay').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   document.getElementById('app').style.flexDirection = 'column';
@@ -12775,6 +13124,18 @@ function clearAllRankRequirements() {
   renderRankEditor();
   showToast('All rank requirements cleared.');
 }
+function saveGcalClientId() {
+  var v = ((document.getElementById('gcalClientIdInput')||{}).value||'').trim();
+  state.gcalClientId = v;
+  save();
+  showToast(v ? '✅ Google Calendar Client ID saved.' : 'Client ID cleared.');
+}
+
+function initGcalClientIdInput() {
+  var inp = document.getElementById('gcalClientIdInput');
+  if (inp) inp.value = state.gcalClientId || '';
+}
+
 function saveFcmKey() {
   var k=((document.getElementById('fcmServerKey')||{}).value||'').trim();
   state.fcmServerKey=k; save();
@@ -15686,6 +16047,12 @@ function applyBulkEdit() {
         <div id="yearEndContent"></div>
       </div>
 
+
+      <!-- Google Calendar Connect Nudge -->
+      <div id="gcalNudge" style="display:none;align-items:center;justify-content:space-between;background:#0D1A2A;border:1px solid #1A3A5A;border-radius:10px;padding:12px 14px;margin-bottom:12px;gap:12px;">
+        <div style="font-size:13px;color:#3498DB;">&#128197; Connect Google Calendar to auto-add shifts &amp; events</div>
+        <button class="btn btn-sm" style="background:#1A3A5A;border-color:#3498DB;color:#3498DB;white-space:nowrap;flex-shrink:0;" onclick="gcalConnect()">Connect</button>
+      </div>
       <!-- Clock In/Out Card -->
       
       <div id="notifNudge" style="display:none;align-items:center;justify-content:space-between;background:#1A1200;border:1px solid #3A2800;border-radius:10px;padding:12px 14px;margin-bottom:12px;gap:12px;">
@@ -17097,6 +17464,17 @@ function applyBulkEdit() {
             <div style="background:#1A2A3A;border:1px solid #2980B9;border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px;color:#7EC8E3;">
               ℹ️ CAD emails are synced automatically via Google Apps Script every 30 minutes. Use the Setup Guide to configure Gmail integration.
             </div>
+            <!-- Google Calendar OAuth -->
+            <div style="border-top:1px solid #1E1E1E;margin:12px 0;padding-top:12px;">
+              <div style="font-size:11px;font-weight:700;color:#3498DB;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">📅 Google Calendar Integration</div>
+              <p style="font-size:12px;color:#666;margin-bottom:10px;">Members connect their own Google Calendar to auto-add shifts, meetings, and events. Paste the <strong>OAuth 2.0 Client ID</strong> (Web Application type) from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#3498DB;">Google Cloud Console ↗</a>.<br><br>In Google Cloud Console: APIs &amp; Services → Credentials → Create Credentials → OAuth Client ID → Web Application. Add your portal URL as an <em>Authorized JavaScript Origin</em> AND an <em>Authorized Redirect URI</em>.</p>
+              <div class="form-group">
+                <label>Google OAuth 2.0 Client ID</label>
+                <input type="text" id="gcalClientIdInput" placeholder="xxxx.apps.googleusercontent.com" style="font-size:12px;">
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="saveGcalClientId()">💾 Save Client ID</button>
+            </div>
+            <div style="border-top:1px solid #1E1E1E;margin:12px 0;"></div>
             <div class="form-group">
               <label>Apps Script Web App URL</label>
               <input type="url" id="cadScriptUrl" placeholder="https://script.google.com/macros/s/…/exec" style="font-size:12px;">
