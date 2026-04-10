@@ -12355,7 +12355,7 @@ function _formatCadAddress(raw) {
 
 function _autoLogCadCall(call) {
   // Auto-create an emergency response record from a synced CAD call
-  // Members who are staffed on the call's units today are auto-logged
+  // Only logs if at least one responding unit has staffing scheduled for that date
   // Normalize date — strip time component if full ISO string was provided
   var today = (call.date||'').slice(0,10) || new Date().toISOString().slice(0,10);
   var callUnits = _parseCadUnits(call.units || call.apparatus || '');
@@ -12376,7 +12376,16 @@ function _autoLogCadCall(call) {
   // Skip auto-log if no unit info at all, or no units could be resolved
   if (!callUnits.length || !resolvedUnitIds.length) return;
 
-  // Find members staffed on those units today (clocked-in shifts take priority)
+  // Check if any responding unit has staffing scheduled for this date
+  // If no staffing exists for any unit, skip — likely not our call
+  var hasStaffing = resolvedUnitIds.some(function(unitId) {
+    return (state.staffingShifts || []).some(function(s) {
+      return s.date === today && s.unitId === unitId && s.memberId;
+    });
+  });
+  if (!hasStaffing) return;
+
+  // Find members staffed on those units today
   var staffedMembers = [];
   resolvedUnitIds.forEach(function(unitId) {
     (state.staffingShifts || []).forEach(function(s) {
@@ -12394,9 +12403,6 @@ function _autoLogCadCall(call) {
       staffedMembers.push(s.memberId);
     }
   });
-
-  // Even if nobody is staffed, log the response so officers can edit it
-  // Calls with no staffing show with a flag for officer review
 
   // Avoid duplicate auto-log for same incident
   var incKey = call.incidentNum || call.id || (call.address + '_' + today);
@@ -12425,10 +12431,8 @@ function _autoLogCadCall(call) {
     members:      staffedMembers,
     autoStaffed:  staffedMembers,
     alarmTime:    call.alarmTime || '',
-    notes:        staffedMembers.length
-                    ? 'Auto-logged from CAD sync. ' + staffedMembers.length + ' member(s) auto-assigned from staffing.'
-                    : 'Auto-logged from CAD sync. No staffing found — officers must add responding members.',
-    needsReview:  !staffedMembers.length,
+    notes:        'Auto-logged from CAD sync. ' + staffedMembers.length + ' member(s) auto-assigned from staffing.',
+    needsReview:  false,
     _cadKey:      incKey,
     enteredBy:    state.currentUserId || 'system',
     created:      new Date().toISOString()
