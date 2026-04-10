@@ -2415,7 +2415,7 @@ function renderLOSAP() {
   }
   allItems.forEach(function(item) {
     var tr = document.createElement('tr');
-    var certBtn = item.cert ? '<a href="'+item.cert+'" target="_blank" style="font-size:11px;color:#3498DB;">📄 Cert</a>' : '';
+    var certBtn = item.cert ? '<button onclick="viewLosapCert(\'' + (item.id||'') + '\')" style="font-size:11px;color:#3498DB;background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;">📄 Cert</button>' : '';
     var unitBadges = item.units ? item.units.map(function(u){ return '<span class="pill gray" style="font-size:10px;padding:2px 5px;">'+u+'</span>'; }).join(' ') : '';
     tr.innerHTML = '<td style="padding:8px;color:#AAA;white-space:nowrap;">'+item.date+'</td>'+
       '<td style="padding:8px;"><span style="'+typePillStyle(item.cat)+'">'+typeLabel(item.cat)+'</span></td>'+
@@ -3303,6 +3303,32 @@ function _handleCertUploadResponse(text, s, onComplete, suffix) {
   } else {
     if (onComplete) onComplete(false, (d.error||'Upload failed')+suffix);
   }
+}
+
+function viewLosapCert(activityId) {
+  var item = (state.losapActivities||[]).find(function(a){ return a.id === activityId; });
+  if (!item || !item.cert) { showToast('\u26a0\ufe0f No certificate attached.'); return; }
+  openCertBlob(item.cert, item.certMime, item.certName);
+}
+
+function openCertBlob(dataUrl, mimeType, filename) {
+  if (!dataUrl) { showToast('\u26a0\ufe0f No certificate data.'); return; }
+  try {
+    var mime  = mimeType || 'application/pdf';
+    var b64   = dataUrl.indexOf(',') >= 0 ? dataUrl.split(',')[1] : dataUrl;
+    var bytes = atob(b64);
+    var buf   = new Uint8Array(bytes.length);
+    for (var i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
+    var blob  = new Blob([buf], { type: mime });
+    var url   = URL.createObjectURL(blob);
+    var win   = window.open(url, '_blank');
+    if (!win) {
+      var a = document.createElement('a'); a.href = url;
+      a.download = filename || ('certificate.' + (mime.split('/')[1] || 'pdf'));
+      a.click(); showToast('Certificate downloading\u2026');
+    }
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+  } catch(e) { showToast('\u26a0\ufe0f Could not open certificate: ' + e.message); }
 }
 
 function viewCert(submissionId) {
@@ -10317,12 +10343,13 @@ function _approvalCard(opts) {
   // opts: {title, meta, sub, notes, certData, certName, certMime, canAct, approveLabel, approveFn, rejectFn, dataId, waitMsg}
   var certBtn = '';
   if (opts.certData) {
-    certBtn = '<a href="'+opts.certData+'" target="_blank" '+
+    // Use Blob URL via viewCert() — direct data: href is blocked by Chrome security policy
+    var _certIcon = opts.certMime === 'application/pdf' ? '📄' : '🖼️';
+    certBtn = '<button onclick="viewCert(\'' + opts.dataId + '\')" '+
       'style="display:inline-flex;align-items:center;gap:5px;background:#1A2A1A;border:1px solid #27AE60;'+
-      'color:#27AE60;border-radius:6px;padding:5px 10px;font-size:11px;text-decoration:none;font-weight:700;">'+
-      (opts.certMime==='application/pdf'?'📄':'🖼️')+' View Certificate</a>';
+      'color:#27AE60;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;font-weight:700;">'+
+      _certIcon + ' View Certificate</button>';
   } else if (opts.hasCert || opts.certAttached) {
-    // Cert was submitted but not available on this device (stored locally on submitter's device)
     certBtn = '<span style="display:inline-flex;align-items:center;gap:5px;background:#1A1A2A;border:1px solid #555;'+
       'color:#888;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;">📎 Certificate attached</span>';
   }
