@@ -1264,7 +1264,7 @@ function showTab(id) {
   // Refresh hooks
   if (id === 'admin') onAdminTabShow();
   if (id === 'drill') initDrillTab();
-  if (id === 'clock')    { try { renderMyShifts(); } catch(e){} try { renderNotifNudge(); } catch(e){} try { renderGcalNudge(); } catch(e){} try { renderRecentSessions(); } catch(e){} try { checkAutoClockoutAlert(); } catch(e){} }
+  if (id === 'clock')    { try { renderMyShifts(); } catch(e){} try { renderNotifNudge(); } catch(e){} try { renderRecentSessions(); } catch(e){} try { checkAutoClockoutAlert(); } catch(e){} }
   if (id === 'staffing') initStaffingTab();
   if (id === 'training') initTrainingTab();
   if (id === 'losap') {
@@ -1287,6 +1287,25 @@ function showTab(id) {
   // Wire up any new cards rendered in this tab
   setTimeout(initCardCollapse, 50);
 }
+function moreNotifAction() {
+  // If already granted and token exists — send a test push
+  // If denied — show blocked modal with instructions
+  // If not yet enabled — trigger the permission flow
+  var perm = ('Notification' in window) ? Notification.permission : 'denied';
+  var uid = state.currentUserId;
+  var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+  var hasToken = m && m.fcmTokens && m.fcmTokens.length > 0;
+  if (perm === 'granted' && hasToken) {
+    // Already enabled — send test
+    sendTestPushToSelf();
+  } else if (perm === 'denied') {
+    _showPushBlockedModal();
+  } else {
+    // Not yet enabled — start the permission flow
+    requestPushPermission();
+  }
+}
+
 function moreGcalAction() {
   if (gcalIsConnected()) {
     if (confirm('Disconnect Google Calendar? New signups will no longer sync automatically.')) {
@@ -1337,8 +1356,22 @@ function showMoreMenu() {
   // Show data management tools for admin/officer
   var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
   var isOfficer = me && (me.appRole==='admin'||me.appRole==='officer');
-  var adminTools = document.getElementById('moreAdminTools');
-  if (adminTools) adminTools.style.display = isOfficer ? 'block' : 'none';
+
+  // Update notification button state
+  var notifLabel = document.getElementById('moreNotifLabel');
+  if (notifLabel) {
+    var perm2 = ('Notification' in window) ? Notification.permission : 'denied';
+    var uid2 = state.currentUserId;
+    var m2 = (state.roster||[]).find(function(x){ return x.id===uid2; });
+    var hasToken2 = m2 && m2.fcmTokens && m2.fcmTokens.length > 0;
+    if (perm2 === 'granted' && hasToken2) {
+      notifLabel.textContent = 'Test My Notifications';
+    } else if (perm2 === 'denied') {
+      notifLabel.textContent = 'Fix Notification Settings';
+    } else {
+      notifLabel.textContent = 'Enable Notifications';
+    }
+  }
   // Update Google Calendar button state
   var gcalLabel = document.getElementById('moreGcalLabel');
   var gcalStatus = document.getElementById('moreGcalStatus');
@@ -16155,11 +16188,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       </div>
 
 
-      <!-- Google Calendar Connect Nudge -->
-      <div id="gcalNudge" style="display:none;align-items:center;justify-content:space-between;background:#0D1A2A;border:1px solid #1A3A5A;border-radius:10px;padding:12px 14px;margin-bottom:12px;gap:12px;">
-        <div style="font-size:13px;color:#3498DB;">&#128197; Connect Google Calendar to auto-add shifts &amp; events</div>
-        <button class="btn btn-sm" style="background:#1A3A5A;border-color:#3498DB;color:#3498DB;white-space:nowrap;flex-shrink:0;" onclick="gcalConnect()">Connect</button>
-      </div>
       <!-- Clock In/Out Card -->
       
       <div id="notifNudge" style="display:none;align-items:center;justify-content:space-between;background:#1A1200;border:1px solid #3A2800;border-radius:10px;padding:12px 14px;margin-bottom:12px;gap:12px;">
@@ -17827,17 +17855,13 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           📅 <span id="moreGcalLabel">Connect Google Calendar</span>
           <span id="moreGcalStatus" style="position:absolute;top:50%;right:14px;transform:translateY(-50%);font-size:10px;"></span>
         </button>
-        <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="sendTestPushToSelf();closeMoreMenu()">🔔 Test My Notifications</button>
+        <button class="btn btn-secondary btn-full" id="moreNotifBtn" style="margin-top:8px;" onclick="moreNotifAction();closeMoreMenu()">
+          🔔 <span id="moreNotifLabel">Enable Notifications</span>
+        </button>
       </div>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
-      <div id="moreAdminTools" style="display:none;border-top:1px solid #2A2A2A;margin-top:12px;padding-top:12px;">
-        <div style="font-size:10px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Admin Tools</div>
-        <button class="btn btn-secondary btn-full" onclick="confirmSendMonthlyEmails();closeMoreMenu()">📧 Email LOSAP Reports (All)</button>
-        <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="openSendToMemberModal();closeMoreMenu()">📧 Email LOSAP Report (Member&hellip;)</button>
-        <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="exportJSON();closeMoreMenu()">📦 Download Full Backup (.json)</button>
-        <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="exportCSV();closeMoreMenu()">📊 Export CSV</button>
-      </div>
+
     </div>
   </div>
 
