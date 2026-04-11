@@ -17464,17 +17464,6 @@ function applyBulkEdit() {
             <div style="background:#1A2A3A;border:1px solid #2980B9;border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px;color:#7EC8E3;">
               ℹ️ CAD emails are synced automatically via Google Apps Script every 30 minutes. Use the Setup Guide to configure Gmail integration.
             </div>
-            <!-- Google Calendar OAuth -->
-            <div style="border-top:1px solid #1E1E1E;margin:12px 0;padding-top:12px;">
-              <div style="font-size:11px;font-weight:700;color:#3498DB;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">📅 Google Calendar Integration</div>
-              <p style="font-size:12px;color:#666;margin-bottom:10px;">Members connect their own Google Calendar to auto-add shifts, meetings, and events. Paste the <strong>OAuth 2.0 Client ID</strong> (Web Application type) from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#3498DB;">Google Cloud Console ↗</a>.<br><br>In Google Cloud Console: APIs &amp; Services → Credentials → Create Credentials → OAuth Client ID → Web Application. Add your portal URL as an <em>Authorized JavaScript Origin</em> AND an <em>Authorized Redirect URI</em>.</p>
-              <div class="form-group">
-                <label>Google OAuth 2.0 Client ID</label>
-                <input type="text" id="gcalClientIdInput" placeholder="xxxx.apps.googleusercontent.com" style="font-size:12px;">
-              </div>
-              <button class="btn btn-secondary btn-sm" onclick="saveGcalClientId()">💾 Save Client ID</button>
-            </div>
-            <div style="border-top:1px solid #1E1E1E;margin:12px 0;"></div>
             <div class="form-group">
               <label>Apps Script Web App URL</label>
               <input type="url" id="cadScriptUrl" placeholder="https://script.google.com/macros/s/…/exec" style="font-size:12px;">
@@ -17543,6 +17532,28 @@ function applyBulkEdit() {
         </div>
       </div>
 
+
+
+      <!-- Google Calendar Integration -->
+      <div class="card" style="margin-top:16px;">
+        <div class="card-header" onclick="toggleAdminCardById('gcalCard')" style="cursor:pointer;user-select:none;">
+          <div class="icon">📅</div><h2>Google Calendar</h2>
+          <span id="gcalCardChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;">&#9660;</span>
+        </div>
+        <div id="gcalCard" style="padding:16px;">
+          <p style="font-size:12px;color:#666;margin-bottom:12px;">
+            Members connect their personal Google Calendar once — after that, every shift, meeting, and event they sign up for automatically appears on their calendar without any extra steps.<br><br>
+            Paste the <strong>OAuth 2.0 Client ID</strong> (Web Application type) from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#3498DB;">Google Cloud Console ↗</a>. In the console: APIs &amp; Services → Credentials → Create Credentials → OAuth Client ID → Web Application. Add your portal URL as both an <em>Authorized JavaScript Origin</em> and an <em>Authorized Redirect URI</em>.
+          </p>
+          <div class="form-group">
+            <label>Google OAuth 2.0 Client ID</label>
+            <input type="text" id="gcalClientIdInput" placeholder="xxxx.apps.googleusercontent.com" style="font-size:12px;">
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-sm" onclick="saveGcalClientId()">💾 Save Client ID</button>
+          </div>
+        </div>
+      </div>
 
       <!-- Firestore Sync Configuration -->
       <div class="card" id="firestoreConfigCard">
