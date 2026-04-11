@@ -17126,21 +17126,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
     <!-- ══════════════ TRAINING TAB ══════════════ -->
     <div id="section-training" class="section">
 
-      <div class="card" style="padding:0;overflow:hidden;">
-        <div class="card-header" onclick="toggleStaffCard('trainingClassesBody','trainingClassesChevron')" style="cursor:pointer;user-select:none;padding:14px 16px;">
-          <div class="icon">📚</div>
-          <h2>Training Classes</h2>
-          <span id="trainingClassesChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span>
-        </div>
-        <div id="trainingClassesBody" style="padding:0 16px 16px;">
-          <div id="trainingClassesOfficerBtn" style="display:none;margin-bottom:12px;">
-            <button class="btn btn-primary" onclick="openClassModal()">＋ Create Class</button>
-          </div>
-          <div id="trainingClassesContainer"></div>
-        </div>
-      </div>
-
-
       <div class="card" id="trainingSubmitCard">
         <div class="card-header"><div class="icon">📤</div><h2>Submit Training for Approval</h2></div>
         <div class="alert info" style="margin-bottom:14px;">📋 Submit completed training courses for LOSAP credit. All submissions require Fire Chief approval before points are posted.</div>
@@ -17198,11 +17183,24 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         <button class="btn btn-primary btn-full" onclick="submitTraining()">📤 Submit for Approval</button>
       </div>
 
-      <!-- Training History / Review -->
       <!-- Training Classes -->
-      
 
-      <!-- Submit Drill Report (moved to top) -->
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div class="card-header" onclick="toggleStaffCard('trainingClassesBody','trainingClassesChevron')" style="cursor:pointer;user-select:none;padding:14px 16px;">
+          <div class="icon">📚</div>
+          <h2>Training Classes</h2>
+          <span id="trainingClassesChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span>
+        </div>
+        <div id="trainingClassesBody" style="padding:0 16px 16px;">
+          <div id="trainingClassesOfficerBtn" style="display:none;margin-bottom:12px;">
+            <button class="btn btn-primary" onclick="openClassModal()">＋ Create Class</button>
+          </div>
+          <div id="trainingClassesContainer"></div>
+        </div>
+      </div>
+
+      <!-- Submit Drill Report -->
+
       <div class="card" id="drillSubmitCard">
         <div class="card-header"><div class="icon">🔧</div><h2>Submit Drill Report</h2></div>
         <div class="form-grid">
