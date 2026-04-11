@@ -1236,6 +1236,43 @@ function showTab(id) {
   // Wire up any new cards rendered in this tab
   setTimeout(initCardCollapse, 50);
 }
+function moreGcalAction() {
+  if (gcalIsConnected()) {
+    if (confirm('Disconnect Google Calendar? New signups will no longer sync automatically.')) {
+      gcalDisconnect();
+    }
+  } else {
+    gcalConnect();
+  }
+}
+
+function sendTestPushToSelf() {
+  var uid = state.currentUserId;
+  var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+  if (!m || !m.fcmTokens || !m.fcmTokens.length) {
+    showToast('⚠️ Enable notifications first — tap Enable on This Device in settings.');
+    return;
+  }
+  var url = state.cadScriptUrl;
+  if (!url) { showToast('⚠️ CAD Script URL not configured.'); return; }
+  fetch(url, {
+    method: 'POST',
+    body: JSON.stringify({
+      action: 'sendPush',
+      tokens: m.fcmTokens,
+      title: '🔔 Co.13 Notification Test',
+      body: 'Your notifications are working! — ' + new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),
+      data: { alertId: 'test_self_' + Date.now() }
+    })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    var ok = d.successCount > 0 || d.success_count > 0;
+    showToast(ok ? '✅ Test notification sent! Check your phone.' : '⚠️ Delivery failed — try re-enabling notifications.');
+  })
+  .catch(function(){ showToast('⚠️ Could not reach server. Check your connection.'); });
+}
+
 function showMoreMenu() {
   var s = document.getElementById('moreSheet');
   if (s) {
@@ -1251,6 +1288,19 @@ function showMoreMenu() {
   var isOfficer = me && (me.appRole==='admin'||me.appRole==='officer');
   var adminTools = document.getElementById('moreAdminTools');
   if (adminTools) adminTools.style.display = isOfficer ? 'block' : 'none';
+  // Update Google Calendar button state
+  var gcalLabel = document.getElementById('moreGcalLabel');
+  var gcalStatus = document.getElementById('moreGcalStatus');
+  var gcalBtn = document.getElementById('moreGcalBtn');
+  if (gcalLabel) {
+    var gcalConnected = gcalIsConnected();
+    gcalLabel.textContent = gcalConnected ? 'Disconnect Google Calendar' : 'Connect Google Calendar';
+    if (gcalStatus) { gcalStatus.textContent = gcalConnected ? '✅' : ''; }
+    if (gcalBtn) { gcalBtn.style.borderColor = gcalConnected ? '#27AE60' : ''; gcalBtn.style.color = gcalConnected ? '#27AE60' : ''; }
+    // Hide if no client ID configured
+    var gcalSection = document.getElementById('moreMemberTools');
+    if (gcalSection) gcalSection.style.display = state.gcalClientId ? 'block' : 'none';
+  }
 }
 function hideMoreMenu() {
   var s = document.getElementById('moreSheet'); if(s) { s.style.opacity='0'; s.style.pointerEvents='none'; var p=document.getElementById('moreSheetPanel'); if(p) p.style.transform='translateY(100%)'; setTimeout(function(){ s.style.display='none'; },350); }
@@ -17713,6 +17763,15 @@ function applyBulkEdit() {
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
+      <!-- Member Tools section -->
+      <div id="moreMemberTools" style="border-top:1px solid #2A2A2A;margin-top:12px;padding-top:12px;">
+        <div style="font-size:10px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">My Settings</div>
+        <button class="btn btn-secondary btn-full" id="moreGcalBtn" onclick="moreGcalAction();closeMoreMenu()" style="position:relative;">
+          📅 <span id="moreGcalLabel">Connect Google Calendar</span>
+          <span id="moreGcalStatus" style="position:absolute;top:50%;right:14px;transform:translateY(-50%);font-size:10px;"></span>
+        </button>
+        <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="sendTestPushToSelf();closeMoreMenu()">🔔 Test My Notifications</button>
+      </div>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
       <div id="moreAdminTools" style="display:none;border-top:1px solid #2A2A2A;margin-top:12px;padding-top:12px;">
