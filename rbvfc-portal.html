@@ -10,6 +10,14 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Member LOSAP Portal - Co.13</title>
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Co.13 Portal">
+<meta name="application-name" content="Co.13 Portal">
+<meta name="theme-color" content="#C8102E">
+<link rel="icon" id="dynamicFavicon" type="image/png" href="">
+<link rel="apple-touch-icon" id="appleTouchIcon" href="">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -504,6 +512,49 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 </style>
 <!-- Firebase SDKs loaded dynamically by initFirebase() when config is saved -->
 <script>
+// ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
+function updateFaviconFromLogo(logoDataUrl) {
+  if (!logoDataUrl) return;
+  try {
+    var canvas = document.createElement('canvas');
+    canvas.width = 192; canvas.height = 192;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#C8102E';
+    ctx.beginPath();
+    ctx.arc(96, 96, 96, 0, Math.PI * 2);
+    ctx.fill();
+    var img = new Image();
+    img.onload = function() {
+      ctx.drawImage(img, 21, 21, 150, 150);
+      var dataUrl = canvas.toDataURL('image/png');
+      var fav = document.getElementById('dynamicFavicon');
+      if (fav) fav.href = dataUrl;
+      var apple = document.getElementById('appleTouchIcon');
+      if (apple) apple.href = dataUrl;
+    };
+    img.src = logoDataUrl;
+  } catch(e) {}
+}
+
+function initFavicon() {
+  var logo = (typeof state !== 'undefined' && state && state.logo) ? state.logo : null;
+  if (!logo) { try { logo = localStorage.getItem('rbvfc_logo') || null; } catch(e) {} }
+  if (logo) { updateFaviconFromLogo(logo); return; }
+  // Fallback: red square with "13"
+  try {
+    var c = document.createElement('canvas'); c.width=64; c.height=64;
+    var cx = c.getContext('2d');
+    cx.fillStyle='#C8102E'; cx.fillRect(0,0,64,64);
+    cx.fillStyle='#FFF'; cx.font='bold 30px sans-serif';
+    cx.textAlign='center'; cx.textBaseline='middle';
+    cx.fillText('13',32,32);
+    var url = c.toDataURL('image/png');
+    var fav = document.getElementById('dynamicFavicon'); if(fav) fav.href=url;
+    var apl = document.getElementById('appleTouchIcon'); if(apl) apl.href=url;
+  } catch(e) {}
+}
+
+
 
 
 // ══════════════════════════════════════════════════════════════
@@ -11248,6 +11299,9 @@ function applyLogo() {
     if (adminPreview)     adminPreview.style.display = 'none';
     if (adminPlaceholder) adminPlaceholder.style.display = 'flex';
   }
+
+  // Update favicon/PWA icon to match company logo
+  try { initFavicon(); } catch(e) {}
 }
 function handleLogoUpload(file) {
   if (!file) return;
@@ -15974,6 +16028,9 @@ function applyBulkEdit() {
   showToast('✅ Updated ' + changed + ' member' + (changed>1?'s':'') + '.');
 }
 
+
+// Init favicon on load
+try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) {}
 </script>
 
     <!-- Meetings Sheet (accessed from More menu) -->
