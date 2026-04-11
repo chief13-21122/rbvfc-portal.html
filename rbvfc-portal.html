@@ -3318,7 +3318,7 @@ function initTrainingTab() {
   if (dhEl) dhEl.value = '2';
   if (dhDisp) dhDisp.textContent = '2';
   if (isOfficer) {
-    try { populateDrillReportBy(); }   catch(e){}
+    try { populateDrillReportBy(); try { populateDrillPIC(); } catch(e){} }   catch(e){}
     try { populateDrillMemberList(); } catch(e){}
   }
   // Training Classes
@@ -5317,7 +5317,7 @@ function loadDrillFromSchedule(scheduledId) {
     var cb = document.getElementById('drill_'+m.id);
     if (cb) cb.checked = (d.members||[]).indexOf(m.id)>=0;
   });
-  populateDrillReportBy();
+  populateDrillReportBy(); try { populateDrillPIC(); } catch(e){}
   // Scroll to form
   var card = document.getElementById('drillSubmitCard');
   if (card) { card.scrollIntoView({behavior:'smooth'}); }
@@ -5334,6 +5334,9 @@ function editDrillReport(reportId) {
 
   // Populate form with existing data
   var de = document.getElementById('drillDate'); if(de) de.value=r.date||'';
+  // Restore PIC
+  try { populateDrillPIC(); } catch(e){}
+  var picSel=document.getElementById('drillPersonInCharge'); if(picSel && r.personInCharge) { picSel.value=r.personInCharge; }
   var tye = document.getElementById('drillType');
   if (tye && r.drillCode && r.drillName) {
     for (var i=0; i<tye.options.length; i++) {
@@ -5355,7 +5358,7 @@ function editDrillReport(reportId) {
     var cb = document.getElementById('drill_'+m.id);
     if (cb) cb.checked = (r.members||[]).indexOf(m.id)>=0;
   });
-  populateDrillReportBy();
+  populateDrillReportBy(); try { populateDrillPIC(); } catch(e){}
   var card = document.getElementById('drillSubmitCard');
   if (card) { card.scrollIntoView({behavior:'smooth'}); }
   showToast('\u270f\ufe0f Editing drill report. Make changes and save.');
@@ -5377,11 +5380,27 @@ function initDrillTab() {
   var dd = document.getElementById('drillDate');
   if (dd && !dd.value) dd.value = localDateStr();
   // Populate report-by and member list
-  populateDrillReportBy();
+  populateDrillReportBy(); try { populateDrillPIC(); } catch(e){}
   populateDrillMemberList();
   populateSdMemberList();
   renderScheduledDrills();
   renderDrillHistory();
+}
+
+function populateDrillPIC() {
+  var sel = document.getElementById('drillPersonInCharge');
+  if (!sel) return;
+  var uid = state.currentUserId;
+  sel.innerHTML = '<option value="">— Select Person in Charge —</option>';
+  (state.roster||[]).filter(function(m){ return m.active!==false; })
+    .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
+    .forEach(function(m) {
+      var opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.last + ', ' + m.first + (m.rank ? ' — ' + m.rank : '');
+      if (m.id === uid) opt.selected = true; // default to current user
+      sel.appendChild(opt);
+    });
 }
 
 function populateDrillReportBy() {
@@ -5535,7 +5554,7 @@ function saveDrillReport() {
   if (_submitBtn) { _submitBtn.disabled = true; _submitBtn.textContent = '⏳ Submitting…'; }
   // Re-populate reporter in case Firestore sync cleared it
   if (!(document.getElementById('drillReportBy')||{}).value) {
-    try { populateDrillReportBy(); } catch(e){}
+    try { populateDrillReportBy(); try { populateDrillPIC(); } catch(e){} } catch(e){} try { populateDrillPIC(); } catch(e){}
   }
   // Re-populate member list if empty
   var _dml = document.getElementById('drillMemberList');
@@ -5637,9 +5656,11 @@ function saveDrillReport() {
     // Edit mode: update existing submission
     var _existing = (state.trainingSubmissions||[]).find(function(x){ return x.id===_editId; });
     if (_existing) {
+      var _picIdEdit = ((document.getElementById('drillPersonInCharge')||{}).value||'') || reportBy;
       _existing.drillCode=drillCode; _existing.drillName=drillName;
       _existing.date=drillDate; _existing.hours=hours; _existing.pts=pts;
       _existing.location=location; _existing.notes=notes; _existing.members=members;
+      _existing.personInCharge=_picIdEdit;
       _existing.editedBy=reportBy; _existing.editedAt=new Date().toISOString();
       if (_existing.status==='approved') {
         _existing.status='pending';
@@ -5653,9 +5674,11 @@ function saveDrillReport() {
   }
 
   var drillId = 'drill_'+Date.now();
+  var _picId = ((document.getElementById('drillPersonInCharge')||{}).value||'') || reportBy;
   var _drillEntry = {
     id: drillId, type: 'drill',
     submittedBy: reportBy, memberId: reportBy, members: members,
+    personInCharge: _picId,
     date: drillDate, submittedDate: localDateStr(),
     submittedAt: new Date().toISOString(),
     drillCode: drillCode, drillName: drillName,
@@ -5667,6 +5690,39 @@ function saveDrillReport() {
     var _sd = (state.scheduledDrills||[]).find(function(x){ return x.id===_schedId; });
     if (_sd) _sd.reportId = drillId;
   }
+  // If drill date is in the future — create a Company Drill special event
+  var _drillDateObj = new Date(drillDate + 'T00:00:00');
+  var _todayObj = new Date(localDateStr() + 'T00:00:00');
+  var _isFutureDrill = _drillDateObj > _todayObj;
+  if (_isFutureDrill) {
+    // Create a Special Event for the Company Drill
+    if (!Array.isArray(state.specialEvents)) state.specialEvents = [];
+    var _evId = 'drill_ev_' + Date.now();
+    var _drillEvent = {
+      id: _evId,
+      title: drillName + ' Drill',
+      type: 'drill',
+      startDate: drillDate,
+      date: drillDate,
+      startTime: '19:00', // default drill time
+      endTime: '21:00',
+      location: location || 'Station 13',
+      description: 'Company Drill — ' + drillName + (notes ? '\n' + notes : ''),
+      signups: members.map(function(mid) {
+        return { memberId: mid, signedUpAt: new Date().toISOString(), clockedIn: false, clockedInAt: null, clockedOutAt: null };
+      }),
+      linkedDrillReportId: drillId,
+      createdBy: reportBy,
+      createdAt: new Date().toISOString()
+    };
+    state.specialEvents.push(_drillEvent);
+    _drillEntry.linkedEventId = _evId;
+    // Mark drill as pending auto-submit (will auto-submit when last member clocks out)
+    _drillEntry.status = 'pending_event';
+    _drillEntry.autoSubmitOnEventClose = true;
+    showToast('📅 Future drill scheduled — event created for ' + drillDate + '. Report auto-submits when last member clocks out.');
+  }
+
   state.trainingSubmissions.push(_drillEntry);
 
   save();
@@ -5736,6 +5792,8 @@ function clearDrillForm() {
   var sb = document.querySelector('#drillSubmitCard button.btn-primary');
   if(sb) sb.innerHTML='&#128221; Submit Drill Report';
   drillClearAll();
+
+  var _picSel = document.getElementById('drillPersonInCharge'); if (_picSel) _picSel.selectedIndex = 0;
 }
 
 
@@ -5785,6 +5843,8 @@ function renderDrillHistory() {
             '⏱ '+s.hours+'h &nbsp;·&nbsp; 🏅 '+s.pts+' pt'+(s.pts!==1?'s':'')+' (pending approval)'+
             (s.location?' &nbsp;·&nbsp; 📍 '+s.location:'')+
           '</div>'+
+          (s.personInCharge ? '<div style="font-size:12px;color:#AAA;margin-top:4px;">👤 <strong>Person in Charge:</strong> ' + (_memberLine((state.roster||[]).find(function(x){ return x.id===s.personInCharge; })) || s.personInCharge) + '</div>' : '')+
+          (s.personInCharge ? (function(){ var _pic=(state.roster||[]).find(function(x){return x.id===s.personInCharge;}); return '<div style="font-size:12px;color:#AAA;margin-top:4px;">👤 <strong>PIC:</strong> '+(_pic?_pic.last+', '+_pic.first:s.personInCharge)+'</div>'; })() : '')+
           (s.notes?'<div style="font-size:12px;color:#777;margin-top:4px;font-style:italic;">'+s.notes+'</div>':'')+
           '<div style="margin-top:8px;font-size:12px;color:#666;">'+
             '<strong style="color:#888;">Participants ('+s.members.length+'):</strong> '+memberNames+
@@ -9871,6 +9931,25 @@ function clockInSpecialEvent(elOrId) {
   showToast('\u26ab\ufe0f Clocked in to '+ev.title+'.');
 }
 
+
+function _checkDrillEventAutoSubmit(evId) {
+  var ev = (state.specialEvents||[]).find(function(e){ return e.id===evId; });
+  if (!ev || ev.type !== 'drill' || !ev.linkedDrillReportId) return;
+  // Check if ALL signed-up members have clocked out
+  var allOut = (ev.signups||[]).every(function(s){ return !s.clockedIn || s.clockedOutAt; });
+  if (!allOut) return;
+  // Find the linked drill report
+  var dr = (state.trainingSubmissions||[]).find(function(x){ return x.id===ev.linkedDrillReportId; });
+  if (!dr || dr.status !== 'pending_event') return;
+  // Auto-submit: change status to pending (goes to officer approvals)
+  dr.status = 'pending';
+  dr.autoSubmittedAt = new Date().toISOString();
+  delete dr.autoSubmitOnEventClose;
+  save();
+  updateApprovalsBadge();
+  showToast('📝 Drill report for ' + dr.drillName + ' auto-submitted for approval!');
+}
+
 function clockOutSpecialEvent(elOrId) {
   var evId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-ev');
   var uid = state.currentUserId;
@@ -9888,6 +9967,8 @@ function clockOutSpecialEvent(elOrId) {
   }
   save(); renderBothSpecialEventViews();
   showToast('\u23f9 Clocked out of '+ev.title+'. LOSAP point awarded!');
+  // Check if this is a drill event — auto-submit drill report when last person clocks out
+  try { _checkDrillEventAutoSubmit(evId); } catch(e) {}
 }
 
 // Officer: create/delete special events
@@ -11039,6 +11120,11 @@ function renderApprovalDrills(canAct) {
     }).join('<br>');
     var meta = s.date+(s.location?' &nbsp;·&nbsp; '+s.location:'')+' &nbsp;·&nbsp; '+s.hours+'h &nbsp;·&nbsp; <strong style="color:#F0F0F0;">'+s.pts+' pts each</strong>';
     var sub  = (sByName?'Submitted by '+sByName+(subDate?' on '+subDate:''):'');
+    if (s.personInCharge) {
+      var _pic = (state.roster||[]).find(function(x){ return x.id===s.personInCharge; });
+      var _picName = _pic ? _pic.last+', '+_pic.first : s.personInCharge;
+      sub += (sub?'<br>':'') + '👤 <strong>PIC:</strong> ' + _picName;
+    }
     var notes= (s.notes||'')+(memberList?'<div style="margin-top:6px;"><span style="color:#666;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Members ('+s.members.length+'):</span><div style="margin-top:4px;font-size:12px;color:#CCC;">'+memberList+'</div></div>':'');
     return _approvalCard({
       title: (s.drillCode||'')+(s.drillName?' — '+s.drillName:''),
@@ -17128,6 +17214,12 @@ id="meetingsSheet" style="display:none;position:fixed;inset:0;z-index:2000;backg
             <label>Reported By</label>
             <div id="drillReportByDisplay" style="background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px 12px;font-size:13px;color:#F0F0F0;min-height:40px;display:flex;align-items:center;"></div>
             <input type="hidden" id="drillReportBy">
+          </div>
+          <div class="form-group" style="grid-column:1/-1;">
+            <label>Person in Charge</label>
+            <select id="drillPersonInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px 12px;font-size:13px;color:#F0F0F0;">
+              <option value="">— Select Person in Charge —</option>
+            </select>
           </div>
           <div class="form-group" style="grid-column:1/-1;">
             <label>Drill Type *</label>
