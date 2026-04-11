@@ -6621,6 +6621,9 @@ function initStaffingTab() {
   // Init meeting form and manual entry card
   try { initMeetingForm(); }          catch(e){}
   try { initManualActivityCard(); }   catch(e){}
+  // Clock Out Everyone — admin only
+  var coeWrap = document.getElementById('clockOutEveryoneWrap');
+  if (coeWrap) coeWrap.style.display = isAdmin ? 'block' : 'none';
 }
 
 // ── DAY NAV ───────────────────────────────────────────────────
