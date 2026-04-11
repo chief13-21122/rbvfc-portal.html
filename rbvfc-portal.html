@@ -16070,7 +16070,24 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 </script>
 
     <!-- Meetings Sheet (accessed from More menu) -->
-    <div id="meetingsSheet" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.7);" onclick="if(event.target===this)closeMeetingsSheet()">
+    <div   <!-- Create Alert Group Modal -->
+  <div id="createGroupModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:3000;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">
+    <div style="background:#1A1A1A;border:1px solid #333;border-radius:14px;padding:24px;width:100%;max-width:400px;max-height:85vh;display:flex;flex-direction:column;">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;color:#F0F0F0;letter-spacing:1px;margin-bottom:16px;">👥 Create Alert Group</div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;">Group Name</label>
+        <input type="text" id="newGroupName" placeholder="e.g. Engine 131 Crew, Officers…" style="width:100%;background:#111;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:14px;margin-top:6px;box-sizing:border-box;">
+      </div>
+      <div style="font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Select Members</div>
+      <div id="newGroupMembers" style="flex:1;overflow-y:auto;background:#111;border:1px solid #2A2A2A;border-radius:8px;padding:8px;margin-bottom:16px;max-height:300px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-primary" style="flex:1;" onclick="saveAlertGroup()">✅ Create Group</button>
+        <button class="btn btn-secondary" style="flex:1;" onclick="closeCreateGroupModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+id="meetingsSheet" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.7);" onclick="if(event.target===this)closeMeetingsSheet()">
       <div style="position:absolute;bottom:0;left:0;right:0;max-height:90vh;overflow-y:auto;background:#111;border-radius:20px 20px 0 0;padding:20px;box-sizing:border-box;">
         <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 16px;"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
@@ -16778,9 +16795,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           </div>
           <div id="customGroupsBody">
             <div id="customGroupsList"></div>
-            <div style="display:flex;gap:8px;margin-top:10px;">
-              <input type="text" id="newGroupName" placeholder="New group name…" style="flex:1;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:8px 10px;font-size:13px;">
-              <button class="btn btn-secondary" onclick="openCreateGroupModal()">＋ Create</button>
+            <div style="margin-top:10px;">
+              <button class="btn btn-secondary btn-full" onclick="openCreateGroupModal()">＋ Create Alert Group</button>
             </div>
           </div>
         </div>
