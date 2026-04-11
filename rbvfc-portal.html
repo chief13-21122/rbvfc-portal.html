@@ -5086,7 +5086,7 @@ function applyUserSession(m) {
   var ahb=document.getElementById('adminHeaderBtn'); if(ahb) ahb.style.display=isOfficer?'inline-flex':'none';
   var sub=document.getElementById('switchUserBtn');
   if(sub) {
-    if (state._realUserId) {
+    if (state._realUserId && state._realUserId !== (m && m.id)) {
       var _rM2 = (state.roster||[]).find(function(x){ return x.id===state._realUserId; });
       sub.textContent = '↩ Return to ' + (_rM2 ? _rM2.first : 'Me');
       sub.style.background='#2A1A1A'; sub.style.borderColor='#C8102E'; sub.style.color='#C8102E';
@@ -12062,6 +12062,7 @@ function doLogin() {
   }
   if (errEl) errEl.style.display='none';
   state.currentUserId = member.id;
+  state._realUserId = null;  // always clear stale view-as state on fresh login
   try { _sanitizeShiftPositions(); } catch(e){}
   save();
   launchApp(member);
@@ -12247,7 +12248,7 @@ function launchApp(member) {
   if (adminBtn) adminBtn.style.display = isOfficer ? 'inline-block' : 'none';
   // Show switch/view-as btn for admins OR when already impersonating (need to return)
   if (switchBtn) {
-    if (state._realUserId) {
+    if (state._realUserId && state._realUserId !== state.currentUserId) {
       // Currently viewing as someone else — show as "Return" button
       var _realM = (state.roster||[]).find(function(x){ return x.id===state._realUserId; });
       var _realName = _realM ? _realM.first : 'Me';
