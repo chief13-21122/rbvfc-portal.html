@@ -9032,6 +9032,7 @@ function renderMyShifts() {
             return ' &nbsp;&middot;&nbsp; <span style="color:'+(remaining===0?'#27AE60':'#888')+';">'+(remaining===0?'✅ Fully staffed':remaining+' slot'+(remaining!==1?'s':'')+' open')+'</span>';
           })() : '')
         + '</div>'
+        + (ev.description||ev.desc ? '<div style="font-size:12px;color:#777;margin-top:4px;font-style:italic;">' + (ev.description||ev.desc) + '</div>' : '')
         + seStaffingBar(ev)
         + sePositionSummary(ev);
       if (isToday && signup && !isClockedIn && !_alreadyOnDuty) {
@@ -17288,18 +17289,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       </div>
 
 
-      <div class="card">
-        <div class="card-header" onclick="toggleAdminCardById('trainingHistoryCard')" style="cursor:pointer;user-select:none;"><div class="icon">📚</div><h2>Training History</h2><span id="trainingHistoryChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;transform:rotate(-90deg);">&#9660;</span></div>
-        <div id="trainingHistoryCard" style="display:none;"><div id="trainingReviewContainer">
-          <p style="color:#666;font-size:13px;text-align:center;padding:16px;">No training submissions yet.</p>
-        </div></div>
-      </div>
 
 
-      <div class="card" id="drillHistoryCard" style="display:none;">
-        <div class="card-header"><div class="icon">🔧</div><h2>Drill Report History</h2><span style="font-size:11px;color:#555;margin-left:8px;">Officers / Admin — Pending Approval</span></div>
-        <div id="drillHistoryContainer"></div>
-      </div>
 
 
       <div class="card" style="padding:0;overflow:hidden;">
@@ -17313,6 +17304,24 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
             <button class="btn btn-primary" onclick="openClassModal()">＋ Create Class</button>
           </div>
           <div id="trainingClassesContainer"></div>
+        </div>
+      </div>
+
+    <div id="section-history" class="section">
+
+      <!-- Training History -->
+      <div class="card">
+        <div class="card-header" onclick="toggleAdminCardById('trainingHistoryCard')" style="cursor:pointer;user-select:none;"><div class="icon">📚</div><h2>Training History</h2><span id="trainingHistoryChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;transform:rotate(-90deg);">&#9660;</span></div>
+        <div id="trainingHistoryCard" style="display:none;">
+          <div id="trainingReviewContainer" style="padding:16px;"></div>
+        </div>
+      </div>
+
+      <!-- Drill Report History -->
+      <div class="card" id="drillHistoryCard" style="display:none;">
+        <div class="card-header" onclick="toggleAdminCardById('drillHistoryBody')" style="cursor:pointer;user-select:none;"><div class="icon">🔧</div><h2>Drill Report History</h2><span id="drillHistoryChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;">&#9660;</span></div>
+        <div id="drillHistoryBody" style="display:none;">
+          <div id="drillHistoryContainer" style="padding:16px;"></div>
         </div>
       </div>
 
