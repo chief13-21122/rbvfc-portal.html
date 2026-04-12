@@ -1345,13 +1345,7 @@ function sendTestPushToSelf() {
 
 
 function openGearMenu() {
-  var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
-  var isOfficer = me && (me.appRole==='officer'||me.appRole==='admin');
-  if (isOfficer) {
-    showTab('admin');
-  } else {
-    openMySettings();
-  }
+  openMySettings();
 }
 
 function openMySettings() {
@@ -1384,6 +1378,13 @@ function openMySettings() {
     gcalLabel.textContent = connected ? 'Disconnect Google Calendar' : 'Connect Google Calendar';
     if (gcalStatus) gcalStatus.textContent = connected ? '✅' : '';
     if (gcalBtn) { gcalBtn.style.borderColor = connected ? '#27AE60' : ''; gcalBtn.style.color = connected ? '#27AE60' : ''; }
+  }
+  // Show Admin Panel button for officers and admins
+  var adminBtnSection = document.getElementById('mySettingsAdminBtn');
+  if (adminBtnSection) {
+    var _me = (state.roster||[]).find(function(x){ return x.id===state.currentUserId; });
+    var _isOfficer = _me && (_me.appRole==='officer'||_me.appRole==='admin');
+    adminBtnSection.style.display = _isOfficer ? 'block' : 'none';
   }
   modal.style.display = 'flex';
 }
@@ -16239,7 +16240,12 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         📳 Test My Notifications
       </button>
 
-      <button class="btn btn-secondary btn-full" style="margin-top:20px;color:#666;" onclick="closeMySettings()">Close</button>
+      <!-- Admin Panel button — officers/admins only -->
+      <div id="mySettingsAdminBtn" style="display:none;margin-top:16px;border-top:1px solid #2A2A2A;padding-top:16px;">
+        <button class="btn btn-secondary btn-full" style="background:#1A0A0A;border-color:#C8102E;color:#C8102E;" onclick="closeMySettings();showTab('admin')">⚙️ Open Admin Panel</button>
+      </div>
+
+      <button class="btn btn-secondary btn-full" style="margin-top:12px;color:#666;" onclick="closeMySettings()">Close</button>
     </div>
   </div>
 
