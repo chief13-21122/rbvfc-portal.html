@@ -1345,7 +1345,13 @@ function sendTestPushToSelf() {
 
 
 function openGearMenu() {
-  openMySettings();
+  var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+  var isOfficer = me && (me.appRole==='officer'||me.appRole==='admin');
+  if (isOfficer) {
+    showTab('admin');
+  } else {
+    openMySettings();
+  }
 }
 
 function openMySettings() {
@@ -2487,7 +2493,7 @@ function submitAttendanceLosap(sourceType, sourceId, date, memberId, desc) {
       clears: []
     });
     save();
-    sendPushToMembers([mic], '\uD83C\uDFC5 LOSAP Approval Needed', memName + ' — ' + desc);
+    sendPushToMembers([mic], '\uD83C\uDFC5 LOSAP Approval Needed', memName + ' — ' + desc, 'losap_approval_' + memberId + '_' + localDateStr());
   }
   var recipient = (state.roster||[]).find(function(x){ return x.id===memberId; });
   showToast('\u23f3 Submitted for approval — ' + (recipient ? recipient.last+', '+recipient.first : 'member'));
@@ -8398,7 +8404,7 @@ function adminClockOutAll() {
     sendPushToMembers(affectedIds,
       '\uD83D\uDD34 Clocked Out by Admin',
       'An officer has ended all active duty sessions. Please confirm your clock-out in the portal.',
-      'admin_clockout_all_' + Date.now()
+      'admin_clockout_' + localDateStr()
     );
   } catch(e){}
 
@@ -9236,6 +9242,17 @@ function checkStaffingReminders() {
       var WARN_AFTER_HRS = 8;    // show warning after 8 hours
       var AUTO_OUT_MINS  = 30;   // auto clock-out 30 min after warning if not acknowledged
 
+      // ── Reset cycle if acknowledged and WARN_AFTER_HRS has passed since ack ──
+      if (openSess._warnedAt && openSess._warnAcknowledged) {
+        var _ackAgeHrs = (now - new Date(openSess._warnedAt)) / 3600000;
+        if (_ackAgeHrs >= WARN_AFTER_HRS) {
+          openSess._warnedAt = null;
+          openSess._warnAcknowledged = false;
+          openSess._pushSent = false;
+          save();
+        }
+      }
+
       // Has a warning been sent already?
       if (!openSess._warnedAt && durHrs >= WARN_AFTER_HRS) {
         // Show the warning modal and record when it was shown
@@ -9296,9 +9313,9 @@ function _showDutyOverTimeWarning(session, warnHrs, autoOutMins) {
   yesBtn.textContent = '✅ Still on duty';
   yesBtn.onclick = function() {
     // Acknowledge — cancel auto-clock-out
-    session._warnAcknowledged = false;
-    session._warnedAt = new Date().toISOString(); // bump to now — won't re-fire for another WARN_AFTER_HRS
-    session._pushSent = false; // allow push again for the next warning cycle
+    session._warnAcknowledged = true;   // suppress re-show until next cycle
+    session._warnedAt = new Date().toISOString(); // start next warning window from now
+    session._pushSent = false;                   // allow push in next cycle
     save();
     wrap.remove();
     showToast('✅ Got it — stay on duty. Reminder reset.');
