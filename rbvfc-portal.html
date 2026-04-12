@@ -6981,7 +6981,9 @@ function renderStaffingBoard() {
         });
         var adminRestricted = isAdminMember(member) && uId !== 'U13';
         var isPastDate = date < localDateStr();
-        var isPastTime = date === localDateStr() && new Date().getHours() >= 20;
+        var _localNow = new Date();
+        var _localHour = _localNow.getHours(); // uses local timezone, not UTC
+        var isPastTime = date === localDateStr() && _localHour >= 20;
         var _elig = member ? checkStaffingEligibility(member, uId, posName) : { eligible:false, code:'NO_MEMBER', reason:'' };
         // Same-unit rule: member may not hold multiple positions on the same unit simultaneously
         var canSignUp = !hasConflict && !adminRestricted && !isPastDate && !isPastTime && _elig.eligible && !alreadyHaveSlot && !isFullyCovered;
