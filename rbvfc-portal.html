@@ -1343,6 +1343,56 @@ function sendTestPushToSelf() {
   .catch(function(){ showToast('⚠️ Could not reach server. Check your connection.'); });
 }
 
+
+function openGearMenu() {
+  var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+  var isOfficer = me && (me.appRole==='officer'||me.appRole==='admin');
+  if (isOfficer) {
+    showTab('admin');
+  } else {
+    openMySettings();
+  }
+}
+
+function openMySettings() {
+  var modal = document.getElementById('mySettingsModal');
+  if (!modal) return;
+  // Update notification button states
+  var perm = ('Notification' in window) ? Notification.permission : 'default';
+  var uid = state.currentUserId;
+  var m2 = (state.roster||[]).find(function(x){ return x.id===uid; });
+  var hasToken = m2 && m2.fcmTokens && m2.fcmTokens.length > 0;
+  var enabled = perm === 'granted' && hasToken;
+  var denied  = perm === 'denied';
+  var enableBtn = document.getElementById('mySettingsEnableNotifBtn');
+  var testBtn   = document.getElementById('mySettingsTestNotifBtn');
+  if (enableBtn) {
+    enableBtn.textContent = denied ? '⚠️ Fix Notification Settings' : '🔔 Enable Notifications on This Device';
+    enableBtn.style.color = denied ? '#F5A623' : '';
+    enableBtn.style.borderColor = denied ? '#F5A623' : '';
+    enableBtn.style.display = enabled ? 'none' : '';
+  }
+  if (testBtn) testBtn.style.display = enabled ? '' : 'none';
+  // Update gcal section
+  var gcalSection = document.getElementById('mySettingsGcalSection');
+  if (gcalSection) gcalSection.style.display = state.gcalClientId ? '' : 'none';
+  var gcalLabel = document.getElementById('mySettingsGcalLabel');
+  var gcalStatus = document.getElementById('mySettingsGcalStatus');
+  var gcalBtn = document.getElementById('mySettingsGcalBtn');
+  if (gcalLabel) {
+    var connected = gcalIsConnected();
+    gcalLabel.textContent = connected ? 'Disconnect Google Calendar' : 'Connect Google Calendar';
+    if (gcalStatus) gcalStatus.textContent = connected ? '✅' : '';
+    if (gcalBtn) { gcalBtn.style.borderColor = connected ? '#27AE60' : ''; gcalBtn.style.color = connected ? '#27AE60' : ''; }
+  }
+  modal.style.display = 'flex';
+}
+
+function closeMySettings() {
+  var modal = document.getElementById('mySettingsModal');
+  if (modal) modal.style.display = 'none';
+}
+
 function showMoreMenu() {
   var s = document.getElementById('moreSheet');
   if (s) {
@@ -1374,18 +1424,7 @@ function showMoreMenu() {
   }
   if (testBtn) testBtn.style.display = _enabled ? '' : 'none';
   // Update Google Calendar button state
-  var gcalLabel = document.getElementById('moreGcalLabel');
-  var gcalStatus = document.getElementById('moreGcalStatus');
-  var gcalBtn = document.getElementById('moreGcalBtn');
-  if (gcalLabel) {
-    var gcalConnected = gcalIsConnected();
-    gcalLabel.textContent = gcalConnected ? 'Disconnect Google Calendar' : 'Connect Google Calendar';
-    if (gcalStatus) { gcalStatus.textContent = gcalConnected ? '✅' : ''; }
-    if (gcalBtn) { gcalBtn.style.borderColor = gcalConnected ? '#27AE60' : ''; gcalBtn.style.color = gcalConnected ? '#27AE60' : ''; }
-    // Hide if no client ID configured
-    var gcalSection = document.getElementById('moreMemberTools');
-    if (gcalSection) gcalSection.style.display = state.gcalClientId ? 'block' : 'none';
-  }
+  // My Settings moved to gear icon — no gcal/notif buttons in More menu
 }
 function hideMoreMenu() {
   var s = document.getElementById('moreSheet'); if(s) { s.style.opacity='0'; s.style.pointerEvents='none'; var p=document.getElementById('moreSheetPanel'); if(p) p.style.transform='translateY(100%)'; setTimeout(function(){ s.style.display='none'; },350); }
@@ -5084,7 +5123,7 @@ function applyUserSession(m) {
   var isOfficer=m.appRole==='officer'||m.appRole==='admin';
   var mab=document.getElementById('moreAdminBtn'); if(mab) mab.style.display=isOfficer?'block':'none';
   var mapb=document.getElementById('moreApprovalsBtn'); if(mapb) mapb.style.display=isOfficer?'block':'none';
-  var ahb=document.getElementById('adminHeaderBtn'); if(ahb) ahb.style.display=isOfficer?'inline-flex':'none';
+  var ahb=document.getElementById('adminHeaderBtn'); if(ahb) ahb.style.display='inline-flex'; // gear shows for all members
   var sub=document.getElementById('switchUserBtn');
   if(sub) {
     if (state._realUserId && state._realUserId !== (m && m.id)) {
@@ -12263,7 +12302,7 @@ function launchApp(member) {
   var adminBtn  = document.getElementById('adminHeaderBtn');
   var switchBtn = document.getElementById('switchUserBtn');
   var moreAdminBtn = document.getElementById('moreAdminBtn');
-  if (adminBtn) adminBtn.style.display = isOfficer ? 'inline-block' : 'none';
+  if (adminBtn) adminBtn.style.display = 'inline-block'; // gear shows for all — opens My Settings for members, Admin for officers
   // Show switch/view-as btn for admins OR when already impersonating (need to return)
   if (switchBtn) {
     if (state._realUserId && state._realUserId !== state.currentUserId) {
@@ -16177,7 +16216,34 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 </script>
 
     <!-- Meetings Sheet (accessed from More menu) -->
-    <div   <!-- Create Alert Group Modal -->
+    <div 
+  <!-- My Settings Modal (member gear icon) -->
+  <div id="mySettingsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:3000;align-items:flex-end;justify-content:center;">
+    <div style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:24px;width:100%;max-width:480px;box-sizing:border-box;">
+      <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 20px;"></div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;color:#F0F0F0;letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;">⚙️ My Settings</div>
+
+      <!-- Google Calendar -->
+      <div id="mySettingsGcalSection" style="display:none;">
+        <button class="btn btn-secondary btn-full" id="mySettingsGcalBtn" onclick="moreGcalAction();closeMySettings()" style="position:relative;">
+          📅 <span id="mySettingsGcalLabel">Connect Google Calendar</span>
+          <span id="mySettingsGcalStatus" style="position:absolute;top:50%;right:14px;transform:translateY(-50%);font-size:11px;"></span>
+        </button>
+      </div>
+
+      <!-- Notifications -->
+      <button class="btn btn-secondary btn-full" id="mySettingsEnableNotifBtn" style="margin-top:8px;" onclick="requestPushPermission();closeMySettings()">
+        🔔 Enable Notifications on This Device
+      </button>
+      <button class="btn btn-secondary btn-full" id="mySettingsTestNotifBtn" style="margin-top:8px;display:none;" onclick="sendTestPushToSelf();closeMySettings()">
+        📳 Test My Notifications
+      </button>
+
+      <button class="btn btn-secondary btn-full" style="margin-top:20px;color:#666;" onclick="closeMySettings()">Close</button>
+    </div>
+  </div>
+
+  <!-- Create Alert Group Modal -->
   <div id="createGroupModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:3000;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">
     <div style="background:#1A1A1A;border:1px solid #333;border-radius:14px;padding:24px;width:100%;max-width:400px;max-height:85vh;display:flex;flex-direction:column;">
       <div style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;color:#F0F0F0;letter-spacing:1px;margin-bottom:16px;">👥 Create Alert Group</div>
@@ -16270,7 +16336,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <div class="app-subtitle" id="appSubtitle">Riviera Beach Volunteer Fire Company</div>
     </div>
     <button class="btn-logout" id="switchUserBtn" style="display:none;background:#1A2A1A;border-color:#27AE60;color:#27AE60;margin-right:6px;font-size:11px;" onclick="openSwitchUser()">👁 View As</button>
-    <button class="btn-logout" id="adminHeaderBtn" style="display:none;background:#C8102E;border-color:#C8102E;color:white;margin-right:6px;" onclick="showTab('admin')">⚙️</button>
+    <button class="btn-logout" id="adminHeaderBtn" style="display:none;background:#C8102E;border-color:#C8102E;color:white;margin-right:6px;" onclick="openGearMenu()">⚙️</button>
     <button class="btn-logout" onclick="logout()">Sign Out</button>
   </div>
 
@@ -17974,20 +18040,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
-      <!-- Member Tools section -->
-      <div id="moreMemberTools" style="border-top:1px solid #2A2A2A;margin-top:12px;padding-top:12px;">
-        <div style="font-size:10px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">My Settings</div>
-        <button class="btn btn-secondary btn-full" id="moreGcalBtn" onclick="moreGcalAction();closeMoreMenu()" style="position:relative;">
-          📅 <span id="moreGcalLabel">Connect Google Calendar</span>
-          <span id="moreGcalStatus" style="position:absolute;top:50%;right:14px;transform:translateY(-50%);font-size:10px;"></span>
-        </button>
-        <button class="btn btn-secondary btn-full" id="moreEnableNotifBtn" style="margin-top:8px;" onclick="requestPushPermission();closeMoreMenu()">
-          🔔 Enable Notifications on This Device
-        </button>
-        <button class="btn btn-secondary btn-full" id="moreTestNotifBtn" style="margin-top:8px;display:none;" onclick="sendTestPushToSelf();closeMoreMenu()">
-          📳 Test My Notifications
-        </button>
-      </div>
+
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
 
