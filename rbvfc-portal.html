@@ -9200,15 +9200,21 @@ function checkStaffingReminders() {
       if (!openSess._warnedAt && durHrs >= WARN_AFTER_HRS) {
         // Show the warning modal and record when it was shown
         openSess._warnedAt = now.toISOString();
+        openSess._pushSent = false;
         save();
         _showDutyOverTimeWarning(openSess, WARN_AFTER_HRS, AUTO_OUT_MINS);
       } else if (openSess._warnedAt && !openSess._warnAcknowledged) {
-        // Check if grace period has expired
-        var warnedAt = new Date(openSess._warnedAt);
-        var minsElapsed = (now - warnedAt) / 60000;
-        if (minsElapsed >= AUTO_OUT_MINS) {
-          // Auto clock-out — no acknowledgment received
+        var warnedAt2 = new Date(openSess._warnedAt);
+        var minsElapsed2 = (now - warnedAt2) / 60000;
+        if (minsElapsed2 >= AUTO_OUT_MINS) {
+          // Grace period expired — auto clock-out
           _autoClockOutDuty(openSess, 'No acknowledgment after ' + AUTO_OUT_MINS + '-minute reminder');
+        } else {
+          // Still within grace window — show modal locally if not already shown
+          // (handles case where another device set _warnedAt via Firestore sync)
+          if (!document.getElementById('_dutyOverTimeModal')) {
+            _showDutyOverTimeWarning(openSess, WARN_AFTER_HRS, AUTO_OUT_MINS);
+          }
         }
       }
     }
@@ -9250,8 +9256,9 @@ function _showDutyOverTimeWarning(session, warnHrs, autoOutMins) {
   yesBtn.textContent = '✅ Still on duty';
   yesBtn.onclick = function() {
     // Acknowledge — cancel auto-clock-out
-    session._warnAcknowledged = true;
-    session._warnedAt = null; // reset so reminder can fire again after another 8 hrs
+    session._warnAcknowledged = false;
+    session._warnedAt = new Date().toISOString(); // bump to now — won't re-fire for another WARN_AFTER_HRS
+    session._pushSent = false; // allow push again for the next warning cycle
     save();
     wrap.remove();
     showToast('✅ Got it — stay on duty. Reminder reset.');
@@ -9272,12 +9279,19 @@ function _showDutyOverTimeWarning(session, warnHrs, autoOutMins) {
   wrap.appendChild(inner);
   document.body.appendChild(wrap);
   // Also send push notification
+  // Only send push once — guard with a flag stored in session state
   try {
-    sendPushToMembers([session.userId],
-      '⏰ Still on duty?',
-      'You have been clocked in for ' + warnHrs + '+ hours. Open the portal to confirm or clock out.',
-      'duty_warning_' + session.userId + '_' + Date.now()
-    );
+    var _warnBucket = session._warnedAt ? new Date(session._warnedAt).toISOString().slice(0,13) : new Date().toISOString().slice(0,13);
+    var _alertId = 'duty_warning_' + session.userId + '_' + _warnBucket;
+    if (!session._pushSent) {
+      session._pushSent = true;
+      save();
+      sendPushToMembers([session.userId],
+        '⏰ Still on duty?',
+        'You have been clocked in for ' + warnHrs + '+ hours. Open the portal to confirm or clock out.',
+        _alertId
+      );
+    }
   } catch(e){}
 }
 
