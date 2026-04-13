@@ -8194,22 +8194,84 @@ function startClockedInReminderPoller() {
   checkClockedInReminders(); // run immediately on load
 }
 
+
+// ─────────────────────────────────────────────────────────────────
+// AUTHORITATIVE clock-in state check.
+// Returns the active session/record if the member is clocked in,
+// or null if they are not.  Checks all clock-in types in order:
+//   1. state.currentSession  (general duty / shift / event duty)
+//   2. Active staffing shift  (clockedIn && !clockedOutAt)
+//   3. Active special event signup (clockedIn && !clockedOutAt)
+//   4. Active meeting attendance (clockedInAt && !clockedOutAt)
+// Does NOT scan state.sessions for stale open entries.
+// ─────────────────────────────────────────────────────────────────
+function _getActiveClockedInSession(uid) {
+  if (!uid) return null;
+
+  // 1. currentSession — the primary authoritative source
+  if (state.currentSession &&
+      state.currentSession.userId === uid &&
+      !state.currentSession.end) {
+    return state.currentSession;
+  }
+
+  var today = localDateStr();
+
+  // 2. Active staffing shift
+  var activeShift = (state.staffingShifts||[]).find(function(s) {
+    return s.memberId === uid && s.clockedIn && !s.clockedOutAt && s.date === today;
+  });
+  if (activeShift) {
+    // Return a synthetic session object for timing purposes
+    var shiftStart = activeShift.date + 'T' +
+      (activeShift.shiftStart
+        ? activeShift.shiftStart.slice(0,2)+':'+activeShift.shiftStart.slice(2,4)
+        : '00:00') + ':00';
+    return { id: activeShift.id, userId: uid, start: shiftStart,
+             shiftId: activeShift.id, _synthetic: true };
+  }
+
+  // 3. Active special event signup
+  var activeEventSess = null;
+  (state.specialEvents||[]).forEach(function(ev) {
+    if (activeEventSess) return;
+    (ev.signups||[]).forEach(function(s) {
+      if (s.memberId === uid && s.clockedIn && !s.clockedOutAt) {
+        var evStart = ev.date + 'T' + (ev.startTime || '00:00') + ':00';
+        activeEventSess = { id: ev.id, userId: uid, start: evStart,
+                            eventId: ev.id, _synthetic: true };
+      }
+    });
+  });
+  if (activeEventSess) return activeEventSess;
+
+  // 4. Active meeting attendance
+  var activeMtgAtt = (state.meetingAttendance||[]).find(function(a) {
+    return a.memberId === uid && a.clockedInAt && !a.clockedOutAt;
+  });
+  if (activeMtgAtt) {
+    return { id: activeMtgAtt.mtgId, userId: uid, start: activeMtgAtt.clockedInAt,
+             mtgId: activeMtgAtt.mtgId, _synthetic: true };
+  }
+
+  return null; // not clocked in
+}
+
 function checkClockedInReminders() {
   var uid = state.currentUserId;
   if (!uid) return;
 
-  // Find any open session for this user
-  var openSess = (state.sessions||[]).find(function(s){ return s.userId===uid && !s.end; });
-  // Also check currentSession
-  if (!openSess && state.currentSession && state.currentSession.userId===uid && !state.currentSession.end) {
-    openSess = state.currentSession;
-  }
+  // Use authoritative check — does NOT scan stale state.sessions entries
+  var openSess = _getActiveClockedInSession(uid);
   if (!openSess) {
-    // No open session — dismiss any lingering reminder banner
+    // Not clocked in — dismiss any lingering reminder banner
     var el = document.getElementById('clockedInReminderBanner');
     if (el) { el.style.display='none'; _adjustAppTopPad(); }
     return;
   }
+  // For synthetic sessions (shift/event/meeting), skip the auto-clock-out logic
+  // since those are managed by checkAutoClockOuts instead
+  if (openSess._synthetic) return;
 
   var now    = new Date();
   var start  = new Date(openSess.start);
@@ -9226,12 +9288,15 @@ function checkStaffingReminders() {
   var hour  = new Date().getHours();
   var now   = new Date();
 
-  var alreadyClocked = !!(state.currentSession && state.currentSession.userId === uid && !state.currentSession.end);
+  // Use authoritative check across all clock-in types
+  var alreadyClocked = !!_getActiveClockedInSession(uid);
 
   // ── Duty session over-time warning + auto-clock-out ──────────────────
   if (alreadyClocked) {
-    // ONLY check state.currentSession — never stale entries in state.sessions
-    var openSess = state.currentSession;
+    // Only trigger overtime warning for general duty (state.currentSession)
+    // Shift/event/meeting clock-outs are handled by checkAutoClockOuts
+    var openSess = (state.currentSession && state.currentSession.userId === uid && !state.currentSession.end)
+        ? state.currentSession : null;
 
     if (openSess && openSess.start) {
       var durHrs = (now - new Date(openSess.start)) / 3600000;
