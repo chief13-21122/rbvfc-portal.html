@@ -907,6 +907,7 @@ function requestPushPermission() {
 
   // If already granted, just re-register and get token
   if (Notification.permission === 'granted') {
+    var _n = document.getElementById('notifNudge'); if(_n) _n.style.display='none';
     _doRegisterPushToken();
     return;
   }
@@ -914,6 +915,7 @@ function requestPushPermission() {
   // permission === 'default' — show the browser prompt
   Notification.requestPermission().then(function(permission) {
     if (permission === 'granted') {
+      var _n = document.getElementById('notifNudge'); if(_n) _n.style.display='none';
       _doRegisterPushToken();
     } else {
       // User clicked Block in the prompt
@@ -999,10 +1001,13 @@ function _doRegisterPushToken() {
       if (sUrl) fetch(sUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'registerToken',token:token}) }).catch(function(){});
       showToast('✅ Push notifications enabled!');
       renderPushStatus();
+      try { renderNotifNudge(); } catch(e) {}       // hide the nudge banner
+      try { openMySettings(); } catch(e) {}          // refresh My Settings buttons
     })
     .catch(function(err) {
       console.error('[RBVFC] Push enable error:', err);
       showToast('⚠️ Could not enable: ' + (err.message||String(err)));
+      try { renderNotifNudge(); } catch(e) {} // re-show nudge if failed
     });
 }
 
