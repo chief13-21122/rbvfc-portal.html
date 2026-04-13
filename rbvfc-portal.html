@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link rel="icon" id="dynamicFavicon" type="image/png" href="data:,">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -1345,13 +1344,7 @@ function sendTestPushToSelf() {
 
 
 function openGearMenu() {
-  var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
-  var isOfficer = me && (me.appRole==='officer'||me.appRole==='admin');
-  if (isOfficer) {
-    showTab('admin');
-  } else {
-    openMySettings();
-  }
+  openMySettings();
 }
 
 function openMySettings() {
@@ -2802,7 +2795,7 @@ function renderHoursLog() {
   all.forEach(function(s) {
     var tr = document.createElement('tr');
     var typeLabel = s.source==='log' ? (s.desc||s.type) : s.type;
-    var ptsBadge = s.pts ? ' <span style="font-size:10px;color:#F5A623;background:rgba(245,166,35,.15);border-radius:3px;padding:1px 4px;">+'+s.pts+' pts</span>' : '';
+    var ptsBadge = s.pts ? ' <span style="font-size:10px;color:#F5A623;background:rgba(245,166,35,.15);border-radius:3px;padding:1px 4px;">+'+(s.pts||s.points||0)+' pts</span>' : '';
     tr.innerHTML = '<td style="padding:8px;color:#AAA;">'+s.date+'</td>'+
       '<td style="padding:8px;color:#CCC;">'+typeLabel+ptsBadge+'</td>'+
       '<td style="padding:8px;color:#F0F0F0;font-weight:600;">'+parseFloat(s.hours).toFixed(1)+'</td>'+
@@ -3387,8 +3380,8 @@ function renderTrainingReview() {
 
   var submissions = (state.trainingSubmissions||[]).filter(function(s){ return s.type !== 'drill'; });
   if (!isOfficer) {
-    // Regular member — show only their own
-    submissions = submissions.filter(function(s){ return s.memberId===uid || (s.submittedBy===uid); });
+    // Regular member — show only their own (check both memberId and legacy userId)
+    submissions = submissions.filter(function(s){ return s.memberId===uid || s.userId===uid || (s.submittedBy===uid); });
   }
 
   var html = '';
@@ -3398,14 +3391,15 @@ function renderTrainingReview() {
   }
 
   submissions.sort(function(a,b){ return (b.submitted||'').localeCompare(a.submitted||''); }).forEach(function(s) {
-    var m = (state.roster||[]).find(function(x){ return x.id===s.memberId; });
-    var mName = m ? m.last+', '+m.first : s.memberId;
+    var _mId = s.memberId || s.userId;
+    var m = (state.roster||[]).find(function(x){ return x.id===_mId; });
+    var mName = m ? m.last+', '+m.first : (_mId || 'Unknown');
     var statusColor = {pending:'#F5A623',approved:'#27AE60',rejected:'#E74C3C'}[s.status]||'#888';
     html += '<div style="background:#181818;border:1px solid #2A2A2A;border-radius:10px;padding:16px;margin-bottom:12px;">'+
       '<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;">'+
       '<div>'+
         '<div style="font-weight:700;font-size:15px;color:#F0F0F0;">'+s.name+'</div>'+
-        '<div style="font-size:12px;color:#888;margin-top:2px;">'+mName+' · '+s.date+' · '+s.hours+'h · '+s.pts+' pts</div>'+
+        '<div style="font-size:12px;color:#888;margin-top:2px;">'+mName+' · '+s.date+' · '+s.hours+'h · '+(s.pts||s.points||0)+' pts</div>'+
         (s.classNum?'<div style="font-size:12px;color:#666;">Class: '+s.classNum+'</div>':'')+
         (s.provider?'<div style="font-size:12px;color:#666;">Provider: '+s.provider+'</div>':'')+
         (s.notes?'<div style="font-size:12px;color:#888;margin-top:4px;">'+s.notes+'</div>':'')+
@@ -3705,7 +3699,7 @@ function approveTraining(elOrId) {
   if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
   var _at_act = {
     id: 'act_'+Date.now(),
-    memberId: s.memberId,
+    memberId: s.memberId || s.userId,
     date: s.date,
     category: 'training',
     desc: (s.name||'Training')+(s.provider?' ('+s.provider+')':''),
@@ -5126,6 +5120,7 @@ function loginSubmit() {
   applyUserSession(m);
 }
 function applyUserSession(m) {
+  try { _normalizeSubmissions(); } catch(e) {}
   var hn=document.getElementById('headerName'); if(hn) hn.textContent=m.last+', '+m.first;
   var isOfficer=m.appRole==='officer'||m.appRole==='admin';
   var mab=document.getElementById('moreAdminBtn'); if(mab) mab.style.display=isOfficer?'block':'none';
@@ -5163,6 +5158,7 @@ function applyUserSession(m) {
       initFirebase(function() {
         loadFromFirestore(function(ok) {
           if (ok) {
+            try { _normalizeSubmissions(); } catch(e) {}  // normalize legacy records after sync
             try{renderMyShifts();}catch(e){}
             try{renderStaffingBoard();}catch(e){}
             try{renderLOSAP();}catch(e){}
@@ -5887,7 +5883,7 @@ function renderDrillHistory() {
             '📋 Submitted: '+s.submittedDate+' by '+repName+
           '</div>'+
           '<div style="font-size:12px;color:#888;margin-bottom:4px;">'+
-            '⏱ '+s.hours+'h &nbsp;·&nbsp; 🏅 '+s.pts+' pt'+(s.pts!==1?'s':'')+' (pending approval)'+
+            '⏱ '+s.hours+'h &nbsp;·&nbsp; 🏅 '+(s.pts||s.points||0)+' pt'+((s.pts||s.points||0)!==1?'s':'')+' (pending approval)'+
             (s.location?' &nbsp;·&nbsp; 📍 '+s.location:'')+
           '</div>'+
           (s.personInCharge ? '<div style="font-size:12px;color:#AAA;margin-top:4px;">👤 <strong>Person in Charge:</strong> ' + (_memberLine((state.roster||[]).find(function(x){ return x.id===s.personInCharge; })) || s.personInCharge) + '</div>' : '')+
@@ -5940,7 +5936,7 @@ function approveDrill(elOrId) {
       date: s.date,
       category: 'drill',
       desc: s.drillCode+' — '+s.drillName+(s.location?' @ '+s.location:''),
-      pts: s.pts,
+      pts: s.pts||s.points||0,
       hours: s.hours,
       notes: s.notes||''
     };
@@ -11193,7 +11189,7 @@ function renderApprovalDrills(canAct) {
       var mem=(state.roster||[]).find(function(r){ return r.id===mid; });
       return mem ? _memberLine(mem) : mid;
     }).join('<br>');
-    var meta = s.date+(s.location?' &nbsp;·&nbsp; '+s.location:'')+' &nbsp;·&nbsp; '+s.hours+'h &nbsp;·&nbsp; <strong style="color:#F0F0F0;">'+s.pts+' pts each</strong>';
+    var meta = s.date+(s.location?' &nbsp;·&nbsp; '+s.location:'')+' &nbsp;·&nbsp; '+s.hours+'h &nbsp;·&nbsp; <strong style="color:#F0F0F0;">'+(s.pts||s.points||0)+' pts each</strong>';
     var sub  = (sByName?'Submitted by '+sByName+(subDate?' on '+subDate:''):'');
     if (s.personInCharge) {
       var _pic = (state.roster||[]).find(function(x){ return x.id===s.personInCharge; });
@@ -12114,6 +12110,23 @@ function devLogin() {
   launchApp(admin);
 }
 
+
+function _normalizeSubmissions() {
+  // One-time migration: normalize legacy training submission field names
+  var changed = false;
+  (state.trainingSubmissions||[]).forEach(function(s) {
+    // userId → memberId
+    if (s.userId && !s.memberId) { s.memberId = s.userId; changed = true; }
+    // points → pts
+    if (s.points !== undefined && s.pts === undefined) { s.pts = s.points; changed = true; }
+    // type → name (old submissions stored course type in 'type' not 'name')
+    if (s.type && !s.name && s.type !== 'drill') { s.name = s.type; changed = true; }
+    // hours stored as string → number
+    if (s.hours && typeof s.hours === 'string') { s.hours = parseFloat(s.hours)||0; changed = true; }
+  });
+  if (changed) { save(); console.log('[RBVFC] Normalized', (state.trainingSubmissions||[]).length, 'training submissions'); }
+}
+
 function doLogin() {
   var memberId = (document.getElementById('loginMember')||{}).value || '';
   var pin      = (document.getElementById('loginPin')||{}).value || '';
@@ -12301,6 +12314,8 @@ function clockOutShiftNow() {
 function launchApp(member) {
   // Check for OAuth callback (Google Calendar connect redirect)
   try { _gcalCheckCallback(); } catch(e) {}
+  // Normalize legacy submission field names
+  try { _normalizeSubmissions(); } catch(e) {}
   document.getElementById('loginOverlay').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   document.getElementById('app').style.flexDirection = 'column';
@@ -13998,7 +14013,7 @@ function renderMyPendingTraining() {
       + '<div>'
       + '<div style="font-weight:700;color:#F0F0F0;font-size:13px;">' + (s.name||s.courseName||'Training') + '</div>'
       + '<div style="font-size:11px;color:#888;margin-top:2px;">'
-      + [s.date, s.hours ? s.hours+'h' : '', s.pts ? s.pts+' pts' : '', s.provider||''].filter(Boolean).join(' · ')
+      + [s.date, s.hours ? s.hours+'h' : '', (s.pts||s.points) ? (s.pts||s.points)+' pts' : '', s.provider||''].filter(Boolean).join(' · ')
       + '</div>'
       + (subDate ? '<div style="font-size:11px;color:#555;margin-top:1px;">Submitted ' + subDate + '</div>' : '')
       + '</div>'
@@ -17850,7 +17865,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
               <div style="font-size:12px;color:#E74C3C;font-weight:700;margin-bottom:8px;">⚠️ Danger Zone</div>
               <button class="btn btn-danger btn-sm" onclick="confirmClearAllData()">🗑 Clear All Data</button>
               <button class="btn btn-sm" onclick="adminCloseStaleSessionsBtn()" style="margin-top:6px;background:#1A1A00;border-color:#F5A623;color:#F5A623;width:100%;">⏱ Close Stale Sessions</button>
-              <button class="btn btn-sm" onclick="adminClockOutAll()" style="margin-top:6px;background:#2A0000;border-color:#C8102E;color:#C8102E;width:100%;font-weight:700;">🔴 Clock Out Everyone</button>
+              <div id="clockOutEveryoneWrap"><button class="btn btn-sm" onclick="adminClockOutAll()" style="margin-top:6px;background:#2A0000;border-color:#C8102E;color:#C8102E;width:100%;font-weight:700;">🔴 Clock Out Everyone</button></div>
               <div style="margin-top:12px;padding-top:12px;border-top:1px solid #3A0000;">
                 <div style="font-size:11px;color:#C8102E;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Reset Demo Roster</div>
                 <p style="font-size:11px;color:#666;margin-bottom:8px;">Removes all demo members &amp; data. Keeps admin account and all settings. Requires passkey.</p>
