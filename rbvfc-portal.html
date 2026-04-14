@@ -10321,7 +10321,7 @@ function initMeetingsCard() {
   var canManage = canManageSpecialEvents();
   var card = document.getElementById('meetingsManagerCard');
   if (card) card.style.display = canManage ? 'block' : 'none';
-  if (canManage) renderMeetingsList();
+  renderMeetingsList(); // show upcoming meetings for all members
   var de = document.getElementById('mtgDate');
   if (de && !de.value) de.value = localDateStr();
 }
@@ -10771,7 +10771,27 @@ function renderMeetingsList() {
       +'<button onclick="openEditMeeting(\''+mtg.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#9998; Edit</button>'
       +(_canAlert?'<button data-mid="'+mtg.id+'" data-mdate="'+sd+'" class="_mtgAlertBtn" style="background:#1A1200;border:1px solid #F5A623;color:#F5A623;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;margin-top:3px;">&#128276; Send Alert</button>':'')
       +'<button onclick="deleteMeeting(\''+mtg.id+'\')" style="background:none;border:1px solid #333;color:#E74C3C;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#128465; Delete</button>'
-      +'</div></div></div>';
+      +'</div></div>'
+      +(function(){
+        // Member sign-up / attendance section
+        if (isPast) return '</div>';
+        var myAtt = (state.meetingAttendance||[]).find(function(a){ return a.mtgId===mtg.id && a.date===sd && a.memberId===_mUid; });
+        var isSigned = !!myAtt;
+        var isClockedIn = myAtt && myAtt.clockedInAt && !myAtt.clockedOutAt;
+        if (isClockedIn) {
+          return '<div style="margin-top:10px;display:flex;justify-content:flex-end;">'
+            +'<span style="font-size:12px;color:#27AE60;">✅ Clocked in</span>'
+            +'</div></div>';
+        } else if (isSigned) {
+          return '<div style="margin-top:10px;display:flex;justify-content:flex-end;">'
+            +'<span style="font-size:12px;color:#7EC8E3;">✓ You are signed up</span>'
+            +'</div></div>';
+        } else {
+          return '<div style="margin-top:10px;display:flex;justify-content:flex-end;">'
+            +'<button onclick="signUpForMeeting(\''+mtg.id+'\',\''+sd+'\')" class="btn btn-sm" style="background:#0D2200;border:1px solid #27AE60;color:#27AE60;border-radius:8px;padding:6px 14px;font-weight:700;font-size:13px;">✋ SIGN UP</button>'
+            +'</div></div>';
+        }
+      })();
   }
   var upcoming=mtgs.filter(function(m){ return !!nextMeetingOccurrence(m); });
   var past=mtgs.filter(function(m){ return !nextMeetingOccurrence(m); });
