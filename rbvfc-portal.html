@@ -1328,7 +1328,10 @@ function sendTestPushToSelf() {
     return;
   }
   var url = state.cadScriptUrl;
-  if (!url) { showToast('⚠️ CAD Script URL not configured.'); return; }
+  if (!url) {
+    showToast('⚠️ Push relay not set up yet — ask your admin to configure the CAD Script URL in Admin → Data Management.');
+    return;
+  }
   fetch(url, {
     method: 'POST',
     body: JSON.stringify({
@@ -1427,7 +1430,22 @@ function showMoreMenu() {
     enableBtn.style.color = _denied ? '#F5A623' : '';
     enableBtn.style.borderColor = _denied ? '#F5A623' : '';
   }
-  if (testBtn) testBtn.style.display = _enabled ? '' : 'none';
+  if (testBtn) {
+    if (_enabled) {
+      testBtn.style.display = '';
+      if (!state.cadScriptUrl) {
+        testBtn.textContent = '📳 Test Notifications (relay not configured)';
+        testBtn.style.color = '#888';
+        testBtn.style.borderColor = '#444';
+      } else {
+        testBtn.textContent = '📳 Test My Notifications';
+        testBtn.style.color = '';
+        testBtn.style.borderColor = '';
+      }
+    } else {
+      testBtn.style.display = 'none';
+    }
+  }
   // Update Google Calendar button state
   // My Settings moved to gear icon — no gcal/notif buttons in More menu
 }
