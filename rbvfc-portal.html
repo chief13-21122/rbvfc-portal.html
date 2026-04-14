@@ -8406,6 +8406,15 @@ function checkClockedInReminders() {
   }
 
   // ── Send reminder 30 min before the 4-hour mark ───────────────────────
+  // Check if recently acknowledged — don't re-fire for another REMINDER_THRESHOLD_HRS
+  if (record._lastAckAt) {
+    var _ackAgeHrs = (now - new Date(record._lastAckAt)) / 3600000;
+    if (_ackAgeHrs < REMINDER_THRESHOLD_HRS) {
+      // Acknowledged too recently — silently skip until enough time passes
+      return;
+    }
+  }
+
   if (hrs >= REMINDER_THRESHOLD_HRS && !record._reminderSentAt) {
     record._reminderSentAt = now.toISOString();
     record._pushSent = false;
