@@ -8190,7 +8190,7 @@ function notifyUnderstaffedDay(date) {
 //  CLOCK-IN REMINDER + AUTO CLOCK-OUT SYSTEM
 // ───────────────────────────────────────────────────────────────
 var _clockedInReminderInterval = null;
-var REMINDER_THRESHOLD_HRS  = 20;   // warn after 20h clocked in
+var REMINDER_THRESHOLD_HRS  = 3.5;  // warn 30 min before the 4-hour mark
 var AUTO_CLOCKOUT_GRACE_MINS = 30;  // auto-close if no ack in 30 min
 
 function startClockedInReminderPoller() {
@@ -8233,7 +8233,7 @@ function _getActiveClockedInSession(uid) {
         ? activeShift.shiftStart.slice(0,2)+':'+activeShift.shiftStart.slice(2,4)
         : '00:00') + ':00';
     return { id: activeShift.id, userId: uid, start: shiftStart,
-             shiftId: activeShift.id, _synthetic: true };
+             shiftId: activeShift.id, _synthetic: true, _record: activeShift };
   }
 
   // 3. Active special event signup
@@ -8244,7 +8244,7 @@ function _getActiveClockedInSession(uid) {
       if (s.memberId === uid && s.clockedIn && !s.clockedOutAt) {
         var evStart = ev.date + 'T' + (ev.startTime || '00:00') + ':00';
         activeEventSess = { id: ev.id, userId: uid, start: evStart,
-                            eventId: ev.id, _synthetic: true };
+                            eventId: ev.id, _synthetic: true, _record: s };
       }
     });
   });
@@ -8256,51 +8256,161 @@ function _getActiveClockedInSession(uid) {
   });
   if (activeMtgAtt) {
     return { id: activeMtgAtt.mtgId, userId: uid, start: activeMtgAtt.clockedInAt,
-             mtgId: activeMtgAtt.mtgId, _synthetic: true };
+             mtgId: activeMtgAtt.mtgId, _synthetic: true, _record: activeMtgAtt };
   }
 
   return null; // not clocked in
+}
+
+
+function _performAutoClockOut(sess, record) {
+  var uid = sess.userId;
+  var endTime = new Date(record._reminderSentAt || new Date());
+  var startTime = new Date(sess.start);
+  var durSecs = Math.max(0, Math.floor((endTime - startTime) / 1000));
+  var reason = 'Auto clocked out — no response to 30-min reminder.';
+
+  if (sess._synthetic) {
+    // ── Synthetic: shift / event / meeting ─────────────────────
+    if (sess.shiftId) {
+      var shift = (state.staffingShifts||[]).find(function(s){ return s.id===sess.shiftId; });
+      if (shift) {
+        shift.clockedIn = false;
+        shift.clockedOutAt = endTime.toISOString();
+        shift.status = 'completed';
+        shift._autoClockoutReason = reason;
+      }
+      // Also close currentSession if it is linked to this shift
+      if (state.currentSession && state.currentSession.shiftId === sess.shiftId && !state.currentSession.end) {
+        state.currentSession.end = endTime.toISOString();
+        state.currentSession.duration = durSecs;
+        state.currentSession._autoClockoutReason = reason;
+        if (!Array.isArray(state.sessions)) state.sessions = [];
+        state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+        state.currentSession = null;
+        clearInterval(_clockTimerInterval); _clockTimerInterval = null;
+        try { updateClockUI(false); } catch(e) {}
+      }
+    } else if (sess.eventId) {
+      if (record) {
+        record.clockedIn = false;
+        record.clockedOutAt = endTime.toISOString();
+        record._autoClockoutReason = reason;
+      }
+    } else if (sess.mtgId) {
+      if (record) {
+        record.clockedOutAt = endTime.toISOString();
+        record._autoClockoutReason = reason;
+      }
+      // Close currentSession if linked to meeting
+      if (state.currentSession && state.currentSession.mtgId === sess.mtgId && !state.currentSession.end) {
+        state.currentSession.end = endTime.toISOString();
+        state.currentSession.duration = durSecs;
+        if (!Array.isArray(state.sessions)) state.sessions = [];
+        state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+        state.currentSession = null;
+        clearInterval(_clockTimerInterval); _clockTimerInterval = null;
+        try { updateClockUI(false); } catch(e) {}
+      }
+    }
+  } else {
+    // ── Real currentSession ─────────────────────────────────────
+    sess.end = endTime.toISOString();
+    sess.duration = durSecs;
+    sess._autoClockoutReason = reason;
+    if (state.currentSession && state.currentSession.id === sess.id) {
+      if (!Array.isArray(state.sessions)) state.sessions = [];
+      state.sessions.push(JSON.parse(JSON.stringify(sess)));
+      state.currentSession = null;
+      clearInterval(_clockTimerInterval); _clockTimerInterval = null;
+      try { updateClockUI(false); } catch(e) {}
+    }
+    if (sess.shiftId) {
+      var sh2 = (state.staffingShifts||[]).find(function(s){ return s.id===sess.shiftId; });
+      if (sh2) { sh2.clockedIn=false; sh2.clockedOutAt=endTime.toISOString(); sh2.status='completed'; }
+    }
+  }
+
+  save();
+
+  // ── UI cleanup ──────────────────────────────────────────────────
+  var banner = document.getElementById('clockedInReminderBanner');
+  if (banner) { banner.style.display='none'; _adjustAppTopPad(); }
+  var modal = document.getElementById('_dutyOverTimeModal');
+  if (modal) modal.remove();
+  try { updateClockUI(false); } catch(e) {}
+  try { renderMyShifts(); }       catch(e) {}
+  try { renderRecentSessions(); } catch(e) {}
+  try { updateClockStats(); }     catch(e) {}
+  try { renderStaffingBoard(); }  catch(e) {}
+
+  // ── Push notification: you were auto clocked out ───────────────
+  try {
+    var _alertId = 'auto_clockout_' + uid + '_' + new Date().toISOString().slice(0,13);
+    sendPushToMembers([uid],
+      '🔴 You were auto clocked out',
+      'No response to the 30-min check-in reminder. Portal clocked you out at ' +
+        endTime.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '.',
+      _alertId
+    );
+  } catch(e) {}
+
+  showToast('🔴 Auto clocked out — no response to 30-min reminder.');
 }
 
 function checkClockedInReminders() {
   var uid = state.currentUserId;
   if (!uid) return;
 
-  // Use authoritative check — does NOT scan stale state.sessions entries
+  // Authoritative check — covers all clock-in types
   var openSess = _getActiveClockedInSession(uid);
   if (!openSess) {
-    // Not clocked in — dismiss any lingering reminder banner
     var el = document.getElementById('clockedInReminderBanner');
     if (el) { el.style.display='none'; _adjustAppTopPad(); }
     return;
   }
-  // For synthetic sessions (shift/event/meeting), skip the auto-clock-out logic
-  // since those are managed by checkAutoClockOuts instead
-  if (openSess._synthetic) return;
 
-  var now    = new Date();
-  var start  = new Date(openSess.start);
-  var hrs    = (now - start) / 3600000;
+  // For synthetic sessions use _record for storing reminder state
+  // For currentSession use the session object itself
+  var record = (openSess._synthetic && openSess._record) ? openSess._record : openSess;
 
-  // ── Auto clock-out check: was a reminder sent and not acknowledged? ───
-  if (openSess._reminderSentAt && !openSess._reminderAckedAt) {
-    var reminderAge = (now - new Date(openSess._reminderSentAt)) / 60000; // minutes
-    if (reminderAge >= AUTO_CLOCKOUT_GRACE_MINS) {
-      // Grace period expired — auto clock-out this member
-      _autoClockOutSession(openSess, 'Auto clocked out — no response to ' + AUTO_CLOCKOUT_GRACE_MINS + '-min reminder.');
+  var now   = new Date();
+  var start = new Date(openSess.start);
+  var hrs   = (now - start) / 3600000;
+
+  // ── Auto clock-out: reminder sent, grace expired, not acknowledged ────
+  if (record._reminderSentAt && !record._reminderAckedAt) {
+    var ageMin = (now - new Date(record._reminderSentAt)) / 60000;
+    if (ageMin >= AUTO_CLOCKOUT_GRACE_MINS) {
+      _performAutoClockOut(openSess, record);
       return;
     }
   }
 
-  // ── Send reminder if clocked in too long ─────────────────────────────
-  if (hrs >= REMINDER_THRESHOLD_HRS && !openSess._reminderSentAt) {
-    openSess._reminderSentAt = now.toISOString();
+  // ── Send reminder 30 min before the 4-hour mark ───────────────────────
+  if (hrs >= REMINDER_THRESHOLD_HRS && !record._reminderSentAt) {
+    record._reminderSentAt = now.toISOString();
+    record._pushSent = false;
     save();
     _showClockedInReminderBanner(openSess, hrs);
+    // Push: warning 30 min before auto clock-out
+    try {
+      var _warnId = 'duty_warn_' + uid + '_' + now.toISOString().slice(0,13);
+      if (!record._pushSent) {
+        record._pushSent = true;
+        save();
+        sendPushToMembers([uid],
+          '⏰ Still on duty? (30-min warning)',
+          'You\'ve been clocked in for ' + hrs.toFixed(1) + ' hrs. ' +
+            'Confirm within 30 min or you will be auto clocked out.',
+          _warnId
+        );
+      }
+    } catch(e) {}
   }
 
-  // ── Re-show banner if still pending ack ──────────────────────────────
-  if (openSess._reminderSentAt && !openSess._reminderAckedAt) {
+  // ── Re-show banner while pending acknowledgment ───────────────────────
+  if (record._reminderSentAt && !record._reminderAckedAt) {
     _showClockedInReminderBanner(openSess, hrs);
   }
 }
@@ -8325,13 +8435,15 @@ function _showClockedInReminderBanner(sess, hrs) {
 }
 
 function acknowledgeClockedInReminder() {
-  var sess = (state.sessions||[]).find(function(s){ return s.userId===state.currentUserId && !s.end; });
-  if (!sess && state.currentSession && state.currentSession.userId===state.currentUserId) sess = state.currentSession;
-  if (sess) {
-    sess._reminderSentAt  = null;  // reset — reminder will re-fire after another REMINDER_THRESHOLD_HRS
-    sess._reminderAckedAt = null;
-    // Bump start time so reminder doesn't immediately re-fire
-    sess._lastAckAt = new Date().toISOString();
+  var uid = state.currentUserId;
+  var openSess = _getActiveClockedInSession(uid);
+  if (openSess) {
+    var record = (openSess._synthetic && openSess._record) ? openSess._record : openSess;
+    // Reset reminder — will re-fire after another REMINDER_THRESHOLD_HRS
+    record._reminderSentAt = null;
+    record._reminderAckedAt = null;
+    record._pushSent = false;
+    record._lastAckAt = new Date().toISOString();
     save();
   }
   var el = document.getElementById('clockedInReminderBanner');
@@ -8382,6 +8494,17 @@ function _autoClockOutSession(sess, reason) {
   try { renderRecentSessions(); } catch(e){}
   try { updateClockStats(); }    catch(e){}
 
+  // Push notification: member was auto clocked out
+  try {
+    var _uid_acs = sess.userId || state.currentUserId;
+    if (_uid_acs) {
+      sendPushToMembers([_uid_acs],
+        '🔴 You were auto clocked out',
+        'No response to the 30-min check-in reminder. Portal clocked you out.',
+        'auto_clockout_' + _uid_acs + '_' + new Date().toISOString().slice(0,13)
+      );
+    }
+  } catch(e) {}
   showToast('🔴 Auto clocked out after ' + AUTO_CLOCKOUT_GRACE_MINS + '-min reminder — ' + formatDuration(sess.duration));
 }
 
@@ -9296,51 +9419,9 @@ function checkStaffingReminders() {
   // Use authoritative check across all clock-in types
   var alreadyClocked = !!_getActiveClockedInSession(uid);
 
-  // ── Duty session over-time warning + auto-clock-out ──────────────────
+  // ── Duty over-time warning now handled by checkClockedInReminders ─────
+  // (which runs every 5 min and covers all clock-in types)
   if (alreadyClocked) {
-    // Only trigger overtime warning for general duty (state.currentSession)
-    // Shift/event/meeting clock-outs are handled by checkAutoClockOuts
-    var openSess = (state.currentSession && state.currentSession.userId === uid && !state.currentSession.end)
-        ? state.currentSession : null;
-
-    if (openSess && openSess.start) {
-      var durHrs = (now - new Date(openSess.start)) / 3600000;
-      var WARN_AFTER_HRS = 8;    // show warning after 8 hours
-      var AUTO_OUT_MINS  = 30;   // auto clock-out 30 min after warning if not acknowledged
-
-      // ── Reset cycle if acknowledged and WARN_AFTER_HRS has passed since ack ──
-      if (openSess._warnedAt && openSess._warnAcknowledged) {
-        var _ackAgeHrs = (now - new Date(openSess._warnedAt)) / 3600000;
-        if (_ackAgeHrs >= WARN_AFTER_HRS) {
-          openSess._warnedAt = null;
-          openSess._warnAcknowledged = false;
-          openSess._pushSent = false;
-          save();
-        }
-      }
-
-      // Has a warning been sent already?
-      if (!openSess._warnedAt && durHrs >= WARN_AFTER_HRS) {
-        // Show the warning modal and record when it was shown
-        openSess._warnedAt = now.toISOString();
-        openSess._pushSent = false;
-        save();
-        _showDutyOverTimeWarning(openSess, WARN_AFTER_HRS, AUTO_OUT_MINS);
-      } else if (openSess._warnedAt && !openSess._warnAcknowledged) {
-        var warnedAt2 = new Date(openSess._warnedAt);
-        var minsElapsed2 = (now - warnedAt2) / 60000;
-        if (minsElapsed2 >= AUTO_OUT_MINS) {
-          // Grace period expired — auto clock-out
-          _autoClockOutDuty(openSess, 'No acknowledgment after ' + AUTO_OUT_MINS + '-minute reminder');
-        } else {
-          // Still within grace window — show modal locally if not already shown
-          // (handles case where another device set _warnedAt via Firestore sync)
-          if (!document.getElementById('_dutyOverTimeModal')) {
-            _showDutyOverTimeWarning(openSess, WARN_AFTER_HRS, AUTO_OUT_MINS);
-          }
-        }
-      }
-    }
     if (hour >= 6) checkClassReminders(uid, today);
     return;
   }
@@ -9444,6 +9525,17 @@ function _autoClockOutDuty(session, reason) {
   // Remove warning modal if still showing
   var modal = document.getElementById('_dutyOverTimeModal');
   if (modal) modal.remove();
+  // Push notification: member was auto clocked out
+  try {
+    var _uid_acd = session.userId || state.currentUserId;
+    if (_uid_acd) {
+      sendPushToMembers([_uid_acd],
+        '🔴 You were auto clocked out',
+        'No response to the 30-min check-in reminder. Portal clocked you out.',
+        'auto_clockout_' + _uid_acd + '_' + new Date().toISOString().slice(0,13)
+      );
+    }
+  } catch(e) {}
   showToast('⏹ Auto clocked out — no response to reminder after 30 min.');
   console.log('[RBVFC] Auto clocked out', session.userId, 'reason:', reason);
 }
