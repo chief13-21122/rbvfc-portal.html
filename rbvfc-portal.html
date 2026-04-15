@@ -13037,7 +13037,8 @@ function renderCompanyLOSAP() {
     duty:'Standby / Duty', meeting:'Company Meeting', training:'Formal Training',
     collateral:'Collateral Duty', fundraiser:'Special Event', other:'On Duty',
     drill:'Drill', emergency:'Emergency Response', class:'Class In Session',
-    boardmeeting:'Board Meeting'
+    boardmeeting:'Board Meeting',
+    staffing:'Staffing'
   };
   var todayStr = localDateStr();
 
@@ -13046,12 +13047,13 @@ function renderCompanyLOSAP() {
     clockedIn[uid] = { activity: activity, note: note || '', color: color || '#27AE60' };
   }
 
-  // Source 1: Staffing shifts clocked in → RED (on apparatus)
+  // Source 1: Staffing shifts clocked in → show as "Staffing · Position · Unit"
   (state.staffingShifts||[]).filter(function(s){
     return s.date===todayStr && s.clockedIn && !s.clockedOutAt && s.memberId;
   }).forEach(function(s){
     var lbl = (UNIT_LABELS&&UNIT_LABELS[s.unitId]) || (s.unitId||'').toUpperCase();
-    _ciSet(s.memberId, 'emergency', lbl + (s.position?' · '+s.position:''), ACT_COLORS.emergency);
+    var note = (s.position ? s.position + ' · ' : '') + lbl;
+    _ciSet(s.memberId, 'staffing', note, ACT_COLORS.emergency);
   });
 
   // Source 2: Staffing shifts assigned today (not clocked in yet) — grey
