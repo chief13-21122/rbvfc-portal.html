@@ -1351,6 +1351,31 @@ function sendTestPushToSelf() {
 }
 
 
+
+function copyPublicLink() {
+  var base = window.location.href.split('?')[0].split('#')[0];
+  var url = base + '?view=public';
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(function() {
+      showToast('✅ Public link copied!');
+    }).catch(function() {
+      _fallbackCopyText(url);
+    });
+  } else {
+    _fallbackCopyText(url);
+  }
+}
+function _fallbackCopyText(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); showToast('✅ Public link copied!'); }
+  catch(e) { showToast('⚠️ Could not copy — link shown above.'); }
+  document.body.removeChild(ta);
+}
+
 function openGearMenu() {
   openMySettings();
 }
@@ -1386,6 +1411,13 @@ function openMySettings() {
     if (gcalStatus) gcalStatus.textContent = connected ? '✅' : '';
     if (gcalBtn) { gcalBtn.style.borderColor = connected ? '#27AE60' : ''; gcalBtn.style.color = connected ? '#27AE60' : ''; }
   }
+  // Populate public view link
+  var _pubEl = document.getElementById('mySettingsPublicUrl');
+  if (_pubEl) {
+    var _base = window.location.href.split('?')[0].split('#')[0];
+    _pubEl.textContent = _base + '?view=public';
+  }
+
   // Show Admin Panel button for officers and admins
   var adminBtnSection = document.getElementById('mySettingsAdminBtn');
   if (adminBtnSection) {
@@ -4524,7 +4556,6 @@ function onAdminTabShow() {
     'memberMgmtCard',         // Member Management
     'firestoreConfigCard',    // Cloud Sync (Firestore)
     'logoMgmtCard',           // Company Logo
-    'publicLinkCard',         // Public View Link
     'adminPinCard',              // Change PIN
     'respondingApparatusCard',   // Responding Apparatus defaults
     'staffingUnitsCard',         // Staffing Unit Visibility
@@ -8555,6 +8586,9 @@ function _shouldFireReminder(sess) {
 //  ADMIN: CLOCK OUT EVERYONE
 // ───────────────────────────────────────────────────────────────
 function adminClockOutAll() {
+  // Admin only backstop
+  var _coaMe = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+  if (!_coaMe || _coaMe.appRole !== 'admin') { showToast('⚠️ Admin only.'); return; }
   // Find all currently open sessions across ALL members
   var openSessions = (state.sessions||[]).filter(function(s){ return !s.end; });
 
@@ -11193,7 +11227,14 @@ function formatDateLong(date) {
 function updateApprovalsBadge() {
   var uid = state.currentUserId;
   var m = (state.roster||[]).find(function(x){ return x.id===uid; });
-  if (!m || (m.appRole!=='officer' && m.appRole!=='admin')) return;
+  if (!m || (m.appRole!=='officer' && m.appRole!=='admin')) {
+    // Not an officer/admin — always hide both badges
+    var _b = document.getElementById('approvalsBadge');
+    var _mb = document.getElementById('moreBadge');
+    if (_b)  _b.style.display  = 'none';
+    if (_mb) _mb.style.display = 'none';
+    return;
+  }
   var pendingTraining = (state.trainingSubmissions||[]).filter(function(s){ return s.status==='pending'; }).length;
   var pendingLosap = (state.losapPending||[]).filter(function(s){ return s.status==='pending'; }).length;
   var pendingER = (state.emergencyResponses||[]).filter(function(r){ return !r.approvedBy; }).length;
@@ -16480,6 +16521,13 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <button class="btn btn-secondary btn-full" id="mySettingsTestNotifBtn" style="margin-top:8px;display:none;" onclick="sendTestPushToSelf();closeMySettings()">
         📳 Test My Notifications
       </button>
+
+      <!-- Public View Link — visible to all -->
+      <div style="margin-top:16px;border-top:1px solid #2A2A2A;padding-top:16px;">
+        <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Public View Link</div>
+        <div id="mySettingsPublicUrl" style="font-size:11px;color:#7EC8E3;word-break:break-all;font-family:monospace;background:#0D1A2A;border:1px solid #1A3A5A;border-radius:6px;padding:8px;margin-bottom:8px;"></div>
+        <button class="btn btn-secondary btn-full" style="font-size:12px;" onclick="copyPublicLink()">📋 Copy Link</button>
+      </div>
 
       <!-- Admin Panel button — officers/admins only -->
       <div id="mySettingsAdminBtn" style="display:none;margin-top:16px;border-top:1px solid #2A2A2A;padding-top:16px;">
