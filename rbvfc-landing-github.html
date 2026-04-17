@@ -403,7 +403,8 @@
   .reveal {
 opacity: 1; transform: none;
     
-  .reveal.visible { opacity: 1; transform: none; }
+    .section-divider{height:1px;background:linear-gradient(90deg,transparent,rgba(200,16,46,0.3),rgba(255,255,255,0.06),rgba(200,16,46,0.3),transparent);margin:0;}
+    .reveal.visible { opacity: 1; transform: none; }
 
   /* ── DIVIDER ── */
   .divider {
@@ -415,7 +416,7 @@ opacity: 1; transform: none;
   @media (max-width: 768px) {
     header { padding: 14px 20px; }
     header nav { display: none; }
-    section { padding: 70px 20px; }
+    section { padding: 40 20px; }
     .stats-bar { grid-template-columns: repeat(2,1fr); }
     .stat-item { border-right: none; border-bottom: 1px solid var(--border); }
     .features-grid, .roles-grid, .notif-grid, .losap-grid { grid-template-columns: 1fr; }
