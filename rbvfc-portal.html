@@ -1409,6 +1409,8 @@ function openMySettings() {
   if (gcalLabel) {
     var connected = gcalIsConnected();
     gcalLabel.textContent = connected ? 'Disconnect Google Calendar' : 'Connect Google Calendar';
+    var gcalSyncBtn = document.getElementById('mySettingsGcalSyncBtn');
+    if (gcalSyncBtn) gcalSyncBtn.style.display = connected ? '' : 'none';
     if (gcalStatus) gcalStatus.textContent = connected ? '✅' : '';
     if (gcalBtn) { gcalBtn.style.borderColor = connected ? '#27AE60' : ''; gcalBtn.style.color = connected ? '#27AE60' : ''; }
   }
@@ -7730,6 +7732,67 @@ async function gcalPushClass(cls) {
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────
+
+
+// ── BULK GCAL SYNC ────────────────────────────────────────────────────────
+// Pushes all past/future signups, meetings, and shifts to Google Calendar
+async function gcalSyncAll() {
+  if (!gcalIsConnected()) {
+    showToast('⚠️ Connect Google Calendar first (Settings → Google Calendar).');
+    return;
+  }
+  var uid = state.currentUserId;
+  if (!uid) { showToast('⚠️ Log in first.'); return; }
+
+  var pushed = 0, skipped = 0, failed = 0;
+
+  showToast('⏳ Syncing to Google Calendar...');
+
+  // ── 1. Special Events signed up for ──
+  for (var i = 0; i < (state.specialEvents||[]).length; i++) {
+    var ev = state.specialEvents[i];
+    var signup = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
+    if (!signup) continue;
+    if (signup._gcalEventId) { skipped++; continue; } // already synced
+    try {
+      var id = await gcalPushEvent(ev);
+      if (id) { signup._gcalEventId = id; pushed++; }
+      else failed++;
+    } catch(e) { failed++; }
+  }
+
+  // ── 2. Meetings signed up for ──
+  for (var j = 0; j < (state.meetingAttendance||[]).length; j++) {
+    var att = state.meetingAttendance[j];
+    if (att.memberId !== uid) continue;
+    if (att._gcalEventId) { skipped++; continue; } // already synced
+    var mtg = (state.meetings||[]).find(function(m){ return m.id===att.mtgId; });
+    if (!mtg) continue;
+    try {
+      var mid = await gcalPushMeeting(mtg, att.date);
+      if (mid) { att._gcalEventId = mid; pushed++; }
+      else failed++;
+    } catch(e) { failed++; }
+  }
+
+  // ── 3. Staffing shifts assigned to me ──
+  for (var k = 0; k < (state.staffingShifts||[]).length; k++) {
+    var shift = state.staffingShifts[k];
+    if (shift.memberId !== uid) continue;
+    if (shift._gcalEventId) { skipped++; continue; } // already synced
+    try {
+      var sid = await gcalPushShift(shift);
+      if (sid) { shift._gcalEventId = sid; pushed++; }
+      else failed++;
+    } catch(e) { failed++; }
+  }
+
+  save();
+  var msg = '✅ Google Calendar sync complete — ' + pushed + ' added';
+  if (skipped) msg += ', ' + skipped + ' already synced';
+  if (failed) msg += ', ' + failed + ' failed';
+  showToast(msg);
+}
 
 function renderGcalStatus() {
   var els = document.querySelectorAll('.gcal-status-text');
@@ -16743,6 +16806,9 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           📅 <span id="mySettingsGcalLabel">Connect Google Calendar</span>
           <span id="mySettingsGcalStatus" style="position:absolute;top:50%;right:14px;transform:translateY(-50%);font-size:11px;"></span>
         </button>
+        <button class="btn btn-full" id="mySettingsGcalSyncBtn" onclick="gcalSyncAll();closeMySettings()" style="margin-top:6px;display:none;background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;">
+          🔄 Sync All Events to Google Calendar
+        </button>
       </div>
 
       <!-- Notifications -->
@@ -18408,6 +18474,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-secondary btn-sm" onclick="saveGcalClientId()">💾 Save Credentials</button>
+            <button class="btn btn-sm" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;" onclick="gcalSyncAll()">🔄 Sync All Past Events</button>
           </div>
         </div>
       </div>
