@@ -1138,6 +1138,7 @@ var state = {
   loggedIncidentNums: [],      // incident numbers already logged — skip on future syncs
   gcalClientId: '',              // Google OAuth 2.0 Client ID for Calendar integration
   gcalClientSecret: '',          // Google OAuth 2.0 Client Secret for Calendar integration
+  gcalCalendarId: '',            // ID of the dedicated 'RBVFC Co.13' Google Calendar (created on first sync)
   cadScriptUrl: '',            // separate Apps Script URL just for CAD dispatch sync
   lastCadSync: '',             // ISO timestamp of last successful CAD sync
   // Extended properties (used at runtime, safe to be undefined but declared for clarity)
@@ -7449,7 +7450,7 @@ function closeSignUpModal() {
 //  No server required. Members authorize once; all signups push silently.
 // ═══════════════════════════════════════════════════════════════════════════
 
-var _GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+var _GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar';
 var _GCAL_TOKEN_KEY = 'rbvfc_gcal_token';
 var _GCAL_EXPIRY_KEY = 'rbvfc_gcal_expiry';
 var _GCAL_VERIFIER_KEY = 'rbvfc_gcal_verifier';
@@ -7510,6 +7511,10 @@ async function gcalConnect() {
     showToast('⚠️ Google Calendar Client ID not configured. Ask your admin.');
     return;
   }
+  // Clear existing tokens so we get the updated scope (calendar vs calendar.events)
+  // This ensures existing users re-authorize with the broader scope
+  _gcalClearToken();
+  try { localStorage.removeItem('rbvfc_gcal_refresh'); } catch(e){}
   var verifier = _gcalRandomString(64);
   try { localStorage.setItem(_GCAL_VERIFIER_KEY, verifier); } catch(e) {}
   var challenge = await _gcalCodeChallenge(verifier);
@@ -7594,12 +7599,73 @@ async function _gcalGetValidToken() {
 
 function gcalDisconnect() {
   _gcalClearToken();
+  try { localStorage.removeItem('rbvfc_gcal_refresh'); } catch(e){}
+  state.gcalCalendarId = '';
+  save();
   try { localStorage.removeItem('rbvfc_gcal_refresh'); } catch(e) {}
   showToast('📅 Google Calendar disconnected.');
   renderGcalStatus();
 }
 
 // ── Create / Delete calendar events ──────────────────────────────────────
+
+
+// ── DEDICATED CALENDAR ───────────────────────────────────────────────────
+// Gets or creates the "RBVFC Co.13 Portal" calendar — keeps portal events
+// separate from the member's main calendar so they can toggle it on/off.
+
+async function _gcalGetOrCreateCalendar() {
+  // Return cached calendar ID if we have it
+  if (state.gcalCalendarId) return state.gcalCalendarId;
+
+  var token = await _gcalGetValidToken();
+  if (!token) return 'primary';
+
+  try {
+    // Check if calendar already exists in their calendar list
+    var listResp = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var listData = await listResp.json();
+    var existing = (listData.items || []).find(function(cal) {
+      return cal.summary === 'RBVFC Co.13 Portal';
+    });
+    if (existing) {
+      state.gcalCalendarId = existing.id;
+      save();
+      return existing.id;
+    }
+
+    // Create a new calendar
+    var createResp = await fetch('https://www.googleapis.com/calendar/v3/calendars', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        summary: 'RBVFC Co.13 Portal',
+        description: 'Shifts, meetings, and events from the Riviera Beach Volunteer Fire Company Co.13 Member Portal',
+        timeZone: 'America/New_York'
+      })
+    });
+    var createData = await createResp.json();
+    if (createData.id) {
+      // Set a distinctive red color for the calendar
+      await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList/' + encodeURIComponent(createData.id), {
+        method: 'PATCH',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ colorId: '11' }) // red/tomato
+      }).catch(function(){});
+
+      state.gcalCalendarId = createData.id;
+      save();
+      console.log('[RBVFC] Created dedicated calendar:', createData.id);
+      return createData.id;
+    }
+  } catch(e) {
+    console.warn('[RBVFC] Could not create dedicated calendar, using primary:', e);
+  }
+
+  return 'primary'; // fallback
+}
 
 async function _gcalCreateEvent(details) {
   // details: { title, startISO, endISO, description, location }
@@ -7617,7 +7683,8 @@ async function _gcalCreateEvent(details) {
     ]}
   };
   try {
-    var resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+    var _calId = await _gcalGetOrCreateCalendar();
+    var resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(_calId) + '/events', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -7632,7 +7699,8 @@ async function _gcalDeleteEvent(gcalEventId) {
   var token = await _gcalGetValidToken();
   if (!token) return;
   try {
-    await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + encodeURIComponent(gcalEventId), {
+    var _delCalId = state.gcalCalendarId || 'primary';
+    await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(_delCalId) + '/events/' + encodeURIComponent(gcalEventId), {
       method: 'DELETE',
       headers: { 'Authorization': 'Bearer ' + token }
     });
@@ -7764,7 +7832,9 @@ async function gcalSyncAll() {
 
   var pushed = 0, skipped = 0, failed = 0;
 
-  showToast('⏳ Syncing to Google Calendar...');
+  // Ensure calendar exists first (creates it if needed)
+  showToast('⏳ Setting up RBVFC Co.13 calendar and syncing...');
+  await _gcalGetOrCreateCalendar();
 
   // ── 1. Special Events signed up for ──
   for (var i = 0; i < (state.specialEvents||[]).length; i++) {
