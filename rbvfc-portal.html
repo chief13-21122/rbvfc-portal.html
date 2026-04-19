@@ -8669,6 +8669,225 @@ function notifyUnderstaffedDay(date) {
 
 // ── CLOCK IN / CANCEL / REMOVE ────────────────────────────────
 
+
+// ══════════════════════════════════════════════════════════════════
+//  FEEDBACK / ISSUE REPORTING
+// ══════════════════════════════════════════════════════════════════
+
+var _feedbackType = 'bug';
+
+function selectFeedbackType(type) {
+  _feedbackType = type;
+  var colors = { bug:'#C8102E', feature:'#3498DB', question:'#F5A623', other:'#888' };
+  document.querySelectorAll('.fb-type-btn').forEach(function(btn) {
+    var t = btn.getAttribute('data-type');
+    var selected = (t === type);
+    btn.style.border = '1px solid ' + (selected ? colors[t] : '#333');
+    btn.style.color  = selected ? colors[t] : '#888';
+    btn.style.background = selected ? (colors[t] + '18') : '#1E1E1E';
+  });
+}
+
+function openFeedbackSheet() {
+  _feedbackType = 'bug';
+  selectFeedbackType('bug');
+  document.getElementById('feedbackSubject').value   = '';
+  document.getElementById('feedbackDesc').value      = '';
+  document.getElementById('feedbackLocation').value  = '';
+  var s = document.getElementById('feedbackSheet');
+  s.style.display = 'flex';
+  requestAnimationFrame(function(){
+    document.getElementById('feedbackSheetPanel').style.transform = 'translateY(0)';
+  });
+}
+
+function closeFeedbackSheet() {
+  document.getElementById('feedbackSheetPanel').style.transform = 'translateY(100%)';
+  setTimeout(function(){ document.getElementById('feedbackSheet').style.display = 'none'; }, 320);
+}
+
+function submitFeedback() {
+  var subject  = (document.getElementById('feedbackSubject').value || '').trim();
+  var desc     = (document.getElementById('feedbackDesc').value    || '').trim();
+  var location = document.getElementById('feedbackLocation').value || '';
+  if (!subject) { showToast('\u26a0\ufe0f Please enter a subject.'); return; }
+  if (!desc)    { showToast('\u26a0\ufe0f Please add a description.'); return; }
+
+  var user = state.currentUser || {};
+  var issue = {
+    id:           'issue_' + Date.now(),
+    type:         _feedbackType,
+    subject:      subject,
+    desc:         desc,
+    location:     location,
+    status:       'open',
+    submittedBy:  (user.first || '') + ' ' + (user.last || ''),
+    submittedById: user.id || '',
+    submittedAt:  new Date().toISOString(),
+    updatedAt:    new Date().toISOString(),
+    adminNote:    '',
+    updatedBy:    ''
+  };
+
+  if (!state.feedbackLog) state.feedbackLog = [];
+  state.feedbackLog.unshift(issue);
+  save();
+  closeFeedbackSheet();
+  showToast('\u2705 Issue reported \u2014 check the Issue Log to track progress.');
+}
+
+// ── ISSUE LOG ──────────────────────────────────────────────────────
+
+var _issueFilter = 'all';
+
+function openIssueLog() {
+  _issueFilter = 'all';
+  renderIssueLog();
+  document.querySelectorAll('.issue-filter-btn').forEach(function(b){
+    b.style.background = 'transparent'; b.style.color = '#888'; b.style.borderColor = '#333';
+  });
+  var allBtn = document.getElementById('issueFilter_all');
+  if (allBtn) { allBtn.style.background='#C8102E'; allBtn.style.color='#FFF'; allBtn.style.borderColor='#C8102E'; }
+  var s = document.getElementById('issueLogSheet');
+  s.style.display = 'flex';
+  requestAnimationFrame(function(){
+    document.getElementById('issueLogPanel').style.transform = 'translateY(0)';
+  });
+}
+
+function closeIssueLog() {
+  document.getElementById('issueLogPanel').style.transform = 'translateY(100%)';
+  setTimeout(function(){ document.getElementById('issueLogSheet').style.display = 'none'; }, 320);
+}
+
+function filterIssues(status) {
+  _issueFilter = status;
+  document.querySelectorAll('.issue-filter-btn').forEach(function(b){
+    b.style.background = 'transparent'; b.style.color = '#888'; b.style.borderColor = '#333';
+  });
+  var btn = document.getElementById('issueFilter_' + status);
+  if (btn) { btn.style.background='#C8102E'; btn.style.color='#FFF'; btn.style.borderColor='#C8102E'; }
+  renderIssueLog();
+}
+
+function _esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderIssueLog() {
+  var list = document.getElementById('issueLogList');
+  if (!list) return;
+  var issues = (state.feedbackLog || []).slice();
+  if (_issueFilter !== 'all') issues = issues.filter(function(i){ return i.status === _issueFilter; });
+
+  if (!issues.length) {
+    list.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#444;">' +
+      '<div style="font-size:32px;margin-bottom:10px;">\ud83d\udced</div>' +
+      '<div style="font-size:13px;">' + (_issueFilter === 'all' ? 'No issues reported yet. Be the first!' : 'No issues with this status.') + '</div></div>';
+    return;
+  }
+
+  var STATUS = {
+    open:        { label:'Open',        color:'#E74C3C', bg:'rgba(231,76,60,0.12)',  icon:'\ud83d\udd34' },
+    in_progress: { label:'In Progress', color:'#F5A623', bg:'rgba(245,166,35,0.12)', icon:'\ud83d\udfe1' },
+    fixed:       { label:'Fixed',       color:'#27AE60', bg:'rgba(39,174,96,0.12)',  icon:'\u2705' },
+    closed:      { label:'Closed',      color:'#666',    bg:'rgba(255,255,255,0.05)',icon:'\ud83d\udeab' }
+  };
+  var TYPE_ICON  = { bug:'\ud83d\udc1b', feature:'\ud83d\udca1', question:'\u2753', other:'\ud83d\udcac' };
+  var TYPE_COLOR = { bug:'#E74C3C', feature:'#3498DB', question:'#F5A623', other:'#888' };
+
+  var user = state.currentUser || {};
+  var isOfficer = user.appRole === 'officer' || user.appRole === 'admin';
+
+  list.innerHTML = issues.map(function(issue) {
+    var st  = STATUS[issue.status] || STATUS['open'];
+    var tColor = TYPE_COLOR[issue.type] || '#888';
+    var tIcon  = TYPE_ICON[issue.type]  || '\ud83d\udcac';
+    var date = issue.submittedAt ? new Date(issue.submittedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
+    var adminNoteHtml = issue.adminNote
+      ? '<div style="margin-top:8px;background:#0A1A0A;border-left:3px solid #27AE60;border-radius:0 6px 6px 0;padding:8px 10px;">' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#27AE60;text-transform:uppercase;margin-bottom:3px;">Officer Note' + (issue.updatedBy ? ' \u2014 ' + _esc(issue.updatedBy) : '') + '</div>' +
+        '<div style="font-size:12px;color:#AAA;">' + _esc(issue.adminNote) + '</div></div>'
+      : '';
+    var locationHtml = issue.location
+      ? '<span style="font-size:10px;color:#555;margin-left:4px;">in ' + _esc(issue.location) + '</span>' : '';
+
+    var statusChanger = '';
+    if (isOfficer) {
+      statusChanger = '<div style="margin-top:10px;border-top:1px solid #1E1E1E;padding-top:10px;">' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#444;margin-bottom:6px;">Officer Actions</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">' +
+        ['open','in_progress','fixed','closed'].map(function(s){
+          var ss = STATUS[s];
+          var active = issue.status === s;
+          return '<button onclick="updateIssueStatus(\'' + issue.id + '\',\'' + s + '\')" style="' +
+            'background:' + (active ? ss.bg : 'transparent') + ';' +
+            'border:1px solid ' + (active ? ss.color : '#2A2A2A') + ';' +
+            'color:' + (active ? ss.color : '#555') + ';' +
+            'border-radius:6px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;">' +
+            ss.icon + ' ' + ss.label + '</button>';
+        }).join('') +
+        '</div>' +
+        '<textarea id="noteFor_' + issue.id + '" placeholder="Add a note visible to all members\u2026" rows="2" style="width:100%;background:#111;border:1px solid #222;border-radius:6px;padding:8px;color:#AAA;font-size:12px;font-family:'Barlow',sans-serif;resize:none;box-sizing:border-box;">' + _esc(issue.adminNote || '') + '</textarea>' +
+        '<button onclick="saveOfficerNote(\'' + issue.id + '\')" style="margin-top:5px;background:#1E1E1E;border:1px solid #333;color:#888;border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer;">\ud83d\udcbe Save Note</button>' +
+        '</div>';
+    }
+
+    return '<div style="background:#111;border:1px solid #1E1E1E;border-radius:12px;padding:14px 14px 10px;">' +
+      '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;">' +
+        '<span style="font-size:18px;flex-shrink:0;">' + tIcon + '</span>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:14px;font-weight:700;color:#F0F0F0;line-height:1.3;">' + _esc(issue.subject) + '</div>' +
+          '<div style="display:flex;align-items:center;gap:5px;margin-top:3px;flex-wrap:wrap;">' +
+            '<span style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:' + tColor + ';">' + _esc(issue.type || 'other') + '</span>' +
+            '<span style="color:#2A2A2A;">\u00b7</span>' +
+            '<span style="font-size:10px;color:#555;">' + _esc(issue.submittedBy) + '</span>' +
+            '<span style="color:#2A2A2A;">\u00b7</span>' +
+            '<span style="font-size:10px;color:#555;">' + date + '</span>' +
+            locationHtml +
+          '</div>' +
+        '</div>' +
+        '<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;background:' + st.bg + ';color:' + st.color + ';flex-shrink:0;white-space:nowrap;">' + st.icon + ' ' + st.label + '</span>' +
+      '</div>' +
+      '<div style="font-size:12px;color:#777;line-height:1.55;">' + _esc(issue.desc) + '</div>' +
+      adminNoteHtml +
+      statusChanger +
+    '</div>';
+  }).join('');
+}
+
+function updateIssueStatus(id, newStatus) {
+  var user = state.currentUser || {};
+  if (!state.feedbackLog) return;
+  var issue = state.feedbackLog.find(function(i){ return i.id === id; });
+  if (!issue) return;
+  issue.status    = newStatus;
+  issue.updatedAt = new Date().toISOString();
+  issue.updatedBy = (user.first || '') + ' ' + (user.last || '');
+  var noteEl = document.getElementById('noteFor_' + id);
+  if (noteEl) issue.adminNote = noteEl.value.trim();
+  save();
+  renderIssueLog();
+  var STATUS_LABEL = { open:'Open', in_progress:'In Progress', fixed:'Fixed', closed:'Closed' };
+  showToast('\u2705 Status updated to ' + (STATUS_LABEL[newStatus] || newStatus));
+}
+
+function saveOfficerNote(id) {
+  var user = state.currentUser || {};
+  if (!state.feedbackLog) return;
+  var issue = state.feedbackLog.find(function(i){ return i.id === id; });
+  if (!issue) return;
+  var noteEl = document.getElementById('noteFor_' + id);
+  if (!noteEl) return;
+  issue.adminNote = noteEl.value.trim();
+  issue.updatedAt = new Date().toISOString();
+  issue.updatedBy = (user.first || '') + ' ' + (user.last || '');
+  save();
+  renderIssueLog();
+  showToast('\u2705 Note saved.');
+}
+
+
 // ───────────────────────────────────────────────────────────────
 //  CLOCK-IN REMINDER + AUTO CLOCK-OUT SYSTEM
 // ───────────────────────────────────────────────────────────────
@@ -16587,9 +16806,9 @@ function checkClockReminder() {
   if (!state.currentSession) return;
   var start = state.currentSession.start;
   if (!start) return;
-  // Don't re-show if already dismissed in the last 2 hours
+  // Don't re-show if already dismissed in the last 4 hours
   var lastDismiss = state.currentSession.reminderDismissed;
-  if (lastDismiss && (Date.now()-new Date(lastDismiss).getTime()) < 2*3600000) return;
+  if (lastDismiss && (Date.now()-new Date(lastDismiss).getTime()) < 4*3600000) return;
   var elapsed = (Date.now() - new Date(start).getTime()) / 1000 / 60 / 60;
   if (elapsed >= 4) {
     var hrs = elapsed.toFixed(1);
@@ -16614,7 +16833,7 @@ function ackClockReminder() {
     state.currentSession.reminderDismissed = new Date().toISOString();
     save();
   }
-  showToast('✅ Acknowledged — will check again in 2 hours.');
+  showToast('✅ Acknowledged — will check again in 4 hours.');
 }
 
 // 3. Cancel sign-up modal (standalone modal cancel button)
@@ -19030,8 +19249,109 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
 
       <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreManualActivityBtn" onclick="openManualActivitySheet();closeMoreMenu()">✏️ Manual Activity Entry</button>
+      <div style="height:1px;background:#2A2A2A;margin:12px 0;"></div>
+      <button class="btn btn-secondary btn-full" style="margin-top:0;" onclick="openFeedbackSheet();closeMoreMenu()">🐛 Report an Issue</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="openIssueLog();closeMoreMenu()">📋 Issue Log</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="closeAllWindows();showTab('admin');">⚙️ Admin</button>
 
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       FEEDBACK / ISSUE SUBMISSION SHEET
+  ════════════════════════════════════════════════════════════════ -->
+  <div id="feedbackSheet" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:1060;align-items:flex-end;" onclick="if(event.target===this)closeFeedbackSheet()">
+    <div id="feedbackSheetPanel" style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:20px;width:100%;box-sizing:border-box;max-height:90vh;overflow-y:auto;transform:translateY(100%);transition:transform .3s ease;">
+      <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 16px;"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:20px;">🐛</span>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#F0F0F0;">Report an Issue</div>
+        </div>
+        <button onclick="closeFeedbackSheet()" style="background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;">✕</button>
+      </div>
+      <p style="font-size:12px;color:#555;margin-bottom:16px;">Found a bug? Have a suggestion? Let us know — all reports go into the public issue log so you can track what's being worked on.</p>
+
+      <!-- Type -->
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Type *</label>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px;" id="feedbackTypeGrid">
+          <button class="fb-type-btn" data-type="bug" onclick="selectFeedbackType('bug')" style="background:#1E1E1E;border:1px solid #C8102E;color:#E8294A;border-radius:8px;padding:8px 4px;font-size:11px;font-weight:700;letter-spacing:.5px;cursor:pointer;text-align:center;">🐛<br>Bug</button>
+          <button class="fb-type-btn" data-type="feature" onclick="selectFeedbackType('feature')" style="background:#1E1E1E;border:1px solid #333;color:#888;border-radius:8px;padding:8px 4px;font-size:11px;font-weight:700;letter-spacing:.5px;cursor:pointer;text-align:center;">💡<br>Feature</button>
+          <button class="fb-type-btn" data-type="question" onclick="selectFeedbackType('question')" style="background:#1E1E1E;border:1px solid #333;color:#888;border-radius:8px;padding:8px 4px;font-size:11px;font-weight:700;letter-spacing:.5px;cursor:pointer;text-align:center;">❓<br>Question</button>
+          <button class="fb-type-btn" data-type="other" onclick="selectFeedbackType('other')" style="background:#1E1E1E;border:1px solid #333;color:#888;border-radius:8px;padding:8px 4px;font-size:11px;font-weight:700;letter-spacing:.5px;cursor:pointer;text-align:center;">💬<br>Other</button>
+        </div>
+      </div>
+
+      <!-- Subject -->
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Subject *</label>
+        <input type="text" id="feedbackSubject" placeholder="Short summary of the issue" style="width:100%;">
+      </div>
+
+      <!-- Description -->
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Description *</label>
+        <textarea id="feedbackDesc" rows="4" placeholder="Describe what happened, what you expected, and steps to reproduce if it's a bug…" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;font-family:'Barlow',sans-serif;resize:vertical;"></textarea>
+      </div>
+
+      <!-- Where were you -->
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>Where in the portal? <span style="color:#555;font-size:10px;">(optional)</span></label>
+        <select id="feedbackLocation" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+          <option value="">— Select section —</option>
+          <option value="Clock">⏱ Clock In/Out</option>
+          <option value="LOSAP">🏅 LOSAP</option>
+          <option value="Staffing">📅 Staffing Board</option>
+          <option value="Company">🏢 Company Overview</option>
+          <option value="Training">📚 Training / Drills</option>
+          <option value="Meetings">📅 Meetings</option>
+          <option value="Admin">⚙️ Admin</option>
+          <option value="Login">🔒 Login / Account</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+
+      <button class="btn btn-primary btn-full" onclick="submitFeedback()">📩 Submit Report</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PUBLIC ISSUE LOG SHEET
+  ════════════════════════════════════════════════════════════════ -->
+  <div id="issueLogSheet" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:1060;align-items:flex-end;" onclick="if(event.target===this)closeIssueLog()">
+    <div id="issueLogPanel" style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:20px;width:100%;box-sizing:border-box;height:90vh;display:flex;flex-direction:column;transform:translateY(100%);transition:transform .3s ease;">
+      <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 16px;"></div>
+
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:20px;">📋</span>
+          <div>
+            <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#F0F0F0;">Issue Log</div>
+            <div style="font-size:11px;color:#555;">All submitted reports — visible to the whole company</div>
+          </div>
+        </div>
+        <button onclick="closeIssueLog()" style="background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;">✕</button>
+      </div>
+
+      <!-- Filter tabs -->
+      <div style="display:flex;gap:6px;margin-bottom:12px;flex-shrink:0;overflow-x:auto;padding-bottom:2px;">
+        <button onclick="filterIssues('all')" id="issueFilter_all" class="issue-filter-btn active-filter" style="background:#C8102E;color:#FFF;border:1px solid #C8102E;border-radius:999px;padding:5px 14px;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;">All</button>
+        <button onclick="filterIssues('open')" id="issueFilter_open" class="issue-filter-btn" style="background:transparent;color:#888;border:1px solid #333;border-radius:999px;padding:5px 14px;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;">🔴 Open</button>
+        <button onclick="filterIssues('in_progress')" id="issueFilter_in_progress" class="issue-filter-btn" style="background:transparent;color:#888;border:1px solid #333;border-radius:999px;padding:5px 14px;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;">🟡 In Progress</button>
+        <button onclick="filterIssues('fixed')" id="issueFilter_fixed" class="issue-filter-btn" style="background:transparent;color:#888;border:1px solid #333;border-radius:999px;padding:5px 14px;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;">✅ Fixed</button>
+        <button onclick="filterIssues('closed')" id="issueFilter_closed" class="issue-filter-btn" style="background:transparent;color:#888;border:1px solid #333;border-radius:999px;padding:5px 14px;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;">🚫 Closed</button>
+      </div>
+
+      <!-- Issue list -->
+      <div id="issueLogList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;"></div>
+
+      <!-- Submit new -->
+      <div style="padding-top:12px;flex-shrink:0;border-top:1px solid #222;margin-top:8px;">
+        <button class="btn btn-primary btn-full" onclick="closeIssueLog();openFeedbackSheet()">🐛 Report a New Issue</button>
+      </div>
     </div>
   </div>
 
@@ -19238,7 +19558,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 <div id="loginOverlay" style="position:fixed;inset:0;background:#000000;z-index:1000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;">
   <div style="width:100%;max-width:360px;">
     <div style="text-align:center;margin-bottom:28px;">
-      <img id="loginLogo" style="display:none;max-width:340px;max-height:340px;width:90%;height:auto;object-fit:contain;margin:0 auto 18px;filter:drop-shadow(0 4px 16px rgba(0,0,0,.65));" alt="Company Logo">
+      <img id="loginLogo" style="display:none;max-width:480px;max-height:480px;width:92%;height:auto;object-fit:contain;margin:0 auto 22px;filter:drop-shadow(0 4px 20px rgba(0,0,0,.7));" alt="Company Logo">
       <div id="loginLogoText" style="font-family:'Barlow Condensed',sans-serif;font-size:36px;font-weight:900;color:#C8102E;letter-spacing:4px;text-transform:uppercase;">RBVFC</div>
       <div style="font-size:12px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-top:5px;">Member LOSAP Portal</div>
     </div>
