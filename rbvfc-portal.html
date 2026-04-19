@@ -11013,7 +11013,7 @@ function renderMeetingsList() {
       +'<button onclick="openEditMeeting(\''+mtg.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#9998; Edit</button>'
       +(_canAlert?'<button data-mid="'+mtg.id+'" data-mdate="'+sd+'" class="_mtgAlertBtn" style="background:#1A1200;border:1px solid #F5A623;color:#F5A623;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;margin-top:3px;">&#128276; Send Alert</button>':'')
       +'<button onclick="deleteMeeting(\''+mtg.id+'\')" style="background:none;border:1px solid #333;color:#E74C3C;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#128465; Delete</button>'
-      +(sd===today?'<button onclick="clockInAllMeeting(\\'"+mtg.id+"\\',\\'"+sd+"\\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;white-space:nowrap;">⚡ Clock All In</button>':'')
+      +(isOfficer&&sd===today?'<button onclick="clockInAllMeeting(\''+mtg.id+'\',\''+sd+'\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;white-space:nowrap;">&#9889; Clock All In</button>':'')
       +'</div></div>'
       +(function(){
         // Member sign-up / attendance section
@@ -11176,18 +11176,18 @@ function renderSpecialEventAdmin() {
           var _uid=state.currentUserId,_mySig=(ev.signups||[]).find(function(s){return s.memberId===_uid;});
           var _myCi=_mySig&&_mySig.clockedIn&&!_mySig.clockedOutAt,_myDone=_mySig&&!!_mySig.clockedOutAt,_canCi=ev.date===today,btns="";
           if(!isPast){
-            if(!_mySig) btns+='<button onclick="signUpSpecialEvent(\\'"+ev.id+"\\')" style="background:#0A2A0A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">✋ Sign Up</button>';
-            else if(_myCi) btns+='<button onclick="clockOutSpecialEvent(\\'"+ev.id+"\\')" style="background:#2A0000;border:1px solid #C8102E;color:#C8102E;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">⏹ Clock Out</button>';
-            else if(!_myDone&&_canCi) btns+='<button onclick="clockInSpecialEvent(\\'"+ev.id+"\\')" style="background:#0A2A0A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">🟢 Clock In</button>';
+            if(!_mySig) btns+='<button onclick="signUpSpecialEvent(\''+ev.id+'\')" style="background:#0A2A0A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#9995; Sign Up</button>';
+            else if(_myCi) btns+='<button onclick="clockOutSpecialEvent(\''+ev.id+'\')" style="background:#2A0000;border:1px solid #C8102E;color:#C8102E;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#9209; Clock Out</button>';
+            else if(!_myDone&&_canCi) btns+='<button onclick="clockInSpecialEvent(\''+ev.id+'\')" style="background:#0A2A0A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#128994; Clock In</button>';
             else if(_myDone) btns+='<span style="font-size:10px;color:#27AE60;display:block;padding:2px 0;">✓ Attended</span>';
             else btns+='<span style="font-size:10px;color:#555;display:block;padding:2px 0;">Day-of only</span>';
-            if(_mySig&&!_myCi&&!_myDone) btns+='<button onclick="cancelSpecialEventSignup(\\'"+ev.id+"\\')" style="background:none;border:1px solid #333;color:#888;cursor:pointer;font-size:10px;padding:3px 6px;border-radius:6px;">✕ Cancel</button>';
-            btns+='<button onclick="clockInAllSpecialEvent(\\'"+ev.id+"\\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Clock in all signed-up members">⚡ Clock All In</button>';
+            if(_mySig&&!_myCi&&!_myDone) btns+='<button onclick="cancelSpecialEventSignup(\''+ev.id+'\')" style="background:none;border:1px solid #333;color:#888;cursor:pointer;font-size:10px;padding:3px 6px;border-radius:6px;">&#10005; Cancel</button>';
+            btns+='<button onclick="clockInAllSpecialEvent(\''+ev.id+'\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#9889; Clock All In</button>';
           }
           return btns;
         }())
-      +'<button onclick="openEditSpecialEvent(\\'"+ev.id+"\\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Edit event">&#9998; Edit</button>'
-      +'<button onclick="sendEventAlert(\\'"+ev.id+"\\')" style="background:#1A1A00;border:1px solid #F5A623;color:#F5A623;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Send alert">&#128226; Alert</button>'
+      +'<button onclick="openEditSpecialEvent(\''+ev.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Edit event">&#9998; Edit</button>'
+      +'<button onclick="sendEventAlert(\''+ev.id+'\')" style="background:#1A1A00;border:1px solid #F5A623;color:#F5A623;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Send alert">&#128226; Alert</button>'
       +'<button onclick="deleteSpecialEvent(this)" data-ev="'+ev.id+'" style="background:none;border:1px solid #333;color:#C8102E;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Delete event">&#128465; Delete</button>'
       +'</div>'
       +'</div></div>';
