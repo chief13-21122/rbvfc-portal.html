@@ -4432,7 +4432,7 @@ function renderAdminRoster() {
   if (roster.length===0) { tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:#666;">No members found.</td></tr>'; return; }
   roster.forEach(function(m) {
     var isActive=m.active!==false;
-    var isClockedIn=!!(state.currentUserId===m.id&&state.currentSession);
+    var isClockedIn=!!(state.currentUserId===m.id&&_getActiveClockedInSession(m.id));
     var positions = m.losapPositions||[];
     if (positions.length===0&&m.losapPosition) positions=[m.losapPosition];
     var tr=document.createElement('tr');
@@ -4459,10 +4459,13 @@ function renderClockedInPanel() {
   if (active.length===0) { panel.innerHTML='<p style="color:#666;font-size:13px;text-align:center;padding:16px;">No members added yet.</p>'; return; }
   var in_=[], out_=[];
   active.forEach(function(m) {
-    if (state.currentUserId===m.id&&state.currentSession) {
-      var el=Date.now()-state.currentSession.start;
+    var _activeSess = _getActiveClockedInSession(m.id);
+    if (_activeSess) {
+      var _sessStart = typeof _activeSess.start === 'number' ? _activeSess.start : new Date(_activeSess.start).getTime();
+      var el=Date.now()-_sessStart;
       var h=Math.floor(el/3600000), min=Math.floor((el%3600000)/60000);
-      in_.push({m:m,display:h+'h '+min+'m',type:state.currentSession.type||'Duty'});
+      var _type = _activeSess.type || (_activeSess.eventId ? 'Event' : _activeSess.mtgId ? 'Meeting' : _activeSess.shiftId ? 'Shift' : 'Duty');
+      in_.push({m:m,display:h+'h '+min+'m',type:_type});
     } else { out_.push(m); }
   });
   var html='';
@@ -10224,7 +10227,20 @@ function clockInSpecialEvent(elOrId) {
   }
   signup.clockedIn = true;
   signup.clockedInAt = now.toISOString();
+  // Set currentSession so Clock tab and Company tab show clocked-in status
+  state.currentSession = {
+    id: 'ev_' + ev.id + '_' + uid,
+    userId: uid,
+    start: now.getTime(),
+    type: 'Event',
+    activity: 'event',
+    notes: ev.title,
+    eventId: ev.id
+  };
   save(); renderBothSpecialEventViews();
+  try { updateClockUI(true); } catch(e) {}
+  try { updateClockStats(); } catch(e) {}
+  try { startClockTimer(); } catch(e) {}
   showToast('\u26ab\ufe0f Clocked in to '+ev.title+'.');
 }
 
@@ -10262,7 +10278,20 @@ function clockOutSpecialEvent(elOrId) {
     var _evDesc = ev.title + ' — attendance';
     try { _autoAwardLosap(uid, 'fundraiser', _evDate, _evDesc, evId); } catch(e){}
   }
+  // Clear currentSession if it was linked to this event
+  if (state.currentSession && state.currentSession.eventId === evId && state.currentSession.userId === uid) {
+    var _endTime = new Date();
+    var _durSecs = Math.max(0, Math.floor((_endTime - new Date(state.currentSession.start)) / 1000));
+    state.currentSession.end = _endTime.toISOString();
+    state.currentSession.duration = _durSecs;
+    if (!Array.isArray(state.sessions)) state.sessions = [];
+    state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+    state.currentSession = null;
+    clearInterval(_clockTimerInterval); _clockTimerInterval = null;
+  }
   save(); renderBothSpecialEventViews();
+  try { updateClockUI(false); } catch(e) {}
+  try { updateClockStats(); } catch(e) {}
   showToast('\u23f9 Clocked out of '+ev.title+'. LOSAP point awarded!');
   // Check if this is a drill event — auto-submit drill report when last person clocks out
   try { _checkDrillEventAutoSubmit(evId); } catch(e) {}
