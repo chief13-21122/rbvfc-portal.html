@@ -1573,7 +1573,12 @@ function updateClockUI(in_) {
       } else if (_sess.activity==='fundraiser') {
         _bc=ACT_COLORS.fundraiser;_bl='SPECIAL EVENT';_bt=_sess.desc||'Event';_bs='';
       } else if (_sess.activity==='duties'||_sess.activity==='collateral'||_sess.activity==='duty') {
-        _bc=ACT_COLORS.duties;_bl='STANDBY / COLLATERAL DUTY';_bt=_sess.desc||'On Duty';_bs='';
+        _bc=ACT_COLORS.duties;_bl='COLLATERAL DUTY';
+        _bt=_sess.desc||'On Duty';_bs='';
+      } else if (_sess.activity==='event'||_sess.eventId) {
+        var _evRec=(state.specialEvents||[]).find(function(e){return e.id===(_sess.eventId||_sess.id);});
+        _bc=ACT_COLORS.fundraiser||'#1ABC9C';_bl='SPECIAL EVENT';
+        _bt=(_evRec&&_evRec.title)||_sess.notes||_sess.desc||'Event';_bs=(_evRec&&_evRec.location)||'';
       } else {
         var _td=localDateStr();
         var _ms=(state.staffingShifts||[]).find(function(s){return s.date===_td&&s.memberId===state.currentUserId&&s.unitId;});
@@ -4442,7 +4447,16 @@ function renderAdminRoster() {
       '<td style="padding:8px;color:#888;font-size:12px;">'+(m.memberId?'50-'+m.memberId:'—')+'</td>'+
       '<td style="padding:8px;"><span class="pill '+(m.appRole==='admin'?'red':m.appRole==='officer'?'blue':'gray')+'" style="font-size:11px;">'+m.appRole+'</span></td>'+
       '<td style="padding:8px;font-size:11px;color:#AAA;">'+(positions.join(', ')||'—')+(m.rideReport==='ineligible'?' <span style="color:#E74C3C;font-size:10px;font-weight:700;">🚫INELIGIBLE</span>':(m.rideReport==='eligible'?' <span style="color:#27AE60;font-size:10px;">✅</span>':''))+'</td>'+
-      '<td style="padding:8px;text-align:center;">'+(isClockedIn?'<span class="pill green" style="font-size:11px;">🟢 In</span>':'<span style="color:#555;font-size:12px;">—</span>')+'</td>'+
+      (function(){
+        var _cSess=_getActiveClockedInSession(m.id),_cLbl='';
+        if(_cSess){
+          if(_cSess.eventId){var _e=(state.specialEvents||[]).find(function(e){return e.id===_cSess.eventId;});_cLbl=_e?_e.title:'Event';}
+          else if(_cSess.mtgId){_cLbl=_cSess.desc||_cSess.notes||'Meeting';}
+          else if(_cSess.shiftId){var _sh=(state.staffingShifts||[]).find(function(s){return s.id===_cSess.shiftId;});_cLbl=_sh?(_sh.unitId||'').toUpperCase():'Shift';}
+          else{_cLbl=_cSess.desc||_cSess.type||_cSess.activity||'Duty';}
+        }
+        return '<td style="padding:8px;text-align:center;">'+(isClockedIn?'<span class="pill green" style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle;">🟢 '+(_cLbl||'In')+'</span>':'<span style="color:#555;font-size:12px;">—</span>')+'</td>';
+      }())+
       '<td style="padding:8px;text-align:center;font-size:12px;color:#666;">'+(m.pin?'••••':'<span style="color:#E74C3C;font-weight:700;">⚠ No PIN</span>')+'</td>'+
       '<td style="padding:8px;white-space:nowrap;">'+
         '<button class="btn btn-sm btn-secondary" onclick="editMemberAdmin(\''+m.id+'\')">✏️ Edit</button> '+
@@ -4464,7 +4478,22 @@ function renderClockedInPanel() {
       var _sessStart = typeof _activeSess.start === 'number' ? _activeSess.start : new Date(_activeSess.start).getTime();
       var el=Date.now()-_sessStart;
       var h=Math.floor(el/3600000), min=Math.floor((el%3600000)/60000);
-      var _type = _activeSess.type || (_activeSess.eventId ? 'Event' : _activeSess.mtgId ? 'Meeting' : _activeSess.shiftId ? 'Shift' : 'Duty');
+      var _type;
+      if (_activeSess.eventId) {
+        var _ev2 = (state.specialEvents||[]).find(function(e){return e.id===_activeSess.eventId;});
+        _type = 'Event' + (_ev2 && _ev2.title ? ': ' + _ev2.title : '');
+      } else if (_activeSess.mtgId) {
+        var _mt2 = _activeSess.desc || _activeSess.notes;
+        _type = 'Meeting' + (_mt2 ? ': ' + _mt2 : '');
+      } else if (_activeSess.shiftId) {
+        var _sh2 = (state.staffingShifts||[]).find(function(s){return s.id===_activeSess.shiftId;});
+        _type = 'Staffing' + (_sh2 && _sh2.unitId ? ': ' + (_sh2.unitId||'').toUpperCase() : '');
+      } else if (_activeSess.activity === 'collateral' || _activeSess.activity === 'duties' || _activeSess.activity === 'duty') {
+        _type = 'Collateral Duty' + (_activeSess.desc ? ': ' + _activeSess.desc : '');
+      } else {
+        _type = _activeSess.type || _activeSess.activity || 'Duty';
+        if (_activeSess.desc) _type += ': ' + _activeSess.desc;
+      }
       in_.push({m:m,display:h+'h '+min+'m',type:_type});
     } else { out_.push(m); }
   });
