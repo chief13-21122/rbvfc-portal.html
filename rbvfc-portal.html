@@ -1442,6 +1442,13 @@ function closeMySettings() {
 }
 
 function showMoreMenu() {
+  // Show Manual Activity button for officers/admins only
+  var _mmaBtn = document.getElementById('moreManualActivityBtn');
+  if (_mmaBtn) {
+    var _me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+    var _isOff = _me && (_me.appRole==='officer'||_me.appRole==='admin');
+    _mmaBtn.style.display = _isOff ? '' : 'none';
+  }
   var s = document.getElementById('moreSheet');
   if (s) {
     s.style.display='flex';
@@ -6753,6 +6760,160 @@ function saveManualActivity() {
   showToast('\u2705 '+mName+': '+pts+' pts recorded for '+desc+'.');
   renderManualRecentEntries();
   try { renderCompanyLOSAP(); } catch(e){}
+}
+
+
+// ── MANUAL ACTIVITY SHEET (More menu) ────────────────────────────────────────
+
+function openManualActivitySheet() {
+  var sheet = document.getElementById('manualActivitySheet');
+  var panel = document.getElementById('manualActivitySheetPanel');
+  if (!sheet || !panel) return;
+
+  // Set logged-by
+  var uid = state.currentUserId;
+  var me = (state.roster||[]).find(function(m){ return m.id===uid; });
+  var byEl = document.getElementById('masEntryByName');
+  if (byEl) byEl.textContent = me ? me.last+', '+me.first+' · '+((me.ranks&&me.ranks.length?me.ranks[0]:me.rank)||me.appRole) : '—';
+
+  // Default date to today
+  var dateEl = document.getElementById('masDate');
+  if (dateEl && !dateEl.value) dateEl.value = localDateStr();
+
+  // Populate member checkboxes
+  var listEl = document.getElementById('masMemberList');
+  if (listEl) {
+    listEl.innerHTML = '';
+    (state.roster||[])
+      .filter(function(m){ return m.active !== false; })
+      .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
+      .forEach(function(m) {
+        var row = document.createElement('label');
+        row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;border-bottom:1px solid #1A1A1A;';
+        row.innerHTML =
+          '<input type="checkbox" class="mas-member-cb" value="'+m.id+'" style="width:16px;height:16px;accent-color:#C8102E;flex-shrink:0;">'+
+          '<span style="font-size:13px;color:#F0F0F0;">'+m.last+', '+m.first+'</span>'+
+          '<span style="font-size:11px;color:#555;margin-left:auto;">'+((m.ranks&&m.ranks.length?m.ranks[0]:m.rank)||m.appRole||'')+'</span>';
+        listEl.appendChild(row);
+      });
+  }
+
+  masRenderRecent();
+
+  // Animate in
+  sheet.style.display = 'flex';
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      panel.style.transform = 'translateY(0)';
+    });
+  });
+}
+
+function closeManualActivitySheet() {
+  var sheet = document.getElementById('manualActivitySheet');
+  var panel = document.getElementById('manualActivitySheetPanel');
+  if (!sheet || !panel) return;
+  panel.style.transform = 'translateY(100%)';
+  setTimeout(function(){ sheet.style.display = 'none'; }, 310);
+}
+
+function masSelectAll() {
+  document.querySelectorAll('.mas-member-cb').forEach(function(cb){ cb.checked = true; });
+}
+
+function masSelectNone() {
+  document.querySelectorAll('.mas-member-cb').forEach(function(cb){ cb.checked = false; });
+}
+
+function masCategoryChanged() {
+  var cat = (document.getElementById('masCategory')||{}).value||'';
+  var hint = document.getElementById('masHoursHint');
+  var hintText = { meeting:'optional', boardmeeting:'optional',
+    duties:'required for pts (1pt per 4hrs)', training:'required',
+    drill:'optional', fundraiser:'optional', other:'optional' };
+  if (hint) hint.textContent = hintText[cat] || '';
+}
+
+function saveManualActivitySheet() {
+  var selectedMembers = Array.from(document.querySelectorAll('.mas-member-cb:checked')).map(function(cb){ return cb.value; });
+  var cat    = (document.getElementById('masCategory')||{}).value||'';
+  var date   = (document.getElementById('masDate')||{}).value||'';
+  var hours  = parseFloat((document.getElementById('masHours')||{}).value||0) || null;
+  var desc   = ((document.getElementById('masDesc')||{}).value||'').trim();
+  var enteredBy = state.currentUserId;
+  var enteredByMe = (state.roster||[]).find(function(m){ return m.id===enteredBy; });
+  var enteredByName = enteredByMe ? enteredByMe.last+', '+enteredByMe.first : enteredBy;
+
+  if (!selectedMembers.length) { showToast('⚠️ Select at least one member.'); return; }
+  if (!cat)   { showToast('⚠️ Select an activity type.'); return; }
+  if (!date)  { showToast('⚠️ Enter a date.'); return; }
+  if (!desc)  { showToast('⚠️ Enter a description.'); return; }
+  if (cat==='duties' && !hours) { showToast('⚠️ Hours are required for Standby/Collateral Duty.'); return; }
+
+  var cfg = CAT_CONFIG[cat];
+  var pts = cfg ? calcActivityPts(cat, hours) : 0;
+  if (cfg && cfg.maxPts) pts = Math.min(pts, cfg.maxPts);
+
+  if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
+
+  var _now = new Date().toISOString();
+  selectedMembers.forEach(function(memberId) {
+    var act = {
+      id:            'mact_'+Date.now()+'_'+memberId,
+      memberId:      memberId,
+      date:          date,
+      category:      cat,
+      desc:          desc,
+      pts:           pts,
+      points:        pts,
+      hours:         hours || 0,
+      notes:         '',
+      approvedBy:    enteredBy,
+      approvedAt:    _now,
+      enteredBy:     enteredBy,
+      enteredByName: enteredByName,
+      manualEntry:   true,
+      createdAt:     _now
+    };
+    state.losapActivities.unshift(act);
+    try { _notifyLosapPoints(act); } catch(e){}
+  });
+
+  save();
+  try { renderCompanyLOSAP(); } catch(e){}
+  try { renderLOSAP(); } catch(e){}
+
+  // Clear form (keep date for quick multi-entry)
+  var catEl = document.getElementById('masCategory'); if (catEl) catEl.value='';
+  var descEl = document.getElementById('masDesc'); if (descEl) descEl.value='';
+  var hrsEl = document.getElementById('masHours'); if (hrsEl) hrsEl.value='';
+  var hintEl = document.getElementById('masHoursHint'); if (hintEl) hintEl.textContent='';
+  masSelectNone();
+
+  var label = selectedMembers.length === 1
+    ? ((state.roster||[]).find(function(m){ return m.id===selectedMembers[0]; })||{first:'Member',last:''}).last
+    : selectedMembers.length + ' members';
+  showToast('✅ '+label+': '+pts+' pts recorded — '+desc+'.');
+  masRenderRecent();
+}
+
+function masRenderRecent() {
+  var container = document.getElementById('masRecentEntries');
+  if (!container) return;
+  var recent = (state.losapActivities||[])
+    .filter(function(a){ return a.manualEntry && a.enteredBy===state.currentUserId; })
+    .slice(0, 8);
+  if (!recent.length) { container.innerHTML = ''; return; }
+  var html = '<div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;margin-top:4px;">Recent Entries</div>';
+  html += recent.map(function(a) {
+    var m = (state.roster||[]).find(function(x){ return x.id===a.memberId; });
+    var mName = m ? m.last+', '+m.first : a.memberId;
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #1A1A1A;font-size:12px;">'+
+      '<div><span style="color:#F0F0F0;font-weight:600;">'+mName+'</span> <span style="color:#666;">'+a.desc+'</span></div>'+
+      '<span style="color:#27AE60;font-weight:700;white-space:nowrap;margin-left:8px;">+'+a.pts+' pts</span>'+
+      '</div>';
+  }).join('');
+  container.innerHTML = html;
 }
 
 function renderManualRecentEntries() {
@@ -13442,7 +13603,51 @@ function renderCompanyLOSAP() {
     var mResponses = (state.emergencyResponses||[]).filter(function(er){
       return er.date>=yearStart && er.date<=yearEnd && (er.members||[]).indexOf(m.id)>=0;
     }).length;
-    totals[m.id] = { member:m, pts:mPts, hours:mHours, responses:mResponses };
+    // Formal training hours (approved trainingSubmissions with type='training' or no type)
+    var mTrainingHrs = (state.trainingSubmissions||[]).reduce(function(sum, t){
+      if (t.memberId !== m.id) return sum;
+      if (t.status !== 'approved') return sum;
+      if (!t.date || t.date < yearStart || t.date > yearEnd) return sum;
+      var isTraining = !t.type || t.type === 'training';
+      return isTraining ? sum + parseFloat(t.hours||0) : sum;
+    }, 0);
+    // Also count from sessions with activity=training/class
+    mTrainingHrs += (state.sessions||[]).reduce(function(sum, s){
+      if (s.userId !== m.id) return sum;
+      var d = (s.start||'').slice(0,10);
+      if (!d || d < yearStart || d > yearEnd) return sum;
+      var act = s.activity||'';
+      if (act === 'training' || act === 'class') {
+        return sum + (s.duration ? s.duration/3600 : parseFloat(s.hours||0));
+      }
+      return sum;
+    }, 0);
+    mTrainingHrs = Math.round(mTrainingHrs * 10) / 10;
+
+    // Drill hours (approved drill submissions)
+    var mDrillHrs = (state.trainingSubmissions||[]).reduce(function(sum, t){
+      if (t.status !== 'approved') return sum;
+      if (!t.date || t.date < yearStart || t.date > yearEnd) return sum;
+      if (t.type !== 'drill') return sum;
+      // Check if this member was part of the drill
+      var inDrill = t.memberId === m.id ||
+        (Array.isArray(t.members) && t.members.indexOf(m.id) >= 0);
+      return inDrill ? sum + parseFloat(t.hours||0) : sum;
+    }, 0);
+    // Also count sessions with activity=drill
+    mDrillHrs += (state.sessions||[]).reduce(function(sum, s){
+      if (s.userId !== m.id) return sum;
+      var d = (s.start||'').slice(0,10);
+      if (!d || d < yearStart || d > yearEnd) return sum;
+      if (s.activity === 'drill') {
+        return sum + (s.duration ? s.duration/3600 : parseFloat(s.hours||0));
+      }
+      return sum;
+    }, 0);
+    mDrillHrs = Math.round(mDrillHrs * 10) / 10;
+
+    totals[m.id] = { member:m, pts:mPts, hours:mHours, responses:mResponses,
+                     trainingHrs:mTrainingHrs, drillHrs:mDrillHrs };
   });
 
   // Build clocked-in lookup: memberId -> { activity, note, color }
@@ -13538,6 +13743,8 @@ function renderCompanyLOSAP() {
     '<th>Member</th><th>Position / Rank</th>' +
     '<th style="text-align:center;">Points</th>' +
     '<th style="text-align:center;">Hours</th>' +
+    '<th style="text-align:center;">Training</th>' +
+    '<th style="text-align:center;">Drills</th>' +
     '<th style="text-align:center;">Calls</th>' +
     '<th style="text-align:center;">Qualified</th>' +
     '<th>On Duty</th>' +
@@ -13584,7 +13791,7 @@ function renderCompanyLOSAP() {
         ? '<td><span style="display:inline-flex;align-items:center;gap:5px;background:rgba('+_ciRgb+',0.12);border:1px solid rgba('+_ciRgb+',0.35);border-radius:12px;padding:2px 8px;font-size:11px;color:'+_ciColor+';white-space:nowrap;">' +
             '<span style="width:6px;height:6px;border-radius:50%;background:'+_ciColor+';flex-shrink:0;box-shadow:0 0 5px '+_ciColor+';display:inline-block;animation:pulse 2s infinite;"></span>' +
             '<strong>' + ci.activity + '</strong>' + (ci.note ? '<span style="color:#888;font-weight:400;"> &middot; ' + ci.note + '</span>' : '') +
-          '</span>' + (_loOff ? '<button data-mid="'+m.id+'" onclick="adminClockOutMember(this.dataset.mid)" style="margin-left:6px;background:rgba(200,16,46,0.15);border:1px solid rgba(200,16,46,0.5);color:#E74C3C;border-radius:5px;padding:1px 6px;cursor:pointer;font-size:10px;font-weight:700;">⏹</button>' : '') +
+          '</span>' + (_loOff && _loMe && _loMe.appRole==='admin' ? '<button data-mid="'+m.id+'" onclick="adminClockOutMember(this.dataset.mid)" style="margin-left:6px;background:rgba(200,16,46,0.15);border:1px solid rgba(200,16,46,0.5);color:#E74C3C;border-radius:5px;padding:1px 6px;cursor:pointer;font-size:10px;font-weight:700;">⏹</button>' : '') +
           '</td>'
         : '<td style="color:#333;font-size:11px;">—</td>';
 
@@ -13593,6 +13800,8 @@ function renderCompanyLOSAP() {
         '<td style="color:#AAA;font-size:12px;">'+_posRankText+'</td>'+
         ptsCell+
         '<td style="text-align:center;color:#AAA;">'+(row.hours||0).toFixed(1)+'</td>'+
+        '<td style="text-align:center;color:#7EC8E3;">'+(row.trainingHrs||0).toFixed(1)+'</td>'+
+        '<td style="text-align:center;color:#F5A623;">'+(row.drillHrs||0).toFixed(1)+'</td>'+
         '<td style="text-align:center;color:#AAA;">'+row.responses+'</td>'+
         '<td style="text-align:center;">'+(qualified?'<span style="color:#27AE60;font-weight:700;">✓ Yes</span>':'<span style="color:#555;">No</span>')+'</td>'+
         dutyCell+'</tr>';
@@ -18768,9 +18977,80 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
 
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreManualActivityBtn" onclick="openManualActivitySheet();closeMoreMenu()">✏️ Manual Activity Entry</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
 
+    </div>
+  </div>
+
+  <!-- Manual Activity Sheet -->
+  <div id="manualActivitySheet" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1050;align-items:flex-end;" onclick="if(event.target===this)closeManualActivitySheet()">
+    <div id="manualActivitySheetPanel" style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:20px;width:100%;box-sizing:border-box;max-height:90vh;overflow-y:auto;transform:translateY(100%);transition:transform .3s ease;">
+      <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 16px;"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:20px;">✏️</span>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#F0F0F0;">Manual Activity Entry</div>
+        </div>
+        <button onclick="closeManualActivitySheet()" style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;line-height:1;">✕</button>
+      </div>
+
+      <!-- Logged By -->
+      <div style="display:flex;align-items:center;gap:10px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+        <span style="font-size:16px;">🔒</span>
+        <div>
+          <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Entry Recorded By</div>
+          <div id="masEntryByName" style="font-size:14px;font-weight:700;color:#27AE60;"></div>
+        </div>
+      </div>
+
+      <!-- Members multi-select -->
+      <div style="margin-bottom:14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <label style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;">Members *</label>
+          <div style="display:flex;gap:8px;">
+            <button onclick="masSelectAll()" style="background:none;border:1px solid #333;color:#888;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;">All</button>
+            <button onclick="masSelectNone()" style="background:none;border:1px solid #333;color:#888;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;">None</button>
+          </div>
+        </div>
+        <div id="masMemberList" style="background:#111;border:1px solid #2A2A2A;border-radius:8px;max-height:180px;overflow-y:auto;padding:4px 0;"></div>
+      </div>
+
+      <!-- Activity Type -->
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Activity Type *</label>
+        <select id="masCategory" onchange="masCategoryChanged()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+          <option value="">— Select type —</option>
+          <option value="meeting">Company Meeting</option>
+          <option value="boardmeeting">Board Meeting</option>
+          <option value="duties">Standby / Collateral Duty</option>
+          <option value="training">Training</option>
+          <option value="drill">Drill / In-House Training</option>
+          <option value="fundraiser">Fundraiser / Special Event</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+
+      <!-- Date -->
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Date *</label>
+        <input type="date" id="masDate" style="width:100%;">
+      </div>
+
+      <!-- Hours -->
+      <div class="form-group" id="masHoursGroup" style="margin-bottom:12px;">
+        <label>Hours <span id="masHoursHint" style="color:#666;font-size:10px;"></span></label>
+        <input type="number" id="masHours" min="0.5" step="0.5" placeholder="e.g. 2" style="width:100%;">
+      </div>
+
+      <!-- Description -->
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>Description / Notes *</label>
+        <input type="text" id="masDesc" placeholder="e.g. Monthly Company Meeting, Station coverage 1800-0600…" style="width:100%;">
+      </div>
+
+      <button class="btn btn-primary btn-full" onclick="saveManualActivitySheet()">✅ Record Activity</button>
+      <div id="masRecentEntries" style="margin-top:14px;"></div>
     </div>
   </div>
 
