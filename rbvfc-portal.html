@@ -1137,6 +1137,7 @@ var state = {
   cadPendingCalls: [],         // calls fetched from Gmail sync, pending logging
   loggedIncidentNums: [],      // incident numbers already logged — skip on future syncs
   gcalClientId: '',              // Google OAuth 2.0 Client ID for Calendar integration
+  gcalClientSecret: '',          // Google OAuth 2.0 Client Secret for Calendar integration
   cadScriptUrl: '',            // separate Apps Script URL just for CAD dispatch sync
   lastCadSync: '',             // ISO timestamp of last successful CAD sync
   // Extended properties (used at runtime, safe to be undefined but declared for clarity)
@@ -7476,6 +7477,7 @@ async function _gcalHandleCallback(code) {
     body: new URLSearchParams({
       code: code,
       client_id: clientId,
+      client_secret: state.gcalClientSecret || '',
       redirect_uri: redirectUri,
       code_verifier: verifier,
       grant_type: 'authorization_code'
@@ -7508,6 +7510,7 @@ async function _gcalRefreshToken() {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       client_id: clientId,
+      client_secret: state.gcalClientSecret || '',
       grant_type: 'refresh_token',
       refresh_token: refreshToken
     })
@@ -13697,14 +13700,18 @@ function clearAllRankRequirements() {
 }
 function saveGcalClientId() {
   var v = ((document.getElementById('gcalClientIdInput')||{}).value||'').trim();
+  var s = ((document.getElementById('gcalClientSecretInput')||{}).value||'').trim();
   state.gcalClientId = v;
+  state.gcalClientSecret = s;
   save();
-  showToast(v ? '✅ Google Calendar Client ID saved.' : 'Client ID cleared.');
+  showToast(v ? '✅ Google Calendar credentials saved.' : 'Credentials cleared.');
 }
 
 function initGcalClientIdInput() {
   var inp = document.getElementById('gcalClientIdInput');
   if (inp) inp.value = state.gcalClientId || '';
+  var sec = document.getElementById('gcalClientSecretInput');
+  if (sec) sec.value = state.gcalClientSecret || '';
 }
 
 function saveFcmKey() {
@@ -18173,8 +18180,12 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
             <label>Google OAuth 2.0 Client ID</label>
             <input type="text" id="gcalClientIdInput" placeholder="xxxx.apps.googleusercontent.com" style="font-size:12px;">
           </div>
+          <div class="form-group">
+            <label>Google OAuth 2.0 Client Secret</label>
+            <input type="text" id="gcalClientSecretInput" placeholder="GOCSPX-..." style="font-size:12px;">
+          </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="btn btn-secondary btn-sm" onclick="saveGcalClientId()">💾 Save Client ID</button>
+            <button class="btn btn-secondary btn-sm" onclick="saveGcalClientId()">💾 Save Credentials</button>
           </div>
         </div>
       </div>
