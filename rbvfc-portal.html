@@ -1255,6 +1255,8 @@ function updateClock() {
 //  NAVIGATION
 // ═══════════════════════════════════════════════════
 function showTab(id) {
+  // Close all open windows when navigating to admin
+  if (id === 'admin') { try { closeAllWindows(); } catch(e){} }
   if (id === 'drill') id = 'training'; // drill merged into training
   setTimeout(_adjustAppTopPad, 50);
   document.querySelectorAll('.section').forEach(function(s){ s.classList.remove('active'); });
@@ -1439,6 +1441,56 @@ function openMySettings() {
 function closeMySettings() {
   var modal = document.getElementById('mySettingsModal');
   if (modal) modal.style.display = 'none';
+}
+
+
+// ── CLOSE ALL OPEN WINDOWS / MODALS / SHEETS ─────────────────────────────────
+// Called before navigating to Admin so the user lands on a clean screen
+function closeAllWindows() {
+  // ── Bottom sheets ──
+  try { closeMoreMenu(); }            catch(e){}
+  try { closeManualActivitySheet(); } catch(e){}
+  try { closeMeetingsSheet(); }       catch(e){}
+  try { closeMySettings(); }          catch(e){}
+  try { closeLosapInfoModal(); }      catch(e){}
+
+  // ── Static modals (hide by ID) ──
+  var staticIds = [
+    'mySettingsModal','createGroupModal','meetingsSheet',
+    'losapInfoModal','rejectReasonModal','cadGmailModal',
+    'signUpModal','classModal','classDetailModal',
+    'manualActivitySheet'
+  ];
+  staticIds.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+
+  // ── Dynamic/injected modals (created at runtime and appended to body) ──
+  var dynamicIds = [
+    'clockInConfirmModal','adjustClockModal','switchUserModal',
+    'csvPreviewModal','bulkEditModal','losapChairModal',
+    '_adminCoModal','_drillConfModal','tsubConfirmModal',
+    '_pushBlockedModal','monthlyPreviewModal','sendToMemberModal',
+    '_dutyOverTimeModal','_stayClockInModal','suModal'
+  ];
+  dynamicIds.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  });
+
+  // ── Reminder overlay ──
+  var ro = document.getElementById('reminderOverlay');
+  if (ro) { ro.classList.remove('show'); }
+
+  // ── Any other position:fixed overlays injected by JS ──
+  // (scan for any full-screen overlays not in the above lists)
+  document.querySelectorAll('[style*="position:fixed"][style*="inset:0"]').forEach(function(el) {
+    if (el.id === 'loginOverlay') return; // never close login
+    if (el.style.display !== 'none' && el.style.display !== '') {
+      el.style.display = 'none';
+    }
+  });
 }
 
 function showMoreMenu() {
@@ -18978,7 +19030,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
 
       <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreManualActivityBtn" onclick="openManualActivitySheet();closeMoreMenu()">✏️ Manual Activity Entry</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="closeAllWindows();showTab('admin');">⚙️ Admin</button>
 
     </div>
   </div>
