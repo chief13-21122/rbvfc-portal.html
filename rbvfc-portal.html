@@ -1531,7 +1531,32 @@ function updateClockUI(in_) {
     if (in_) {
       pill.style.borderColor = _accent;
       pill.querySelector('span').style.color = _accent;
-      pill.querySelector('span').textContent = _isClass ? 'CLASS IN SESSION' : 'CLOCKED IN — SESSION ACTIVE';
+      // Build a specific duty-type label for the pill
+      var _pillLabel;
+      if (_isClass) {
+        _pillLabel = 'CLOCKED IN — CLASS / TRAINING';
+      } else if (!_sess) {
+        _pillLabel = 'CLOCKED IN — SESSION ACTIVE';
+      } else if (_sess.activity === 'meeting' || _sess.activity === 'boardmeeting') {
+        _pillLabel = 'CLOCKED IN — MEETING';
+      } else if (_sess.activity === 'emergency') {
+        _pillLabel = 'CLOCKED IN — EMERGENCY RESPONSE';
+      } else if (_sess.activity === 'drill') {
+        _pillLabel = 'CLOCKED IN — DRILL';
+      } else if (_sess.activity === 'training') {
+        _pillLabel = 'CLOCKED IN — FORMAL TRAINING';
+      } else if (_sess.activity === 'fundraiser' || _sess.activity === 'event' || _sess.eventId) {
+        _pillLabel = 'CLOCKED IN — SPECIAL EVENT';
+      } else if (_sess.activity === 'collateral' || _sess.activity === 'duties') {
+        _pillLabel = 'CLOCKED IN — COLLATERAL DUTY';
+      } else if (_sess.activity === 'duty' || _sess.shiftId) {
+        _pillLabel = 'CLOCKED IN — STATION DUTY';
+      } else if (_sess.mtgId) {
+        _pillLabel = 'CLOCKED IN — MEETING';
+      } else {
+        _pillLabel = 'CLOCKED IN — SESSION ACTIVE';
+      }
+      pill.querySelector('span').textContent = _pillLabel;
     }
   }
   if (nameEl) {
@@ -7030,6 +7055,7 @@ function renderStaffingBoard() {
     // Units always staff independently — no combined crew
     html += '<span style="font-size:18px;font-weight:700;letter-spacing:1.5px;color:#F0F0F0;">'+UNIT_LABELS[unitId]+'</span>';
     html += '<span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;background:'+bgStatus+';color:'+statusColor+';">'+statusText+'</span>';
+    if (isOfficer && date === _ld) html += '<button onclick="clockInAllUnit(\''+unitId+'\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;font-weight:700;white-space:nowrap;">⚡ Clock All In</button>';
     html += '</div>';
 
     // ── Position rows helper (shared for primary and linked units) ──
@@ -10231,6 +10257,118 @@ function cancelSpecialEventSignup(elOrId) {
   showToast('Signup cancelled. Calendar event removed.');
 }
 
+
+// ── OFFICER BULK CLOCK-IN FUNCTIONS ──────────────────────────────────────────
+
+function clockInAllSpecialEvent(evId) {
+  if (!canManageSpecialEvents()) { showToast('⚠️ Officers only.'); return; }
+  var ev = (state.specialEvents||[]).find(function(e){ return e.id===evId; });
+  if (!ev) return;
+  var now = new Date();
+  var today = localDateStr();
+  if (ev.date !== today) { showToast('⚠️ Bulk clock-in is only available on the day of the event.'); return; }
+  var signups = (ev.signups||[]).filter(function(s){ return !s.clockedIn && !s.clockedOutAt; });
+  if (!signups.length) { showToast('⚠️ No members to clock in — all are already clocked in or have clocked out.'); return; }
+  var count = 0;
+  signups.forEach(function(s) {
+    s.clockedIn = true;
+    s.clockedInAt = now.toISOString();
+    s._clockedInBy = state.currentUserId;
+    // Set currentSession if this is the logged-in user
+    if (s.memberId === state.currentUserId && (!state.currentSession || state.currentSession.end)) {
+      state.currentSession = {
+        id: 'ev_' + ev.id + '_' + s.memberId,
+        userId: s.memberId,
+        start: now.getTime(),
+        type: 'Event',
+        activity: 'event',
+        notes: ev.title,
+        eventId: ev.id
+      };
+      try { updateClockUI(true); } catch(e) {}
+      try { startClockTimer(); } catch(e) {}
+    }
+    count++;
+  });
+  save();
+  renderBothSpecialEventViews();
+  try { updateClockStats(); } catch(e) {}
+  showToast('✅ Clocked in ' + count + ' member' + (count===1?'':'s') + ' to ' + ev.title + '.');
+}
+
+function clockInAllMeeting(mtgId, occurrenceDate) {
+  if (!canManageSpecialEvents()) { showToast('⚠️ Officers only.'); return; }
+  var mtg = (state.meetings||[]).find(function(m){ return m.id===mtgId; });
+  if (!mtg) return;
+  var now = new Date();
+  var today = localDateStr();
+  if (occurrenceDate !== today) { showToast('⚠️ Bulk clock-in is only available on the day of the meeting.'); return; }
+  if (!Array.isArray(state.meetingAttendance)) state.meetingAttendance = [];
+  // Get all members on the meeting roster (or all active if none specified)
+  var members = (mtg.members && mtg.members.length)
+    ? mtg.members
+    : (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).map(function(m){ return m.id; });
+  var count = 0;
+  members.forEach(function(mid) {
+    // Find or create attendance record
+    var att = state.meetingAttendance.find(function(a){ return a.mtgId===mtgId && a.date===occurrenceDate && a.memberId===mid; });
+    if (!att) {
+      att = { id:'ma_'+Date.now()+'_'+mid, mtgId:mtgId, date:occurrenceDate, memberId:mid,
+               signedUpAt:now.toISOString(), clockedInAt:null, clockedOutAt:null, _clockedInBy:state.currentUserId };
+      state.meetingAttendance.push(att);
+    }
+    if (att.clockedInAt && !att.clockedOutAt) return; // already in
+    att.clockedInAt = now.toISOString();
+    att.clockedOutAt = null;
+    att._clockedInBy = state.currentUserId;
+    // Set currentSession for logged-in user
+    if (mid === state.currentUserId && (!state.currentSession || state.currentSession.end)) {
+      state.currentSession = {
+        id: 'sess_mtg_'+Date.now(), userId: mid, start: now.toISOString(),
+        activity: 'meeting', desc: mtg.title, mtgId: mtgId, mtgDate: occurrenceDate, end: null, duration: null
+      };
+      try { updateClockUI(true); } catch(e) {}
+      try { updateClockStats(); } catch(e) {}
+    }
+    count++;
+  });
+  save();
+  try { renderMeetingsList(); } catch(e) {}
+  try { renderMyShifts(); } catch(e) {}
+  showToast('✅ Clocked in ' + count + ' member' + (count===1?'':'s') + ' to ' + mtg.title + '.');
+}
+
+function clockInAllUnit(unitId) {
+  if (!canManageSpecialEvents()) { showToast('⚠️ Officers only.'); return; }
+  var today = localDateStr();
+  var now = new Date();
+  var shifts = (state.staffingShifts||[]).filter(function(s){
+    return s.unitId === unitId && s.date === today && !s.clockedIn && !s.clockedOutAt;
+  });
+  if (!shifts.length) { showToast('⚠️ No unchecked members on ' + (UNIT_LABELS[unitId]||unitId) + ' today.'); return; }
+  var count = 0;
+  shifts.forEach(function(s) {
+    s.clockedIn = true;
+    s.clockedInAt = now.toISOString();
+    s.status = 'active';
+    s._clockedInBy = state.currentUserId;
+    // Set currentSession for logged-in user
+    if (s.memberId === state.currentUserId && (!state.currentSession || state.currentSession.end)) {
+      state.currentSession = {
+        id: 'sess_'+Date.now(), userId: s.memberId, start: now.toISOString(),
+        activity: 'duty', desc: (UNIT_LABELS[unitId]||unitId), shiftId: s.id, end: null, duration: null
+      };
+      try { updateClockUI(true); } catch(e) {}
+      try { updateClockStats(); } catch(e) {}
+    }
+    count++;
+  });
+  save();
+  try { renderStaffingBoard(); } catch(e) {}
+  try { renderMyShifts(); } catch(e) {}
+  showToast('✅ Clocked in ' + count + ' member' + (count===1?'':'s') + ' on ' + (UNIT_LABELS[unitId]||unitId) + '.');
+}
+
 function clockInSpecialEvent(elOrId) {
   var evId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-ev');
   var uid = state.currentUserId;
@@ -10875,6 +11013,7 @@ function renderMeetingsList() {
       +'<button onclick="openEditMeeting(\''+mtg.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#9998; Edit</button>'
       +(_canAlert?'<button data-mid="'+mtg.id+'" data-mdate="'+sd+'" class="_mtgAlertBtn" style="background:#1A1200;border:1px solid #F5A623;color:#F5A623;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;margin-top:3px;">&#128276; Send Alert</button>':'')
       +'<button onclick="deleteMeeting(\''+mtg.id+'\')" style="background:none;border:1px solid #333;color:#E74C3C;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#128465; Delete</button>'
+      +(sd===today?'<button onclick="clockInAllMeeting(\\'"+mtg.id+"\\',\\'"+sd+"\\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;white-space:nowrap;">⚡ Clock All In</button>':'')
       +'</div></div>'
       +(function(){
         // Member sign-up / attendance section
@@ -11033,8 +11172,22 @@ function renderSpecialEventAdmin() {
         +'<div style="background:#111;border-radius:6px;padding:4px 8px;">'+signupRows+'</div>'
       +'</div>'
       +'<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px;">'
-      +'<button onclick="openEditSpecialEvent(\''+ev.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Edit event">&#9998; Edit</button>'
-      +'<button onclick="sendEventAlert(\''+ev.id+'\')" style="background:#1A1A00;border:1px solid #F5A623;color:#F5A623;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Send alert to signed-up members">&#128226; Alert</button>'
+      +(function(){
+          var _uid=state.currentUserId,_mySig=(ev.signups||[]).find(function(s){return s.memberId===_uid;});
+          var _myCi=_mySig&&_mySig.clockedIn&&!_mySig.clockedOutAt,_myDone=_mySig&&!!_mySig.clockedOutAt,_canCi=ev.date===today,btns="";
+          if(!isPast){
+            if(!_mySig) btns+='<button onclick="signUpSpecialEvent(\\'"+ev.id+"\\')" style="background:#0A2A0A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">✋ Sign Up</button>';
+            else if(_myCi) btns+='<button onclick="clockOutSpecialEvent(\\'"+ev.id+"\\')" style="background:#2A0000;border:1px solid #C8102E;color:#C8102E;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">⏹ Clock Out</button>';
+            else if(!_myDone&&_canCi) btns+='<button onclick="clockInSpecialEvent(\\'"+ev.id+"\\')" style="background:#0A2A0A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">🟢 Clock In</button>';
+            else if(_myDone) btns+='<span style="font-size:10px;color:#27AE60;display:block;padding:2px 0;">✓ Attended</span>';
+            else btns+='<span style="font-size:10px;color:#555;display:block;padding:2px 0;">Day-of only</span>';
+            if(_mySig&&!_myCi&&!_myDone) btns+='<button onclick="cancelSpecialEventSignup(\\'"+ev.id+"\\')" style="background:none;border:1px solid #333;color:#888;cursor:pointer;font-size:10px;padding:3px 6px;border-radius:6px;">✕ Cancel</button>';
+            btns+='<button onclick="clockInAllSpecialEvent(\\'"+ev.id+"\\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Clock in all signed-up members">⚡ Clock All In</button>';
+          }
+          return btns;
+        }())
+      +'<button onclick="openEditSpecialEvent(\\'"+ev.id+"\\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Edit event">&#9998; Edit</button>'
+      +'<button onclick="sendEventAlert(\\'"+ev.id+"\\')" style="background:#1A1A00;border:1px solid #F5A623;color:#F5A623;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Send alert">&#128226; Alert</button>'
       +'<button onclick="deleteSpecialEvent(this)" data-ev="'+ev.id+'" style="background:none;border:1px solid #333;color:#C8102E;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Delete event">&#128465; Delete</button>'
       +'</div>'
       +'</div></div>';
@@ -13082,9 +13235,20 @@ function renderCompanyLOSAP() {
   (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).forEach(function(m){
     var mPts = calcMemberLOSAP(m.id, yr);
     // Count hours from activities this year
+    // Hours from manually logged LOSAP activities
     var mHours = (state.losapActivities||[]).reduce(function(sum, a){
       return (a.memberId===m.id && a.date>=yearStart && a.date<=yearEnd) ? sum+(a.hours||0) : sum;
     }, 0);
+    // Hours from completed clock-in sessions (duration stored in seconds)
+    mHours += (state.sessions||[]).reduce(function(sum, s){
+      if (s.userId !== m.id) return sum;
+      var _date = s.start ? s.start.slice(0,10) : (s.date||'');
+      if (!_date || _date < yearStart || _date > yearEnd) return sum;
+      if (s.duration && s.duration > 0) return sum + (s.duration / 3600);
+      // Fall back to hours field if present
+      return sum + (parseFloat(s.hours)||0);
+    }, 0);
+    mHours = Math.round(mHours * 10) / 10; // round to 1 decimal
     // Count responses this year
     var mResponses = (state.emergencyResponses||[]).filter(function(er){
       return er.date>=yearStart && er.date<=yearEnd && (er.members||[]).indexOf(m.id)>=0;
@@ -17546,7 +17710,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <div class="card">
         <div class="card-header">
           <div class="icon">&#127941;</div>
-          <h2>Company LOSAP Leaderboard</h2>
+          <h2>Company LOSAP Board</h2>
           <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
             <select id="companyYear" onchange="renderCompanyLOSAP()" style="background:#111;border:1px solid #333;color:#F0F0F0;border-radius:6px;padding:4px 8px;font-size:12px;"></select>
           </div>
