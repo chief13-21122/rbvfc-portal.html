@@ -1411,6 +1411,8 @@ function openMySettings() {
     gcalLabel.textContent = connected ? 'Disconnect Google Calendar' : 'Connect Google Calendar';
     var gcalSyncBtn = document.getElementById('mySettingsGcalSyncBtn');
     if (gcalSyncBtn) gcalSyncBtn.style.display = connected ? '' : 'none';
+    var gcalNote = document.getElementById('mySettingsGcalNote');
+    if (gcalNote) gcalNote.style.display = connected ? 'none' : 'block';
     if (gcalStatus) gcalStatus.textContent = connected ? '✅' : '';
     if (gcalBtn) { gcalBtn.style.borderColor = connected ? '#27AE60' : ''; gcalBtn.style.color = connected ? '#27AE60' : ''; }
   }
@@ -7521,7 +7523,8 @@ async function gcalConnect() {
     prompt: 'consent',
     code_challenge: challenge,
     code_challenge_method: 'S256',
-    state: 'gcal_oauth'
+    state: 'gcal_oauth',
+    hd: 'rbvfc13.com'
   });
   window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
 }
@@ -7550,7 +7553,7 @@ async function _gcalHandleCallback(code) {
       try { localStorage.setItem('rbvfc_gcal_refresh', data.refresh_token); } catch(e) {}
     }
     try { localStorage.removeItem(_GCAL_VERIFIER_KEY); } catch(e) {}
-    showToast('✅ Google Calendar connected! Future signups will appear automatically.');
+    showToast('✅ Google Calendar connected! Future signups will appear on your @rbvfc13.com calendar.');
     renderGcalStatus();
     // Clean URL
     window.history.replaceState({}, document.title, window.location.pathname);
@@ -7640,15 +7643,30 @@ async function _gcalDeleteEvent(gcalEventId) {
 
 function _gcalShiftISO(date, startHHMM, hours) {
   // date: 'YYYY-MM-DD', startHHMM: '0700' or '07:00', hours: number
-  var hhmm = String(startHHMM).replace(':','');
-  var hh = parseInt(hhmm.slice(0,2)||'7');
-  var mm = parseInt(hhmm.slice(2,4)||'0');
-  var start = new Date(date + 'T' + String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0') + ':00');
-  var end = new Date(start.getTime() + (hours || 12) * 3600000);
-  return {
-    startISO: start.toISOString().replace('Z', '-05:00').slice(0, 22) + ':00',
-    endISO:   end.toISOString().replace('Z', '-05:00').slice(0, 22) + ':00'
-  };
+  var hhmm = String(startHHMM || '0700').replace(':','').replace(/[^0-9]/g,'');
+  var hh = parseInt(hhmm.slice(0,2) || '7') || 0;
+  var mm = parseInt(hhmm.slice(2,4) || '0') || 0;
+  if (isNaN(hh) || hh < 0 || hh > 23) hh = 7;
+  if (isNaN(mm) || mm < 0 || mm > 59) mm = 0;
+  // Build RFC3339 string directly using local time — avoids UTC conversion bugs
+  // Google Calendar API accepts YYYY-MM-DDTHH:MM:SS-05:00 format
+  var hhStr = String(hh).padStart(2,'0');
+  var mmStr = String(mm).padStart(2,'0');
+  var startISO = date + 'T' + hhStr + ':' + mmStr + ':00-05:00';
+  // Compute end by adding hours in minutes
+  var totalMins = hh * 60 + mm + Math.round((hours || 12) * 60);
+  var endHH = Math.floor(totalMins / 60) % 24;
+  var endMM = totalMins % 60;
+  // Handle multi-day shifts — just cap end at same day + 23:59
+  var endDate = date;
+  if (Math.floor(totalMins / 60) >= 24) {
+    // Shift goes past midnight — use next day
+    var d = new Date(date + 'T12:00:00');
+    d.setDate(d.getDate() + 1);
+    endDate = d.toISOString().slice(0,10);
+  }
+  var endISO = endDate + 'T' + String(endHH).padStart(2,'0') + ':' + String(endMM).padStart(2,'0') + ':00-05:00';
+  return { startISO: startISO, endISO: endISO };
 }
 
 // ── Public push functions ─────────────────────────────────────────────────
@@ -16809,6 +16827,9 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         <button class="btn btn-full" id="mySettingsGcalSyncBtn" onclick="gcalSyncAll();closeMySettings()" style="margin-top:6px;display:none;background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;">
           🔄 Sync All Events to Google Calendar
         </button>
+        <div id="mySettingsGcalNote" style="margin-top:8px;display:none;background:#1A1200;border:1px solid rgba(245,166,35,0.3);border-radius:8px;padding:8px 12px;font-size:11px;color:#F5A623;line-height:1.5;">
+          ⚠️ Use your <strong>@rbvfc13.com</strong> Google account when connecting — not a personal Gmail.
+        </div>
       </div>
 
       <!-- Notifications -->
@@ -18461,7 +18482,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         </div>
         <div id="gcalCard" style="padding:16px;">
           <p style="font-size:12px;color:#666;margin-bottom:12px;">
-            Members connect their personal Google Calendar once — after that, every shift, meeting, and event they sign up for automatically appears on their calendar without any extra steps.<br><br>
+            Members connect their <strong style="color:#F5A623;">@rbvfc13.com Google Calendar</strong> once — after that, every shift, meeting, and event they sign up for automatically appears on their calendar without any extra steps.<br><br>
+            <strong>⚠️ Important:</strong> Members must sign in with their <strong>@rbvfc13.com Google account</strong> when prompted. Personal Gmail accounts will not work with this integration.<br><br>
             Paste the <strong>OAuth 2.0 Client ID</strong> (Web Application type) from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#3498DB;">Google Cloud Console ↗</a>. In the console: APIs &amp; Services → Credentials → Create Credentials → OAuth Client ID → Web Application. Add your portal URL as both an <em>Authorized JavaScript Origin</em> and an <em>Authorized Redirect URI</em>.
           </p>
           <div class="form-group">
