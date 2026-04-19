@@ -13351,11 +13351,40 @@ function renderCompanyStats() {
   var onTrack      = Object.values(memberPts).filter(function(p){ return p >= 25 && p < 50; }).length;
   var qualPct      = totalMembers ? Math.round((qualified/totalMembers)*100) : 0;
 
-  // Training hours this year
+  // Training hours this year — aggregate all sources
+  // Source 1: Approved training submissions
   var trainingActs = (state.losapActivities||[]).filter(function(a){
     return a.date>=yearStart && a.date<=yearEnd && a.category==='training';
   });
   var totalTrainingHrs = trainingActs.reduce(function(s,a){ return s+(a.hours||0); }, 0);
+
+  // Source 2: Approved training & drill submissions in trainingSubmissions
+  (state.trainingSubmissions||[]).forEach(function(t){
+    if ((t.status==='approved') && t.date>=yearStart && t.date<=yearEnd) {
+      totalTrainingHrs += parseFloat(t.hours||0);
+    }
+  });
+
+  // Source 3: Clock-in sessions with training/drill/class activity
+  (state.sessions||[]).forEach(function(s){
+    var d = (s.start||s.date||'').slice(0,10);
+    if (!d || d<yearStart || d>yearEnd) return;
+    var act = s.activity||'';
+    if (act==='training'||act==='drill'||act==='class') {
+      totalTrainingHrs += s.duration ? s.duration/3600 : (parseFloat(s.hours)||0);
+    }
+  });
+
+  // Source 4: Class attendance (clockedInAt + clockedOutAt)
+  (state.classAttendance||[]).forEach(function(a){
+    if (!a.clockedInAt || !a.clockedOutAt) return;
+    var d = (a.sessionDate||a.clockedInAt||'').slice(0,10);
+    if (!d || d<yearStart || d>yearEnd) return;
+    var dur = (new Date(a.clockedOutAt) - new Date(a.clockedInAt)) / 3600000;
+    if (dur > 0) totalTrainingHrs += dur;
+  });
+
+  totalTrainingHrs = Math.round(totalTrainingHrs * 10) / 10; // 1 decimal
 
   // Drills
   var drills = (state.drills||[]).filter(function(d){ return d.date>=yearStart && d.date<=yearEnd && d.status==='approved'; }).length;
