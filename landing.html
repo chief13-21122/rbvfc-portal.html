@@ -112,8 +112,11 @@
     .hero-subtitle {
       font-size: clamp(15px, 2vw, 18px);
       color: #888;
-      max-width: 560px;
+      max-width: 620px;
       line-height: 1.6;
+      text-align: center;
+      margin-left: auto;
+      margin-right: auto;
     }
 
     /* ── DIVIDER ── */
@@ -126,11 +129,13 @@
     }
 
     /* ── R&D SECTION ── */
+    #rd { text-align: center; }
     #rd .rd-intro {
       font-size: 15px;
       color: #aaa;
       line-height: 1.7;
       margin-bottom: 24px;
+      text-align: center;
     }
     #rd .rd-intro strong { color: #f0f0f0; }
     .rd-grid {
@@ -257,7 +262,8 @@
       margin-bottom: 12px;
     }
     #features .section-heading span { color: #C8102E; }
-    #features .features-sub {
+    #features .features-sub { text-align: center; }
+    #features .features-sub_unused {
       font-size: 15px;
       color: #555;
       margin-bottom: 36px;
@@ -499,7 +505,7 @@
 
 <!-- ══ HERO ══ -->
 <section id="hero">
-  <div class="hero-badge">
+  <div class="hero-badge" style="margin-left:auto;margin-right:auto;">
     <span class="dot"></span>
     ⚠ Demo Preview — Building &amp; Research Phase
   </div>
@@ -509,7 +515,7 @@
 </section>
 
 <!-- ══ R&D DISCLAIMER ══ -->
-<section id="rd">
+<section id="rd" style="text-align:center;">
   <div style="display:flex;align-items:center;gap:18px;margin-bottom:20px">
     <div style="width:48px;height:48px;background:rgba(245,166,35,0.12);border:2px solid rgba(245,166,35,0.3);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">🪖</div>
     <h2 style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:clamp(18px,3vw,28px);text-transform:uppercase;letter-spacing:1px;color:#f5a623;line-height:1.1">THIS IS A DEMO — BUILDING, RESEARCH &amp; DEVELOPMENT PHASE</h2>
@@ -533,67 +539,9 @@
 </section>
 
 
-<!-- ══ DATA SAFETY ══ -->
-<section id="data-safety" style="background:linear-gradient(135deg,#0A1A0A 0%,#0D0D0D 60%,#0A1600 100%);border:2px solid #27AE60;border-radius:16px;padding:clamp(32px,6vw,64px) clamp(16px,4vw,48px);text-align:center;">
-  <div style="display:inline-flex;align-items:center;gap:10px;background:rgba(39,174,96,0.15);border:1px solid rgba(39,174,96,0.4);border-radius:999px;padding:6px 20px;margin-bottom:24px;">
-    <span style="width:10px;height:10px;border-radius:50%;background:#27AE60;box-shadow:0 0 10px #27AE60;display:inline-block;animation:pulse 1.8s infinite;flex-shrink:0;"></span>
-    <span style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#27AE60;">LIVE &amp; BACKED UP 24/7</span>
-  </div>
-
-  <h2 style="font-family:'Bebas Neue',sans-serif;font-size:clamp(32px,7vw,64px);letter-spacing:3px;line-height:1;color:#F0F0F0;margin-bottom:12px;">YOUR LOSAP DATA IS<br><span style="color:#27AE60;">NEVER LOST.</span></h2>
-  <p style="font-family:'Barlow',sans-serif;font-size:clamp(15px,2vw,18px);color:#AAA;max-width:620px;margin:0 auto 36px;line-height:1.7;">We know change is hard. We built this system around one promise: <strong style="color:#F0F0F0;">no member ever loses a point they earned.</strong> Here's exactly how we keep that promise.</p>
-
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;max-width:960px;margin:0 auto 40px;text-align:left;">
-
-    <div style="background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.25);border-radius:12px;padding:24px;">
-      <div style="font-size:32px;margin-bottom:12px;">📊</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1.5px;color:#27AE60;margin-bottom:8px;">REAL-TIME GOOGLE SHEETS BACKUP</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:14px;color:#CCC;line-height:1.6;margin:0;">Every clock-in, every point, every training record syncs automatically to a Google Sheet that admins can view anytime — on any computer, without touching the portal. Your data lives in <em>your</em> Google account, not ours.</p>
-    </div>
-
-    <div style="background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.25);border-radius:12px;padding:24px;">
-      <div style="font-size:32px;margin-bottom:12px;">📧</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1.5px;color:#27AE60;margin-bottom:8px;">AUTOMATIC MONTHLY LOSAP REPORTS</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:14px;color:#CCC;line-height:1.6;margin:0;">Every month, every member automatically receives a personal LOSAP summary by email — points by category, year-to-date progress, and qualification status. A paper trail in your inbox every 30 days, whether you use the portal or not.</p>
-    </div>
-
-    <div style="background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.25);border-radius:12px;padding:24px;">
-      <div style="font-size:32px;margin-bottom:12px;">⚡</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1.5px;color:#27AE60;margin-bottom:8px;">LIVE. UP TO THE MINUTE.</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:14px;color:#CCC;line-height:1.6;margin:0;">The moment a training gets approved or a meeting ends — your points update. No waiting for end-of-year paperwork. No guessing where you stand. Every member sees their exact LOSAP total in real time, always.</p>
-    </div>
-
-    <div style="background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.25);border-radius:12px;padding:24px;">
-      <div style="font-size:32px;margin-bottom:12px;">📅</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1.5px;color:#27AE60;margin-bottom:8px;">SYNCS TO YOUR GOOGLE CALENDAR</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:14px;color:#CCC;line-height:1.6;margin:0;">Connect your personal Google Calendar and every shift, meeting, drill, and event from the portal shows up automatically in a dedicated "LOSAP Portal" calendar — separate from your personal events, easy to hide or show.</p>
-    </div>
-
-    <div style="background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.25);border-radius:12px;padding:24px;">
-      <div style="font-size:32px;margin-bottom:12px;">📥</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1.5px;color:#27AE60;margin-bottom:8px;">DOWNLOAD YOUR REPORT ANY TIME</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:14px;color:#CCC;line-height:1.6;margin:0;">Every member can download a personal PDF LOSAP report on demand — at any hour, any day. Print it, email it, or hand it to the LOSAP Coordinator. It's your record and you always have access to it.</p>
-    </div>
-
-    <div style="background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.25);border-radius:12px;padding:24px;">
-      <div style="font-size:32px;margin-bottom:12px;">🔒</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1.5px;color:#27AE60;margin-bottom:8px;">NO SINGLE POINT OF FAILURE</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:14px;color:#CCC;line-height:1.6;margin:0;">Data is stored in three places simultaneously: on-device, in Google Sheets, and in cloud backup. If any one system has a problem, the other two have everything. We designed this so that losing data is practically impossible.</p>
-    </div>
-
-  </div>
-
-  <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:24px 32px;max-width:700px;margin:0 auto;">
-    <p style="font-family:'Barlow',sans-serif;font-size:clamp(15px,2vw,17px);color:#F0F0F0;line-height:1.7;margin:0;">
-      <strong style="color:#27AE60;">"What if I don't trust technology with my points?"</strong><br>
-      Fair. That's why every member gets a monthly email with their full report — <em>automatically</em>, without asking. Even members who never open the portal will still have a paper trail in their inbox. The LOSAP Coordinator and all admins also have full access to every member's data via Google Sheets at all times. This isn't a black box — it's more transparent than a paper log.
-    </p>
-  </div>
-</section>
-
 
 <!-- ══ LIVE STATS ══ -->
-<section id="stats">
+<section id="stats" style="text-align:center;">
   <div class="stats-label">A Demonstration Fire Company Built</div>
   <div class="stats-grid">
     <div class="stat-cell"><div class="stat-num">18</div><div class="stat-label">Active Accounts</div></div>
@@ -604,7 +552,7 @@
 </section>
 
 <!-- ══ WHERE WE ARE TODAY ══ -->
-<section id="effort">
+<section id="effort" style="text-align:center;">
   <div class="label">Where We Are Today</div>
   <p style="font-size:14px;color:#444;margin-bottom:4px">A snapshot of the real effort behind what you're about to use. Every number is verified.</p>
   <div class="effort-grid">
@@ -619,10 +567,10 @@
 </section>
 
 <!-- ══ FEATURES ══ -->
-<section id="features">
+<section id="features" style="text-align:center;">
   <div class="label">What's Inside</div>
   <h2 class="section-heading">EVERYTHING A<br>MEMBER <span>NEEDS</span></h2>
-  <p class="features-sub">Built specifically for Anne Arundel County volunteers, every feature is designed around real station workflows.</p>
+  <p class="features-sub" style="text-align:center;">Built specifically for Anne Arundel County volunteers, every feature is designed around real station workflows.</p>
   <div class="features-grid">
     <div class="feature-card">
       <div class="feature-icon">🕐</div>
@@ -664,7 +612,7 @@
 </section>
 
 <!-- ══ GETTING STARTED ══ -->
-<section id="steps">
+<section id="steps" style="text-align:center;">
   <div class="label">Getting Started</div>
   <h2 class="section-heading">SIMPLE FOR<br>EVERY MEMBER</h2>
   <p class="steps-sub">No app to download. Works on any phone, any browser.</p>
@@ -694,7 +642,7 @@
 </section>
 
 <!-- ══ FAQ ══ -->
-<section id="faq">
+<section id="faq" style="text-align:center;">
   <div class="label">Common Questions</div>
   <h2 class="section-heading">A WEBSITE.<br>NOT AN <span class="red">APP.</span></h2>
   <p class="faq-sub">Good question — and one you'll probably hear from other members. Here's the real answer.</p>
@@ -751,8 +699,61 @@
   </div>
 </section>
 
+<!-- ══ DATA SAFETY ══ -->
+<section id="data-safety" style="text-align:center;">
+  <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(39,174,96,0.1);border:1px solid rgba(39,174,96,0.25);border-radius:999px;padding:5px 16px;margin-bottom:20px;">
+    <span style="width:7px;height:7px;border-radius:50%;background:#27AE60;display:inline-block;flex-shrink:0;"></span>
+    <span style="font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#27AE60;">Live Data &amp; Always Backed Up</span>
+  </div>
+
+  <h2 style="font-family:'Bebas Neue',sans-serif;font-size:clamp(28px,5vw,48px);letter-spacing:2px;line-height:1.05;color:#F0F0F0;margin-bottom:10px;">Your LOSAP Data Is <span style="color:#27AE60;">Always Safe.</span></h2>
+  <p style="font-family:'Barlow',sans-serif;font-size:clamp(14px,1.8vw,16px);color:#888;max-width:580px;margin:0 auto 28px;line-height:1.7;">Points update in real time, back up automatically, and land in your inbox every month — whether you open the portal or not.</p>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;max-width:960px;margin:0 auto 28px;text-align:left;">
+
+    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
+      <div style="font-size:24px;margin-bottom:8px;">📊</div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Real-Time Google Sheets Backup</div>
+      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">Every clock-in and point syncs to a Google Sheet admins can view anytime — on any computer.</p>
+    </div>
+
+    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
+      <div style="font-size:24px;margin-bottom:8px;">📧</div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Automatic Monthly Email Reports</div>
+      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">Every member receives a personal LOSAP summary by email on the first of each month — no action required.</p>
+    </div>
+
+    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
+      <div style="font-size:24px;margin-bottom:8px;">⚡</div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Live Points — Not Year-End Paperwork</div>
+      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">The moment a training is approved or a drill is signed off, your points update. You always know exactly where you stand.</p>
+    </div>
+
+    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
+      <div style="font-size:24px;margin-bottom:8px;">📥</div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Download Your Report Any Time</div>
+      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">Every member can download a personal LOSAP report on demand — print it, email it, or hand it to the coordinator.</p>
+    </div>
+
+    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
+      <div style="font-size:24px;margin-bottom:8px;">📅</div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Syncs to Google Calendar</div>
+      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">Every shift, meeting, and event shows up in a dedicated "LOSAP Portal" calendar — separate from your personal events.</p>
+    </div>
+
+    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
+      <div style="font-size:24px;margin-bottom:8px;">🔒</div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Three Layers of Redundancy</div>
+      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">Data lives on your device, in Google Sheets, and in cloud backup simultaneously. Losing data is practically impossible.</p>
+    </div>
+
+  </div>
+
+  <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#555;max-width:600px;margin:0 auto;line-height:1.7;font-style:italic;">"What if I don't trust technology with my points?" — Even members who never open the portal still get a full monthly report in their inbox. The LOSAP Coordinator and all admins have independent access via Google Sheets at all times.</p>
+</section>
+
 <!-- ══ CTA ══ -->
-<section id="cta">
+<section id="cta" style="text-align:center;">
   <h2 class="section-heading">READY TO<br>RUN IT LIVE?</h2>
   <p class="cta-sub">Explore the portal. Break things. Tell us what you need.</p>
   <a class="cta-btn" href="https://chief13-21122.github.io/rbvfc-portal.html/rbvfc-portal.html" target="_blank" rel="noopener">OPEN THE PORTAL</a>
