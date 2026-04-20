@@ -415,9 +415,11 @@ main{padding:16px;max-width:900px;margin:0 auto;}
 @keyframes spin{to{transform:rotate(360deg);}}
 
 /* ── TOAST ── */
-#toast{position:fixed;bottom:calc(var(--bottom-nav-h) + var(--safe-bottom) + 12px);left:16px;right:16px;transform:translateY(20px);background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:12px 16px;font-size:13px;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,.5);transition:all .35s cubic-bezier(.175,.885,.32,1.275);z-index:998;opacity:0;pointer-events:none;white-space:normal;text-align:center;line-height:1.4;}
+#toast{position:fixed;left:50%;transform:translateX(-50%) translateY(40px);bottom:calc(var(--bottom-nav-h) + var(--safe-bottom) + 16px);width:90vw;max-width:480px;background:#1C1C1C;border:1px solid rgba(255,255,255,0.12);border-radius:16px;padding:18px 24px;font-size:17px;font-weight:600;color:#F0F0F0;box-shadow:0 8px 40px rgba(0,0,0,0.75);transition:opacity 0.3s ease,transform 0.3s cubic-bezier(.175,.885,.32,1.275);z-index:9999;opacity:0;pointer-events:none;text-align:center;line-height:1.5;letter-spacing:0.2px;}
+
+@keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
-@media(min-width:768px){#toast{bottom:24px;}}
+@media(min-width:768px){#toast{font-size:16px;max-width:440px;bottom:32px;}}
 
 /* ── PROFILE ── */
 #section-profile .losap-10yr th, #section-profile .losap-10yr td{ padding: 8px 10px; }
@@ -1138,6 +1140,7 @@ var state = {
   loggedIncidentNums: [],      // incident numbers already logged — skip on future syncs
   gcalClientId: '',              // Google OAuth 2.0 Client ID for Calendar integration
   gcalClientSecret: '',          // Google OAuth 2.0 Client Secret for Calendar integration
+  gcalCalendarId: '',            // ID of the dedicated 'RBVFC Co.13' Google Calendar (created on first sync)
   cadScriptUrl: '',            // separate Apps Script URL just for CAD dispatch sync
   lastCadSync: '',             // ISO timestamp of last successful CAD sync
   // Extended properties (used at runtime, safe to be undefined but declared for clarity)
@@ -1252,6 +1255,8 @@ function updateClock() {
 //  NAVIGATION
 // ═══════════════════════════════════════════════════
 function showTab(id) {
+  // Close all open windows when navigating to admin
+  if (id === 'admin') { try { closeAllWindows(); } catch(e){} }
   if (id === 'drill') id = 'training'; // drill merged into training
   setTimeout(_adjustAppTopPad, 50);
   document.querySelectorAll('.section').forEach(function(s){ s.classList.remove('active'); });
@@ -1409,6 +1414,10 @@ function openMySettings() {
   if (gcalLabel) {
     var connected = gcalIsConnected();
     gcalLabel.textContent = connected ? 'Disconnect Google Calendar' : 'Connect Google Calendar';
+    var gcalSyncBtn = document.getElementById('mySettingsGcalSyncBtn');
+    if (gcalSyncBtn) gcalSyncBtn.style.display = connected ? '' : 'none';
+    var gcalNote = document.getElementById('mySettingsGcalNote');
+    if (gcalNote) gcalNote.style.display = connected ? 'none' : 'block';
     if (gcalStatus) gcalStatus.textContent = connected ? '✅' : '';
     if (gcalBtn) { gcalBtn.style.borderColor = connected ? '#27AE60' : ''; gcalBtn.style.color = connected ? '#27AE60' : ''; }
   }
@@ -1434,7 +1443,64 @@ function closeMySettings() {
   if (modal) modal.style.display = 'none';
 }
 
+
+// ── CLOSE ALL OPEN WINDOWS / MODALS / SHEETS ─────────────────────────────────
+// Called before navigating to Admin so the user lands on a clean screen
+function closeAllWindows() {
+  // ── Bottom sheets ──
+  try { closeMoreMenu(); }            catch(e){}
+  try { closeManualActivitySheet(); } catch(e){}
+  try { closeMeetingsSheet(); }       catch(e){}
+  try { closeMySettings(); }          catch(e){}
+  try { closeLosapInfoModal(); }      catch(e){}
+
+  // ── Static modals (hide by ID) ──
+  var staticIds = [
+    'mySettingsModal','createGroupModal','meetingsSheet',
+    'losapInfoModal','rejectReasonModal','cadGmailModal',
+    'signUpModal','classModal','classDetailModal',
+    'manualActivitySheet'
+  ];
+  staticIds.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+
+  // ── Dynamic/injected modals (created at runtime and appended to body) ──
+  var dynamicIds = [
+    'clockInConfirmModal','adjustClockModal','switchUserModal',
+    'csvPreviewModal','bulkEditModal','losapChairModal',
+    '_adminCoModal','_drillConfModal','tsubConfirmModal',
+    '_pushBlockedModal','monthlyPreviewModal','sendToMemberModal',
+    '_dutyOverTimeModal','_stayClockInModal','suModal'
+  ];
+  dynamicIds.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  });
+
+  // ── Reminder overlay ──
+  var ro = document.getElementById('reminderOverlay');
+  if (ro) { ro.classList.remove('show'); }
+
+  // ── Any other position:fixed overlays injected by JS ──
+  // (scan for any full-screen overlays not in the above lists)
+  document.querySelectorAll('[style*="position:fixed"][style*="inset:0"]').forEach(function(el) {
+    if (el.id === 'loginOverlay') return; // never close login
+    if (el.style.display !== 'none' && el.style.display !== '') {
+      el.style.display = 'none';
+    }
+  });
+}
+
 function showMoreMenu() {
+  // Show Manual Activity button for officers/admins only
+  var _mmaBtn = document.getElementById('moreManualActivityBtn');
+  if (_mmaBtn) {
+    var _me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+    var _isOff = _me && (_me.appRole==='officer'||_me.appRole==='admin');
+    _mmaBtn.style.display = _isOff ? '' : 'none';
+  }
   var s = document.getElementById('moreSheet');
   if (s) {
     s.style.display='flex';
@@ -1531,7 +1597,32 @@ function updateClockUI(in_) {
     if (in_) {
       pill.style.borderColor = _accent;
       pill.querySelector('span').style.color = _accent;
-      pill.querySelector('span').textContent = _isClass ? 'CLASS IN SESSION' : 'CLOCKED IN — SESSION ACTIVE';
+      // Build a specific duty-type label for the pill
+      var _pillLabel;
+      if (_isClass) {
+        _pillLabel = 'CLOCKED IN — CLASS / TRAINING';
+      } else if (!_sess) {
+        _pillLabel = 'CLOCKED IN — SESSION ACTIVE';
+      } else if (_sess.activity === 'meeting' || _sess.activity === 'boardmeeting') {
+        _pillLabel = 'CLOCKED IN — MEETING';
+      } else if (_sess.activity === 'emergency') {
+        _pillLabel = 'CLOCKED IN — EMERGENCY RESPONSE';
+      } else if (_sess.activity === 'drill') {
+        _pillLabel = 'CLOCKED IN — DRILL';
+      } else if (_sess.activity === 'training') {
+        _pillLabel = 'CLOCKED IN — FORMAL TRAINING';
+      } else if (_sess.activity === 'fundraiser' || _sess.activity === 'event' || _sess.eventId) {
+        _pillLabel = 'CLOCKED IN — SPECIAL EVENT';
+      } else if (_sess.activity === 'collateral' || _sess.activity === 'duties') {
+        _pillLabel = 'CLOCKED IN — COLLATERAL DUTY';
+      } else if (_sess.activity === 'duty' || _sess.shiftId) {
+        _pillLabel = 'CLOCKED IN — STATION DUTY';
+      } else if (_sess.mtgId) {
+        _pillLabel = 'CLOCKED IN — MEETING';
+      } else {
+        _pillLabel = 'CLOCKED IN — SESSION ACTIVE';
+      }
+      pill.querySelector('span').textContent = _pillLabel;
     }
   }
   if (nameEl) {
@@ -1573,7 +1664,12 @@ function updateClockUI(in_) {
       } else if (_sess.activity==='fundraiser') {
         _bc=ACT_COLORS.fundraiser;_bl='SPECIAL EVENT';_bt=_sess.desc||'Event';_bs='';
       } else if (_sess.activity==='duties'||_sess.activity==='collateral'||_sess.activity==='duty') {
-        _bc=ACT_COLORS.duties;_bl='STANDBY / COLLATERAL DUTY';_bt=_sess.desc||'On Duty';_bs='';
+        _bc=ACT_COLORS.duties;_bl='COLLATERAL DUTY';
+        _bt=_sess.desc||'On Duty';_bs='';
+      } else if (_sess.activity==='event'||_sess.eventId) {
+        var _evRec=(state.specialEvents||[]).find(function(e){return e.id===(_sess.eventId||_sess.id);});
+        _bc=ACT_COLORS.fundraiser||'#1ABC9C';_bl='SPECIAL EVENT';
+        _bt=(_evRec&&_evRec.title)||_sess.notes||_sess.desc||'Event';_bs=(_evRec&&_evRec.location)||'';
       } else {
         var _td=localDateStr();
         var _ms=(state.staffingShifts||[]).find(function(s){return s.date===_td&&s.memberId===state.currentUserId&&s.unitId;});
@@ -4432,7 +4528,7 @@ function renderAdminRoster() {
   if (roster.length===0) { tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:#666;">No members found.</td></tr>'; return; }
   roster.forEach(function(m) {
     var isActive=m.active!==false;
-    var isClockedIn=!!(state.currentUserId===m.id&&state.currentSession);
+    var isClockedIn=!!(state.currentUserId===m.id&&_getActiveClockedInSession(m.id));
     var positions = m.losapPositions||[];
     if (positions.length===0&&m.losapPosition) positions=[m.losapPosition];
     var tr=document.createElement('tr');
@@ -4442,7 +4538,16 @@ function renderAdminRoster() {
       '<td style="padding:8px;color:#888;font-size:12px;">'+(m.memberId?'50-'+m.memberId:'—')+'</td>'+
       '<td style="padding:8px;"><span class="pill '+(m.appRole==='admin'?'red':m.appRole==='officer'?'blue':'gray')+'" style="font-size:11px;">'+m.appRole+'</span></td>'+
       '<td style="padding:8px;font-size:11px;color:#AAA;">'+(positions.join(', ')||'—')+(m.rideReport==='ineligible'?' <span style="color:#E74C3C;font-size:10px;font-weight:700;">🚫INELIGIBLE</span>':(m.rideReport==='eligible'?' <span style="color:#27AE60;font-size:10px;">✅</span>':''))+'</td>'+
-      '<td style="padding:8px;text-align:center;">'+(isClockedIn?'<span class="pill green" style="font-size:11px;">🟢 In</span>':'<span style="color:#555;font-size:12px;">—</span>')+'</td>'+
+      (function(){
+        var _cSess=_getActiveClockedInSession(m.id),_cLbl='';
+        if(_cSess){
+          if(_cSess.eventId){var _e=(state.specialEvents||[]).find(function(e){return e.id===_cSess.eventId;});_cLbl=_e?_e.title:'Event';}
+          else if(_cSess.mtgId){_cLbl=_cSess.desc||_cSess.notes||'Meeting';}
+          else if(_cSess.shiftId){var _sh=(state.staffingShifts||[]).find(function(s){return s.id===_cSess.shiftId;});_cLbl=_sh?(_sh.unitId||'').toUpperCase():'Shift';}
+          else{_cLbl=_cSess.desc||_cSess.type||_cSess.activity||'Duty';}
+        }
+        return '<td style="padding:8px;text-align:center;">'+(isClockedIn?'<span class="pill green" style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle;">🟢 '+(_cLbl||'In')+'</span>':'<span style="color:#555;font-size:12px;">—</span>')+'</td>';
+      }())+
       '<td style="padding:8px;text-align:center;font-size:12px;color:#666;">'+(m.pin?'••••':'<span style="color:#E74C3C;font-weight:700;">⚠ No PIN</span>')+'</td>'+
       '<td style="padding:8px;white-space:nowrap;">'+
         '<button class="btn btn-sm btn-secondary" onclick="editMemberAdmin(\''+m.id+'\')">✏️ Edit</button> '+
@@ -4459,10 +4564,28 @@ function renderClockedInPanel() {
   if (active.length===0) { panel.innerHTML='<p style="color:#666;font-size:13px;text-align:center;padding:16px;">No members added yet.</p>'; return; }
   var in_=[], out_=[];
   active.forEach(function(m) {
-    if (state.currentUserId===m.id&&state.currentSession) {
-      var el=Date.now()-state.currentSession.start;
+    var _activeSess = _getActiveClockedInSession(m.id);
+    if (_activeSess) {
+      var _sessStart = typeof _activeSess.start === 'number' ? _activeSess.start : new Date(_activeSess.start).getTime();
+      var el=Date.now()-_sessStart;
       var h=Math.floor(el/3600000), min=Math.floor((el%3600000)/60000);
-      in_.push({m:m,display:h+'h '+min+'m',type:state.currentSession.type||'Duty'});
+      var _type;
+      if (_activeSess.eventId) {
+        var _ev2 = (state.specialEvents||[]).find(function(e){return e.id===_activeSess.eventId;});
+        _type = 'Event' + (_ev2 && _ev2.title ? ': ' + _ev2.title : '');
+      } else if (_activeSess.mtgId) {
+        var _mt2 = _activeSess.desc || _activeSess.notes;
+        _type = 'Meeting' + (_mt2 ? ': ' + _mt2 : '');
+      } else if (_activeSess.shiftId) {
+        var _sh2 = (state.staffingShifts||[]).find(function(s){return s.id===_activeSess.shiftId;});
+        _type = 'Staffing' + (_sh2 && _sh2.unitId ? ': ' + (_sh2.unitId||'').toUpperCase() : '');
+      } else if (_activeSess.activity === 'collateral' || _activeSess.activity === 'duties' || _activeSess.activity === 'duty') {
+        _type = 'Collateral Duty' + (_activeSess.desc ? ': ' + _activeSess.desc : '');
+      } else {
+        _type = _activeSess.type || _activeSess.activity || 'Duty';
+        if (_activeSess.desc) _type += ': ' + _activeSess.desc;
+      }
+      in_.push({m:m,display:h+'h '+min+'m',type:_type});
     } else { out_.push(m); }
   });
   var html='';
@@ -5126,9 +5249,16 @@ function showToast(msg) {
   var tm=document.getElementById('toastMsg');
   if (!t||!tm) return;
   tm.textContent=msg;
-  t.style.opacity='1'; t.style.transform='translateX(-50%) translateY(0)'; t.style.pointerEvents='auto';
+  // Slide up from bottom
+  t.style.opacity='1';
+  t.style.transform='translateX(-50%) translateY(0)';
+  t.style.pointerEvents='auto';
   if (toastTimeout) clearTimeout(toastTimeout);
-  toastTimeout=setTimeout(function(){ t.style.opacity='0'; t.style.transform='translateX(-50%) translateY(30px)'; t.style.pointerEvents='none'; },4000);
+  toastTimeout=setTimeout(function(){
+    t.style.opacity='0';
+    t.style.transform='translateX(-50%) translateY(40px)'; // slide back down
+    t.style.pointerEvents='none';
+  }, 4500);
 }
 
 // ═══════════════════════════════════════════════════
@@ -5604,13 +5734,13 @@ function renderDrillReportHistory() {
 function showSubmitConfirmation(msg, iconStr) {
   var icon = iconStr || '✅';
   var banner = document.createElement('div');
-  banner.style.cssText = 'position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:9999;'
-    + 'background:#0D1F0D;border:1.5px solid #27AE60;border-radius:12px;padding:14px 20px;'
-    + 'display:flex;align-items:center;gap:10px;max-width:340px;width:90%;'
-    + 'box-shadow:0 4px 20px rgba(39,174,96,0.3);animation:slideDown .25s ease;';
-  banner.innerHTML = '<span style="font-size:20px;">'+icon+'</span>'
-    + '<div><div style="font-size:13px;font-weight:700;color:#27AE60;">Submitted</div>'
-    + '<div style="font-size:12px;color:#AAA;margin-top:1px;">'+msg+'</div></div>';
+  banner.style.cssText = 'position:fixed;bottom:calc(var(--bottom-nav-h,68px) + env(safe-area-inset-bottom,0px) + 80px);left:50%;transform:translateX(-50%);z-index:9999;'
+    + 'background:#0D1F0D;border:1.5px solid #27AE60;border-radius:14px;padding:16px 22px;'
+    + 'display:flex;align-items:center;gap:12px;max-width:90vw;width:auto;max-width:400px;'
+    + 'box-shadow:0 4px 24px rgba(39,174,96,0.35);animation:slideUp .25s ease;';
+  banner.innerHTML = '<span style="font-size:24px;">'+icon+'</span>'
+    + '<div><div style="font-size:15px;font-weight:700;color:#27AE60;">Submitted</div>'
+    + '<div style="font-size:14px;color:#CCC;margin-top:2px;">'+msg+'</div></div>';
   document.body.appendChild(banner);
   setTimeout(function(){ banner.style.opacity='0'; banner.style.transition='opacity .4s'; 
     setTimeout(function(){ if(banner.parentNode) banner.parentNode.removeChild(banner); }, 400); }, 3000);
@@ -6684,6 +6814,160 @@ function saveManualActivity() {
   try { renderCompanyLOSAP(); } catch(e){}
 }
 
+
+// ── MANUAL ACTIVITY SHEET (More menu) ────────────────────────────────────────
+
+function openManualActivitySheet() {
+  var sheet = document.getElementById('manualActivitySheet');
+  var panel = document.getElementById('manualActivitySheetPanel');
+  if (!sheet || !panel) return;
+
+  // Set logged-by
+  var uid = state.currentUserId;
+  var me = (state.roster||[]).find(function(m){ return m.id===uid; });
+  var byEl = document.getElementById('masEntryByName');
+  if (byEl) byEl.textContent = me ? me.last+', '+me.first+' · '+((me.ranks&&me.ranks.length?me.ranks[0]:me.rank)||me.appRole) : '—';
+
+  // Default date to today
+  var dateEl = document.getElementById('masDate');
+  if (dateEl && !dateEl.value) dateEl.value = localDateStr();
+
+  // Populate member checkboxes
+  var listEl = document.getElementById('masMemberList');
+  if (listEl) {
+    listEl.innerHTML = '';
+    (state.roster||[])
+      .filter(function(m){ return m.active !== false; })
+      .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
+      .forEach(function(m) {
+        var row = document.createElement('label');
+        row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;border-bottom:1px solid #1A1A1A;';
+        row.innerHTML =
+          '<input type="checkbox" class="mas-member-cb" value="'+m.id+'" style="width:16px;height:16px;accent-color:#C8102E;flex-shrink:0;">'+
+          '<span style="font-size:13px;color:#F0F0F0;">'+m.last+', '+m.first+'</span>'+
+          '<span style="font-size:11px;color:#555;margin-left:auto;">'+((m.ranks&&m.ranks.length?m.ranks[0]:m.rank)||m.appRole||'')+'</span>';
+        listEl.appendChild(row);
+      });
+  }
+
+  masRenderRecent();
+
+  // Animate in
+  sheet.style.display = 'flex';
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      panel.style.transform = 'translateY(0)';
+    });
+  });
+}
+
+function closeManualActivitySheet() {
+  var sheet = document.getElementById('manualActivitySheet');
+  var panel = document.getElementById('manualActivitySheetPanel');
+  if (!sheet || !panel) return;
+  panel.style.transform = 'translateY(100%)';
+  setTimeout(function(){ sheet.style.display = 'none'; }, 310);
+}
+
+function masSelectAll() {
+  document.querySelectorAll('.mas-member-cb').forEach(function(cb){ cb.checked = true; });
+}
+
+function masSelectNone() {
+  document.querySelectorAll('.mas-member-cb').forEach(function(cb){ cb.checked = false; });
+}
+
+function masCategoryChanged() {
+  var cat = (document.getElementById('masCategory')||{}).value||'';
+  var hint = document.getElementById('masHoursHint');
+  var hintText = { meeting:'optional', boardmeeting:'optional',
+    duties:'required for pts (1pt per 4hrs)', training:'required',
+    drill:'optional', fundraiser:'optional', other:'optional' };
+  if (hint) hint.textContent = hintText[cat] || '';
+}
+
+function saveManualActivitySheet() {
+  var selectedMembers = Array.from(document.querySelectorAll('.mas-member-cb:checked')).map(function(cb){ return cb.value; });
+  var cat    = (document.getElementById('masCategory')||{}).value||'';
+  var date   = (document.getElementById('masDate')||{}).value||'';
+  var hours  = parseFloat((document.getElementById('masHours')||{}).value||0) || null;
+  var desc   = ((document.getElementById('masDesc')||{}).value||'').trim();
+  var enteredBy = state.currentUserId;
+  var enteredByMe = (state.roster||[]).find(function(m){ return m.id===enteredBy; });
+  var enteredByName = enteredByMe ? enteredByMe.last+', '+enteredByMe.first : enteredBy;
+
+  if (!selectedMembers.length) { showToast('⚠️ Select at least one member.'); return; }
+  if (!cat)   { showToast('⚠️ Select an activity type.'); return; }
+  if (!date)  { showToast('⚠️ Enter a date.'); return; }
+  if (!desc)  { showToast('⚠️ Enter a description.'); return; }
+  if (cat==='duties' && !hours) { showToast('⚠️ Hours are required for Standby/Collateral Duty.'); return; }
+
+  var cfg = CAT_CONFIG[cat];
+  var pts = cfg ? calcActivityPts(cat, hours) : 0;
+  if (cfg && cfg.maxPts) pts = Math.min(pts, cfg.maxPts);
+
+  if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
+
+  var _now = new Date().toISOString();
+  selectedMembers.forEach(function(memberId) {
+    var act = {
+      id:            'mact_'+Date.now()+'_'+memberId,
+      memberId:      memberId,
+      date:          date,
+      category:      cat,
+      desc:          desc,
+      pts:           pts,
+      points:        pts,
+      hours:         hours || 0,
+      notes:         '',
+      approvedBy:    enteredBy,
+      approvedAt:    _now,
+      enteredBy:     enteredBy,
+      enteredByName: enteredByName,
+      manualEntry:   true,
+      createdAt:     _now
+    };
+    state.losapActivities.unshift(act);
+    try { _notifyLosapPoints(act); } catch(e){}
+  });
+
+  save();
+  try { renderCompanyLOSAP(); } catch(e){}
+  try { renderLOSAP(); } catch(e){}
+
+  // Clear form (keep date for quick multi-entry)
+  var catEl = document.getElementById('masCategory'); if (catEl) catEl.value='';
+  var descEl = document.getElementById('masDesc'); if (descEl) descEl.value='';
+  var hrsEl = document.getElementById('masHours'); if (hrsEl) hrsEl.value='';
+  var hintEl = document.getElementById('masHoursHint'); if (hintEl) hintEl.textContent='';
+  masSelectNone();
+
+  var label = selectedMembers.length === 1
+    ? ((state.roster||[]).find(function(m){ return m.id===selectedMembers[0]; })||{first:'Member',last:''}).last
+    : selectedMembers.length + ' members';
+  showToast('✅ '+label+': '+pts+' pts recorded — '+desc+'.');
+  masRenderRecent();
+}
+
+function masRenderRecent() {
+  var container = document.getElementById('masRecentEntries');
+  if (!container) return;
+  var recent = (state.losapActivities||[])
+    .filter(function(a){ return a.manualEntry && a.enteredBy===state.currentUserId; })
+    .slice(0, 8);
+  if (!recent.length) { container.innerHTML = ''; return; }
+  var html = '<div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;margin-top:4px;">Recent Entries</div>';
+  html += recent.map(function(a) {
+    var m = (state.roster||[]).find(function(x){ return x.id===a.memberId; });
+    var mName = m ? m.last+', '+m.first : a.memberId;
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #1A1A1A;font-size:12px;">'+
+      '<div><span style="color:#F0F0F0;font-weight:600;">'+mName+'</span> <span style="color:#666;">'+a.desc+'</span></div>'+
+      '<span style="color:#27AE60;font-weight:700;white-space:nowrap;margin-left:8px;">+'+a.pts+' pts</span>'+
+      '</div>';
+  }).join('');
+  container.innerHTML = html;
+}
+
 function renderManualRecentEntries() {
   var container = document.getElementById('manualRecentEntries');
   if (!container) return;
@@ -6998,6 +7282,7 @@ function renderStaffingBoard() {
     // Units always staff independently — no combined crew
     html += '<span style="font-size:18px;font-weight:700;letter-spacing:1.5px;color:#F0F0F0;">'+UNIT_LABELS[unitId]+'</span>';
     html += '<span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;background:'+bgStatus+';color:'+statusColor+';">'+statusText+'</span>';
+    if (isOfficer && date === _ld) html += '<button onclick="clockInAllUnit(\''+unitId+'\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;font-weight:700;white-space:nowrap;">⚡ Clock All In</button>';
     html += '</div>';
 
     // ── Position rows helper (shared for primary and linked units) ──
@@ -7387,7 +7672,7 @@ function closeSignUpModal() {
 //  No server required. Members authorize once; all signups push silently.
 // ═══════════════════════════════════════════════════════════════════════════
 
-var _GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+var _GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar';
 var _GCAL_TOKEN_KEY = 'rbvfc_gcal_token';
 var _GCAL_EXPIRY_KEY = 'rbvfc_gcal_expiry';
 var _GCAL_VERIFIER_KEY = 'rbvfc_gcal_verifier';
@@ -7448,6 +7733,10 @@ async function gcalConnect() {
     showToast('⚠️ Google Calendar Client ID not configured. Ask your admin.');
     return;
   }
+  // Clear existing tokens so we get the updated scope (calendar vs calendar.events)
+  // This ensures existing users re-authorize with the broader scope
+  _gcalClearToken();
+  try { localStorage.removeItem('rbvfc_gcal_refresh'); } catch(e){}
   var verifier = _gcalRandomString(64);
   try { localStorage.setItem(_GCAL_VERIFIER_KEY, verifier); } catch(e) {}
   var challenge = await _gcalCodeChallenge(verifier);
@@ -7461,7 +7750,8 @@ async function gcalConnect() {
     prompt: 'consent',
     code_challenge: challenge,
     code_challenge_method: 'S256',
-    state: 'gcal_oauth'
+    state: 'gcal_oauth',
+    hd: 'rbvfc13.com'
   });
   window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
 }
@@ -7490,7 +7780,7 @@ async function _gcalHandleCallback(code) {
       try { localStorage.setItem('rbvfc_gcal_refresh', data.refresh_token); } catch(e) {}
     }
     try { localStorage.removeItem(_GCAL_VERIFIER_KEY); } catch(e) {}
-    showToast('✅ Google Calendar connected! Future signups will appear automatically.');
+    showToast('✅ Google Calendar connected! Future signups will appear on your @rbvfc13.com calendar.');
     renderGcalStatus();
     // Clean URL
     window.history.replaceState({}, document.title, window.location.pathname);
@@ -7531,12 +7821,73 @@ async function _gcalGetValidToken() {
 
 function gcalDisconnect() {
   _gcalClearToken();
+  try { localStorage.removeItem('rbvfc_gcal_refresh'); } catch(e){}
+  state.gcalCalendarId = '';
+  save();
   try { localStorage.removeItem('rbvfc_gcal_refresh'); } catch(e) {}
   showToast('📅 Google Calendar disconnected.');
   renderGcalStatus();
 }
 
 // ── Create / Delete calendar events ──────────────────────────────────────
+
+
+// ── DEDICATED CALENDAR ───────────────────────────────────────────────────
+// Gets or creates the "LOSAP Portal" calendar — keeps portal events
+// separate from the member's main calendar so they can toggle it on/off.
+
+async function _gcalGetOrCreateCalendar() {
+  // Return cached calendar ID if we have it
+  if (state.gcalCalendarId) return state.gcalCalendarId;
+
+  var token = await _gcalGetValidToken();
+  if (!token) return 'primary';
+
+  try {
+    // Check if calendar already exists in their calendar list
+    var listResp = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var listData = await listResp.json();
+    var existing = (listData.items || []).find(function(cal) {
+      return cal.summary === 'LOSAP Portal';
+    });
+    if (existing) {
+      state.gcalCalendarId = existing.id;
+      save();
+      return existing.id;
+    }
+
+    // Create a new calendar
+    var createResp = await fetch('https://www.googleapis.com/calendar/v3/calendars', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        summary: 'LOSAP Portal',
+        description: 'Shifts, meetings, and events from the Riviera Beach Volunteer Fire Company Co.13 Member Portal',
+        timeZone: 'America/New_York'
+      })
+    });
+    var createData = await createResp.json();
+    if (createData.id) {
+      // Set a distinctive red color for the calendar
+      await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList/' + encodeURIComponent(createData.id), {
+        method: 'PATCH',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ colorId: '11' }) // red/tomato
+      }).catch(function(){});
+
+      state.gcalCalendarId = createData.id;
+      save();
+      console.log('[RBVFC] Created dedicated calendar:', createData.id);
+      return createData.id;
+    }
+  } catch(e) {
+    console.warn('[RBVFC] Could not create dedicated calendar, using primary:', e);
+  }
+
+  return 'primary'; // fallback
+}
 
 async function _gcalCreateEvent(details) {
   // details: { title, startISO, endISO, description, location }
@@ -7554,7 +7905,8 @@ async function _gcalCreateEvent(details) {
     ]}
   };
   try {
-    var resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+    var _calId = await _gcalGetOrCreateCalendar();
+    var resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(_calId) + '/events', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -7569,7 +7921,8 @@ async function _gcalDeleteEvent(gcalEventId) {
   var token = await _gcalGetValidToken();
   if (!token) return;
   try {
-    await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + encodeURIComponent(gcalEventId), {
+    var _delCalId = state.gcalCalendarId || 'primary';
+    await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(_delCalId) + '/events/' + encodeURIComponent(gcalEventId), {
       method: 'DELETE',
       headers: { 'Authorization': 'Bearer ' + token }
     });
@@ -7580,15 +7933,30 @@ async function _gcalDeleteEvent(gcalEventId) {
 
 function _gcalShiftISO(date, startHHMM, hours) {
   // date: 'YYYY-MM-DD', startHHMM: '0700' or '07:00', hours: number
-  var hhmm = String(startHHMM).replace(':','');
-  var hh = parseInt(hhmm.slice(0,2)||'7');
-  var mm = parseInt(hhmm.slice(2,4)||'0');
-  var start = new Date(date + 'T' + String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0') + ':00');
-  var end = new Date(start.getTime() + (hours || 12) * 3600000);
-  return {
-    startISO: start.toISOString().replace('Z', '-05:00').slice(0, 22) + ':00',
-    endISO:   end.toISOString().replace('Z', '-05:00').slice(0, 22) + ':00'
-  };
+  var hhmm = String(startHHMM || '0700').replace(':','').replace(/[^0-9]/g,'');
+  var hh = parseInt(hhmm.slice(0,2) || '7') || 0;
+  var mm = parseInt(hhmm.slice(2,4) || '0') || 0;
+  if (isNaN(hh) || hh < 0 || hh > 23) hh = 7;
+  if (isNaN(mm) || mm < 0 || mm > 59) mm = 0;
+  // Build RFC3339 string directly using local time — avoids UTC conversion bugs
+  // Google Calendar API accepts YYYY-MM-DDTHH:MM:SS-05:00 format
+  var hhStr = String(hh).padStart(2,'0');
+  var mmStr = String(mm).padStart(2,'0');
+  var startISO = date + 'T' + hhStr + ':' + mmStr + ':00-05:00';
+  // Compute end by adding hours in minutes
+  var totalMins = hh * 60 + mm + Math.round((hours || 12) * 60);
+  var endHH = Math.floor(totalMins / 60) % 24;
+  var endMM = totalMins % 60;
+  // Handle multi-day shifts — just cap end at same day + 23:59
+  var endDate = date;
+  if (Math.floor(totalMins / 60) >= 24) {
+    // Shift goes past midnight — use next day
+    var d = new Date(date + 'T12:00:00');
+    d.setDate(d.getDate() + 1);
+    endDate = d.toISOString().slice(0,10);
+  }
+  var endISO = endDate + 'T' + String(endHH).padStart(2,'0') + ':' + String(endMM).padStart(2,'0') + ':00-05:00';
+  return { startISO: startISO, endISO: endISO };
 }
 
 // ── Public push functions ─────────────────────────────────────────────────
@@ -7672,6 +8040,69 @@ async function gcalPushClass(cls) {
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────
+
+
+// ── BULK GCAL SYNC ────────────────────────────────────────────────────────
+// Pushes all past/future signups, meetings, and shifts to Google Calendar
+async function gcalSyncAll() {
+  if (!gcalIsConnected()) {
+    showToast('⚠️ Connect Google Calendar first (Settings → Google Calendar).');
+    return;
+  }
+  var uid = state.currentUserId;
+  if (!uid) { showToast('⚠️ Log in first.'); return; }
+
+  var pushed = 0, skipped = 0, failed = 0;
+
+  // Ensure calendar exists first (creates it if needed)
+  showToast('⏳ Setting up RBVFC Co.13 calendar and syncing...');
+  await _gcalGetOrCreateCalendar();
+
+  // ── 1. Special Events signed up for ──
+  for (var i = 0; i < (state.specialEvents||[]).length; i++) {
+    var ev = state.specialEvents[i];
+    var signup = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
+    if (!signup) continue;
+    if (signup._gcalEventId) { skipped++; continue; } // already synced
+    try {
+      var id = await gcalPushEvent(ev);
+      if (id) { signup._gcalEventId = id; pushed++; }
+      else failed++;
+    } catch(e) { failed++; }
+  }
+
+  // ── 2. Meetings signed up for ──
+  for (var j = 0; j < (state.meetingAttendance||[]).length; j++) {
+    var att = state.meetingAttendance[j];
+    if (att.memberId !== uid) continue;
+    if (att._gcalEventId) { skipped++; continue; } // already synced
+    var mtg = (state.meetings||[]).find(function(m){ return m.id===att.mtgId; });
+    if (!mtg) continue;
+    try {
+      var mid = await gcalPushMeeting(mtg, att.date);
+      if (mid) { att._gcalEventId = mid; pushed++; }
+      else failed++;
+    } catch(e) { failed++; }
+  }
+
+  // ── 3. Staffing shifts assigned to me ──
+  for (var k = 0; k < (state.staffingShifts||[]).length; k++) {
+    var shift = state.staffingShifts[k];
+    if (shift.memberId !== uid) continue;
+    if (shift._gcalEventId) { skipped++; continue; } // already synced
+    try {
+      var sid = await gcalPushShift(shift);
+      if (sid) { shift._gcalEventId = sid; pushed++; }
+      else failed++;
+    } catch(e) { failed++; }
+  }
+
+  save();
+  var msg = '✅ Google Calendar sync complete — ' + pushed + ' added';
+  if (skipped) msg += ', ' + skipped + ' already synced';
+  if (failed) msg += ', ' + failed + ' failed';
+  showToast(msg);
+}
 
 function renderGcalStatus() {
   var els = document.querySelectorAll('.gcal-status-text');
@@ -9657,17 +10088,17 @@ function _showTopBanner(id, bgColor, accentColor, icon, title, body, buttons) {
     document.body.appendChild(el);
   }
   var btnHtml = buttons.map(function(b){
-    return '<button onclick="'+b.fn+'" style="flex-shrink:0;background:'+b.bg+';color:'+b.color+';border:1px solid '+b.border+';padding:8px 14px;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;letter-spacing:.3px;line-height:1.2;">'+b.label+'</button>';
+    return '<button onclick="'+b.fn+'" style="flex-shrink:0;background:'+b.bg+';color:'+b.color+';border:1px solid '+b.border+';padding:10px 18px;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap;letter-spacing:.3px;line-height:1.2;">'+b.label+'</button>';
   }).join('');
-  el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:'+bgColor+';border-bottom:3px solid '+accentColor+';color:#F0F0F0;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top, 0px));box-shadow:0 4px 24px rgba(0,0,0,.7);box-sizing:border-box;';
+  el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:'+bgColor+';border-bottom:3px solid '+accentColor+';color:#F0F0F0;padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top, 0px));box-shadow:0 4px 24px rgba(0,0,0,.7);box-sizing:border-box;';
   el.innerHTML =
     // Top row: icon + label
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">'
     + '<span style="font-size:18px;flex-shrink:0;line-height:1;">'+icon+'</span>'
-    + '<div style="font-family:Barlow Condensed,sans-serif;font-size:10px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:'+accentColor+';">'+title+'</div>'
+    + '<div style="font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:'+accentColor+';">'+title+'</div>'
     + '</div>'
     // Middle row: body text
-    + '<div style="font-size:13px;font-weight:600;color:#F0F0F0;line-height:1.3;margin-bottom:8px;padding-left:26px;">'+body+'</div>'
+    + '<div style="font-size:15px;font-weight:600;color:#F0F0F0;line-height:1.4;margin-bottom:10px;padding-left:28px;">'+body+'</div>'
     // Bottom row: buttons
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;padding-left:26px;">'+btnHtml+'</div>';
   el.style.display = 'block';
@@ -10199,6 +10630,118 @@ function cancelSpecialEventSignup(elOrId) {
   showToast('Signup cancelled. Calendar event removed.');
 }
 
+
+// ── OFFICER BULK CLOCK-IN FUNCTIONS ──────────────────────────────────────────
+
+function clockInAllSpecialEvent(evId) {
+  if (!canManageSpecialEvents()) { showToast('⚠️ Officers only.'); return; }
+  var ev = (state.specialEvents||[]).find(function(e){ return e.id===evId; });
+  if (!ev) return;
+  var now = new Date();
+  var today = localDateStr();
+  if (ev.date !== today) { showToast('⚠️ Bulk clock-in is only available on the day of the event.'); return; }
+  var signups = (ev.signups||[]).filter(function(s){ return !s.clockedIn && !s.clockedOutAt; });
+  if (!signups.length) { showToast('⚠️ No members to clock in — all are already clocked in or have clocked out.'); return; }
+  var count = 0;
+  signups.forEach(function(s) {
+    s.clockedIn = true;
+    s.clockedInAt = now.toISOString();
+    s._clockedInBy = state.currentUserId;
+    // Set currentSession if this is the logged-in user
+    if (s.memberId === state.currentUserId && (!state.currentSession || state.currentSession.end)) {
+      state.currentSession = {
+        id: 'ev_' + ev.id + '_' + s.memberId,
+        userId: s.memberId,
+        start: now.getTime(),
+        type: 'Event',
+        activity: 'event',
+        notes: ev.title,
+        eventId: ev.id
+      };
+      try { updateClockUI(true); } catch(e) {}
+      try { startClockTimer(); } catch(e) {}
+    }
+    count++;
+  });
+  save();
+  renderBothSpecialEventViews();
+  try { updateClockStats(); } catch(e) {}
+  showToast('✅ Clocked in ' + count + ' member' + (count===1?'':'s') + ' to ' + ev.title + '.');
+}
+
+function clockInAllMeeting(mtgId, occurrenceDate) {
+  if (!canManageSpecialEvents()) { showToast('⚠️ Officers only.'); return; }
+  var mtg = (state.meetings||[]).find(function(m){ return m.id===mtgId; });
+  if (!mtg) return;
+  var now = new Date();
+  var today = localDateStr();
+  if (occurrenceDate !== today) { showToast('⚠️ Bulk clock-in is only available on the day of the meeting.'); return; }
+  if (!Array.isArray(state.meetingAttendance)) state.meetingAttendance = [];
+  // Get all members on the meeting roster (or all active if none specified)
+  var members = (mtg.members && mtg.members.length)
+    ? mtg.members
+    : (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).map(function(m){ return m.id; });
+  var count = 0;
+  members.forEach(function(mid) {
+    // Find or create attendance record
+    var att = state.meetingAttendance.find(function(a){ return a.mtgId===mtgId && a.date===occurrenceDate && a.memberId===mid; });
+    if (!att) {
+      att = { id:'ma_'+Date.now()+'_'+mid, mtgId:mtgId, date:occurrenceDate, memberId:mid,
+               signedUpAt:now.toISOString(), clockedInAt:null, clockedOutAt:null, _clockedInBy:state.currentUserId };
+      state.meetingAttendance.push(att);
+    }
+    if (att.clockedInAt && !att.clockedOutAt) return; // already in
+    att.clockedInAt = now.toISOString();
+    att.clockedOutAt = null;
+    att._clockedInBy = state.currentUserId;
+    // Set currentSession for logged-in user
+    if (mid === state.currentUserId && (!state.currentSession || state.currentSession.end)) {
+      state.currentSession = {
+        id: 'sess_mtg_'+Date.now(), userId: mid, start: now.toISOString(),
+        activity: 'meeting', desc: mtg.title, mtgId: mtgId, mtgDate: occurrenceDate, end: null, duration: null
+      };
+      try { updateClockUI(true); } catch(e) {}
+      try { updateClockStats(); } catch(e) {}
+    }
+    count++;
+  });
+  save();
+  try { renderMeetingsList(); } catch(e) {}
+  try { renderMyShifts(); } catch(e) {}
+  showToast('✅ Clocked in ' + count + ' member' + (count===1?'':'s') + ' to ' + mtg.title + '.');
+}
+
+function clockInAllUnit(unitId) {
+  if (!canManageSpecialEvents()) { showToast('⚠️ Officers only.'); return; }
+  var today = localDateStr();
+  var now = new Date();
+  var shifts = (state.staffingShifts||[]).filter(function(s){
+    return s.unitId === unitId && s.date === today && !s.clockedIn && !s.clockedOutAt;
+  });
+  if (!shifts.length) { showToast('⚠️ No unchecked members on ' + (UNIT_LABELS[unitId]||unitId) + ' today.'); return; }
+  var count = 0;
+  shifts.forEach(function(s) {
+    s.clockedIn = true;
+    s.clockedInAt = now.toISOString();
+    s.status = 'active';
+    s._clockedInBy = state.currentUserId;
+    // Set currentSession for logged-in user
+    if (s.memberId === state.currentUserId && (!state.currentSession || state.currentSession.end)) {
+      state.currentSession = {
+        id: 'sess_'+Date.now(), userId: s.memberId, start: now.toISOString(),
+        activity: 'duty', desc: (UNIT_LABELS[unitId]||unitId), shiftId: s.id, end: null, duration: null
+      };
+      try { updateClockUI(true); } catch(e) {}
+      try { updateClockStats(); } catch(e) {}
+    }
+    count++;
+  });
+  save();
+  try { renderStaffingBoard(); } catch(e) {}
+  try { renderMyShifts(); } catch(e) {}
+  showToast('✅ Clocked in ' + count + ' member' + (count===1?'':'s') + ' on ' + (UNIT_LABELS[unitId]||unitId) + '.');
+}
+
 function clockInSpecialEvent(elOrId) {
   var evId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-ev');
   var uid = state.currentUserId;
@@ -10224,7 +10767,20 @@ function clockInSpecialEvent(elOrId) {
   }
   signup.clockedIn = true;
   signup.clockedInAt = now.toISOString();
+  // Set currentSession so Clock tab and Company tab show clocked-in status
+  state.currentSession = {
+    id: 'ev_' + ev.id + '_' + uid,
+    userId: uid,
+    start: now.getTime(),
+    type: 'Event',
+    activity: 'event',
+    notes: ev.title,
+    eventId: ev.id
+  };
   save(); renderBothSpecialEventViews();
+  try { updateClockUI(true); } catch(e) {}
+  try { updateClockStats(); } catch(e) {}
+  try { startClockTimer(); } catch(e) {}
   showToast('\u26ab\ufe0f Clocked in to '+ev.title+'.');
 }
 
@@ -10262,7 +10818,20 @@ function clockOutSpecialEvent(elOrId) {
     var _evDesc = ev.title + ' — attendance';
     try { _autoAwardLosap(uid, 'fundraiser', _evDate, _evDesc, evId); } catch(e){}
   }
+  // Clear currentSession if it was linked to this event
+  if (state.currentSession && state.currentSession.eventId === evId && state.currentSession.userId === uid) {
+    var _endTime = new Date();
+    var _durSecs = Math.max(0, Math.floor((_endTime - new Date(state.currentSession.start)) / 1000));
+    state.currentSession.end = _endTime.toISOString();
+    state.currentSession.duration = _durSecs;
+    if (!Array.isArray(state.sessions)) state.sessions = [];
+    state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+    state.currentSession = null;
+    clearInterval(_clockTimerInterval); _clockTimerInterval = null;
+  }
   save(); renderBothSpecialEventViews();
+  try { updateClockUI(false); } catch(e) {}
+  try { updateClockStats(); } catch(e) {}
   showToast('\u23f9 Clocked out of '+ev.title+'. LOSAP point awarded!');
   // Check if this is a drill event — auto-submit drill report when last person clocks out
   try { _checkDrillEventAutoSubmit(evId); } catch(e) {}
@@ -10817,6 +11386,7 @@ function renderMeetingsList() {
       +'<button onclick="openEditMeeting(\''+mtg.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#9998; Edit</button>'
       +(_canAlert?'<button data-mid="'+mtg.id+'" data-mdate="'+sd+'" class="_mtgAlertBtn" style="background:#1A1200;border:1px solid #F5A623;color:#F5A623;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;margin-top:3px;">&#128276; Send Alert</button>':'')
       +'<button onclick="deleteMeeting(\''+mtg.id+'\')" style="background:none;border:1px solid #333;color:#E74C3C;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#128465; Delete</button>'
+      +(isOfficer&&sd===today?'<button onclick="clockInAllMeeting(\''+mtg.id+'\',\''+sd+'\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;white-space:nowrap;">&#9889; Clock All In</button>':'')
       +'</div></div>'
       +(function(){
         // Member sign-up / attendance section
@@ -10975,8 +11545,22 @@ function renderSpecialEventAdmin() {
         +'<div style="background:#111;border-radius:6px;padding:4px 8px;">'+signupRows+'</div>'
       +'</div>'
       +'<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px;">'
+      +(function(){
+          var _uid=state.currentUserId,_mySig=(ev.signups||[]).find(function(s){return s.memberId===_uid;});
+          var _myCi=_mySig&&_mySig.clockedIn&&!_mySig.clockedOutAt,_myDone=_mySig&&!!_mySig.clockedOutAt,_canCi=ev.date===today,btns="";
+          if(!isPast){
+            if(!_mySig) btns+='<button onclick="signUpSpecialEvent(\''+ev.id+'\')" style="background:#0A2A0A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#9995; Sign Up</button>';
+            else if(_myCi) btns+='<button onclick="clockOutSpecialEvent(\''+ev.id+'\')" style="background:#2A0000;border:1px solid #C8102E;color:#C8102E;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#9209; Clock Out</button>';
+            else if(!_myDone&&_canCi) btns+='<button onclick="clockInSpecialEvent(\''+ev.id+'\')" style="background:#0A2A0A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#128994; Clock In</button>';
+            else if(_myDone) btns+='<span style="font-size:10px;color:#27AE60;display:block;padding:2px 0;">✓ Attended</span>';
+            else btns+='<span style="font-size:10px;color:#555;display:block;padding:2px 0;">Day-of only</span>';
+            if(_mySig&&!_myCi&&!_myDone) btns+='<button onclick="cancelSpecialEventSignup(\''+ev.id+'\')" style="background:none;border:1px solid #333;color:#888;cursor:pointer;font-size:10px;padding:3px 6px;border-radius:6px;">&#10005; Cancel</button>';
+            btns+='<button onclick="clockInAllSpecialEvent(\''+ev.id+'\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#9889; Clock All In</button>';
+          }
+          return btns;
+        }())
       +'<button onclick="openEditSpecialEvent(\''+ev.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Edit event">&#9998; Edit</button>'
-      +'<button onclick="sendEventAlert(\''+ev.id+'\')" style="background:#1A1A00;border:1px solid #F5A623;color:#F5A623;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Send alert to signed-up members">&#128226; Alert</button>'
+      +'<button onclick="sendEventAlert(\''+ev.id+'\')" style="background:#1A1A00;border:1px solid #F5A623;color:#F5A623;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Send alert">&#128226; Alert</button>'
       +'<button onclick="deleteSpecialEvent(this)" data-ev="'+ev.id+'" style="background:none;border:1px solid #333;color:#C8102E;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Delete event">&#128465; Delete</button>'
       +'</div>'
       +'</div></div>';
@@ -12980,11 +13564,40 @@ function renderCompanyStats() {
   var onTrack      = Object.values(memberPts).filter(function(p){ return p >= 25 && p < 50; }).length;
   var qualPct      = totalMembers ? Math.round((qualified/totalMembers)*100) : 0;
 
-  // Training hours this year
+  // Training hours this year — aggregate all sources
+  // Source 1: Approved training submissions
   var trainingActs = (state.losapActivities||[]).filter(function(a){
     return a.date>=yearStart && a.date<=yearEnd && a.category==='training';
   });
   var totalTrainingHrs = trainingActs.reduce(function(s,a){ return s+(a.hours||0); }, 0);
+
+  // Source 2: Approved training & drill submissions in trainingSubmissions
+  (state.trainingSubmissions||[]).forEach(function(t){
+    if ((t.status==='approved') && t.date>=yearStart && t.date<=yearEnd) {
+      totalTrainingHrs += parseFloat(t.hours||0);
+    }
+  });
+
+  // Source 3: Clock-in sessions with training/drill/class activity
+  (state.sessions||[]).forEach(function(s){
+    var d = (s.start||s.date||'').slice(0,10);
+    if (!d || d<yearStart || d>yearEnd) return;
+    var act = s.activity||'';
+    if (act==='training'||act==='drill'||act==='class') {
+      totalTrainingHrs += s.duration ? s.duration/3600 : (parseFloat(s.hours)||0);
+    }
+  });
+
+  // Source 4: Class attendance (clockedInAt + clockedOutAt)
+  (state.classAttendance||[]).forEach(function(a){
+    if (!a.clockedInAt || !a.clockedOutAt) return;
+    var d = (a.sessionDate||a.clockedInAt||'').slice(0,10);
+    if (!d || d<yearStart || d>yearEnd) return;
+    var dur = (new Date(a.clockedOutAt) - new Date(a.clockedInAt)) / 3600000;
+    if (dur > 0) totalTrainingHrs += dur;
+  });
+
+  totalTrainingHrs = Math.round(totalTrainingHrs * 10) / 10; // 1 decimal
 
   // Drills
   var drills = (state.drills||[]).filter(function(d){ return d.date>=yearStart && d.date<=yearEnd && d.status==='approved'; }).length;
@@ -13024,14 +13637,69 @@ function renderCompanyLOSAP() {
   (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).forEach(function(m){
     var mPts = calcMemberLOSAP(m.id, yr);
     // Count hours from activities this year
+    // Hours from manually logged LOSAP activities
     var mHours = (state.losapActivities||[]).reduce(function(sum, a){
       return (a.memberId===m.id && a.date>=yearStart && a.date<=yearEnd) ? sum+(a.hours||0) : sum;
     }, 0);
+    // Hours from completed clock-in sessions (duration stored in seconds)
+    mHours += (state.sessions||[]).reduce(function(sum, s){
+      if (s.userId !== m.id) return sum;
+      var _date = s.start ? s.start.slice(0,10) : (s.date||'');
+      if (!_date || _date < yearStart || _date > yearEnd) return sum;
+      if (s.duration && s.duration > 0) return sum + (s.duration / 3600);
+      // Fall back to hours field if present
+      return sum + (parseFloat(s.hours)||0);
+    }, 0);
+    mHours = Math.round(mHours * 10) / 10; // round to 1 decimal
     // Count responses this year
     var mResponses = (state.emergencyResponses||[]).filter(function(er){
       return er.date>=yearStart && er.date<=yearEnd && (er.members||[]).indexOf(m.id)>=0;
     }).length;
-    totals[m.id] = { member:m, pts:mPts, hours:mHours, responses:mResponses };
+    // Formal training hours (approved trainingSubmissions with type='training' or no type)
+    var mTrainingHrs = (state.trainingSubmissions||[]).reduce(function(sum, t){
+      if (t.memberId !== m.id) return sum;
+      if (t.status !== 'approved') return sum;
+      if (!t.date || t.date < yearStart || t.date > yearEnd) return sum;
+      var isTraining = !t.type || t.type === 'training';
+      return isTraining ? sum + parseFloat(t.hours||0) : sum;
+    }, 0);
+    // Also count from sessions with activity=training/class
+    mTrainingHrs += (state.sessions||[]).reduce(function(sum, s){
+      if (s.userId !== m.id) return sum;
+      var d = (s.start||'').slice(0,10);
+      if (!d || d < yearStart || d > yearEnd) return sum;
+      var act = s.activity||'';
+      if (act === 'training' || act === 'class') {
+        return sum + (s.duration ? s.duration/3600 : parseFloat(s.hours||0));
+      }
+      return sum;
+    }, 0);
+    mTrainingHrs = Math.round(mTrainingHrs * 10) / 10;
+
+    // Drill hours (approved drill submissions)
+    var mDrillHrs = (state.trainingSubmissions||[]).reduce(function(sum, t){
+      if (t.status !== 'approved') return sum;
+      if (!t.date || t.date < yearStart || t.date > yearEnd) return sum;
+      if (t.type !== 'drill') return sum;
+      // Check if this member was part of the drill
+      var inDrill = t.memberId === m.id ||
+        (Array.isArray(t.members) && t.members.indexOf(m.id) >= 0);
+      return inDrill ? sum + parseFloat(t.hours||0) : sum;
+    }, 0);
+    // Also count sessions with activity=drill
+    mDrillHrs += (state.sessions||[]).reduce(function(sum, s){
+      if (s.userId !== m.id) return sum;
+      var d = (s.start||'').slice(0,10);
+      if (!d || d < yearStart || d > yearEnd) return sum;
+      if (s.activity === 'drill') {
+        return sum + (s.duration ? s.duration/3600 : parseFloat(s.hours||0));
+      }
+      return sum;
+    }, 0);
+    mDrillHrs = Math.round(mDrillHrs * 10) / 10;
+
+    totals[m.id] = { member:m, pts:mPts, hours:mHours, responses:mResponses,
+                     trainingHrs:mTrainingHrs, drillHrs:mDrillHrs };
   });
 
   // Build clocked-in lookup: memberId -> { activity, note, color }
@@ -13127,6 +13795,8 @@ function renderCompanyLOSAP() {
     '<th>Member</th><th>Position / Rank</th>' +
     '<th style="text-align:center;">Points</th>' +
     '<th style="text-align:center;">Hours</th>' +
+    '<th style="text-align:center;">Training</th>' +
+    '<th style="text-align:center;">Drills</th>' +
     '<th style="text-align:center;">Calls</th>' +
     '<th style="text-align:center;">Qualified</th>' +
     '<th>On Duty</th>' +
@@ -13173,7 +13843,7 @@ function renderCompanyLOSAP() {
         ? '<td><span style="display:inline-flex;align-items:center;gap:5px;background:rgba('+_ciRgb+',0.12);border:1px solid rgba('+_ciRgb+',0.35);border-radius:12px;padding:2px 8px;font-size:11px;color:'+_ciColor+';white-space:nowrap;">' +
             '<span style="width:6px;height:6px;border-radius:50%;background:'+_ciColor+';flex-shrink:0;box-shadow:0 0 5px '+_ciColor+';display:inline-block;animation:pulse 2s infinite;"></span>' +
             '<strong>' + ci.activity + '</strong>' + (ci.note ? '<span style="color:#888;font-weight:400;"> &middot; ' + ci.note + '</span>' : '') +
-          '</span>' + (_loOff ? '<button data-mid="'+m.id+'" onclick="adminClockOutMember(this.dataset.mid)" style="margin-left:6px;background:rgba(200,16,46,0.15);border:1px solid rgba(200,16,46,0.5);color:#E74C3C;border-radius:5px;padding:1px 6px;cursor:pointer;font-size:10px;font-weight:700;">⏹</button>' : '') +
+          '</span>' + (_loOff && _loMe && _loMe.appRole==='admin' ? '<button data-mid="'+m.id+'" onclick="adminClockOutMember(this.dataset.mid)" style="margin-left:6px;background:rgba(200,16,46,0.15);border:1px solid rgba(200,16,46,0.5);color:#E74C3C;border-radius:5px;padding:1px 6px;cursor:pointer;font-size:10px;font-weight:700;">⏹</button>' : '') +
           '</td>'
         : '<td style="color:#333;font-size:11px;">—</td>';
 
@@ -13182,6 +13852,8 @@ function renderCompanyLOSAP() {
         '<td style="color:#AAA;font-size:12px;">'+_posRankText+'</td>'+
         ptsCell+
         '<td style="text-align:center;color:#AAA;">'+(row.hours||0).toFixed(1)+'</td>'+
+        '<td style="text-align:center;color:#7EC8E3;">'+(row.trainingHrs||0).toFixed(1)+'</td>'+
+        '<td style="text-align:center;color:#F5A623;">'+(row.drillHrs||0).toFixed(1)+'</td>'+
         '<td style="text-align:center;color:#AAA;">'+row.responses+'</td>'+
         '<td style="text-align:center;">'+(qualified?'<span style="color:#27AE60;font-weight:700;">✓ Yes</span>':'<span style="color:#555;">No</span>')+'</td>'+
         dutyCell+'</tr>';
@@ -16521,6 +17193,12 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           📅 <span id="mySettingsGcalLabel">Connect Google Calendar</span>
           <span id="mySettingsGcalStatus" style="position:absolute;top:50%;right:14px;transform:translateY(-50%);font-size:11px;"></span>
         </button>
+        <button class="btn btn-full" id="mySettingsGcalSyncBtn" onclick="gcalSyncAll();closeMySettings()" style="margin-top:6px;display:none;background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;">
+          🔄 Sync All Events to Google Calendar
+        </button>
+        <div id="mySettingsGcalNote" style="margin-top:8px;display:none;background:#1A1200;border:1px solid rgba(245,166,35,0.3);border-radius:8px;padding:8px 12px;font-size:11px;color:#F5A623;line-height:1.5;">
+          ⚠️ Use your <strong>@rbvfc13.com</strong> Google account when connecting — not a personal Gmail.
+        </div>
       </div>
 
       <!-- Notifications -->
@@ -17488,7 +18166,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <div class="card">
         <div class="card-header">
           <div class="icon">&#127941;</div>
-          <h2>Company LOSAP Leaderboard</h2>
+          <h2>Company LOSAP Board</h2>
           <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
             <select id="companyYear" onchange="renderCompanyLOSAP()" style="background:#111;border:1px solid #333;color:#F0F0F0;border-radius:6px;padding:4px 8px;font-size:12px;"></select>
           </div>
@@ -18173,7 +18851,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         </div>
         <div id="gcalCard" style="padding:16px;">
           <p style="font-size:12px;color:#666;margin-bottom:12px;">
-            Members connect their personal Google Calendar once — after that, every shift, meeting, and event they sign up for automatically appears on their calendar without any extra steps.<br><br>
+            Members connect their <strong style="color:#F5A623;">@rbvfc13.com Google Calendar</strong> once — after that, every shift, meeting, and event they sign up for automatically appears on their calendar without any extra steps.<br><br>
+            <strong>⚠️ Important:</strong> Members must sign in with their <strong>@rbvfc13.com Google account</strong> when prompted. Personal Gmail accounts will not work with this integration.<br><br>
             Paste the <strong>OAuth 2.0 Client ID</strong> (Web Application type) from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#3498DB;">Google Cloud Console ↗</a>. In the console: APIs &amp; Services → Credentials → Create Credentials → OAuth Client ID → Web Application. Add your portal URL as both an <em>Authorized JavaScript Origin</em> and an <em>Authorized Redirect URI</em>.
           </p>
           <div class="form-group">
@@ -18186,6 +18865,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-secondary btn-sm" onclick="saveGcalClientId()">💾 Save Credentials</button>
+            <button class="btn btn-sm" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;" onclick="gcalSyncAll()">🔄 Sync All Past Events</button>
           </div>
         </div>
       </div>
@@ -18349,9 +19029,80 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
 
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreManualActivityBtn" onclick="openManualActivitySheet();closeMoreMenu()">✏️ Manual Activity Entry</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="closeAllWindows();showTab('admin');">⚙️ Admin</button>
 
+    </div>
+  </div>
+
+  <!-- Manual Activity Sheet -->
+  <div id="manualActivitySheet" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1050;align-items:flex-end;" onclick="if(event.target===this)closeManualActivitySheet()">
+    <div id="manualActivitySheetPanel" style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:20px;width:100%;box-sizing:border-box;max-height:90vh;overflow-y:auto;transform:translateY(100%);transition:transform .3s ease;">
+      <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 16px;"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:20px;">✏️</span>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#F0F0F0;">Manual Activity Entry</div>
+        </div>
+        <button onclick="closeManualActivitySheet()" style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;line-height:1;">✕</button>
+      </div>
+
+      <!-- Logged By -->
+      <div style="display:flex;align-items:center;gap:10px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+        <span style="font-size:16px;">🔒</span>
+        <div>
+          <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Entry Recorded By</div>
+          <div id="masEntryByName" style="font-size:14px;font-weight:700;color:#27AE60;"></div>
+        </div>
+      </div>
+
+      <!-- Members multi-select -->
+      <div style="margin-bottom:14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <label style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;">Members *</label>
+          <div style="display:flex;gap:8px;">
+            <button onclick="masSelectAll()" style="background:none;border:1px solid #333;color:#888;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;">All</button>
+            <button onclick="masSelectNone()" style="background:none;border:1px solid #333;color:#888;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;">None</button>
+          </div>
+        </div>
+        <div id="masMemberList" style="background:#111;border:1px solid #2A2A2A;border-radius:8px;max-height:180px;overflow-y:auto;padding:4px 0;"></div>
+      </div>
+
+      <!-- Activity Type -->
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Activity Type *</label>
+        <select id="masCategory" onchange="masCategoryChanged()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+          <option value="">— Select type —</option>
+          <option value="meeting">Company Meeting</option>
+          <option value="boardmeeting">Board Meeting</option>
+          <option value="duties">Standby / Collateral Duty</option>
+          <option value="training">Training</option>
+          <option value="drill">Drill / In-House Training</option>
+          <option value="fundraiser">Fundraiser / Special Event</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+
+      <!-- Date -->
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Date *</label>
+        <input type="date" id="masDate" style="width:100%;">
+      </div>
+
+      <!-- Hours -->
+      <div class="form-group" id="masHoursGroup" style="margin-bottom:12px;">
+        <label>Hours <span id="masHoursHint" style="color:#666;font-size:10px;"></span></label>
+        <input type="number" id="masHours" min="0.5" step="0.5" placeholder="e.g. 2" style="width:100%;">
+      </div>
+
+      <!-- Description -->
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>Description / Notes *</label>
+        <input type="text" id="masDesc" placeholder="e.g. Monthly Company Meeting, Station coverage 1800-0600…" style="width:100%;">
+      </div>
+
+      <button class="btn btn-primary btn-full" onclick="saveManualActivitySheet()">✅ Record Activity</button>
+      <div id="masRecentEntries" style="margin-top:14px;"></div>
     </div>
   </div>
 
@@ -18487,7 +19238,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 <div id="loginOverlay" style="position:fixed;inset:0;background:#000000;z-index:1000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;">
   <div style="width:100%;max-width:360px;">
     <div style="text-align:center;margin-bottom:28px;">
-      <img id="loginLogo" style="display:none;max-width:320px;max-height:280px;width:auto;height:auto;object-fit:contain;margin:0 auto 14px;filter:drop-shadow(0 2px 12px rgba(0,0,0,.6));" alt="Company Logo">
+      <img id="loginLogo" style="display:none;max-width:340px;max-height:340px;width:90%;height:auto;object-fit:contain;margin:0 auto 18px;filter:drop-shadow(0 4px 16px rgba(0,0,0,.65));" alt="Company Logo">
       <div id="loginLogoText" style="font-family:'Barlow Condensed',sans-serif;font-size:36px;font-weight:900;color:#C8102E;letter-spacing:4px;text-transform:uppercase;">RBVFC</div>
       <div style="font-size:12px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-top:5px;">Member LOSAP Portal</div>
     </div>
@@ -18555,7 +19306,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
 
 <!-- Toast notification -->
-<div id="toastNotif" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1A1A1A;border:1px solid #333;border-radius:10px;padding:12px 20px;font-size:13px;color:#F0F0F0;z-index:3000;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.5);"></div>
+<div id="toastNotif" style="display:none;position:fixed;bottom:calc(var(--bottom-nav-h, 68px) + env(safe-area-inset-bottom, 0px) + 16px);left:50%;transform:translateX(-50%);background:#1C1C1C;border:1px solid rgba(255,255,255,0.12);border-radius:16px;padding:16px 24px;font-size:16px;font-weight:600;color:#F0F0F0;z-index:9998;white-space:normal;max-width:90vw;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.75);line-height:1.5;"></div>
 
 <!-- ══ CREATE / EDIT CLASS MODAL ══ -->
 <div id="classModal" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;padding:16px;">
@@ -18653,7 +19404,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 </div>
 
   <!-- Toast notification -->
-  <div id="toast" style="position:fixed;bottom:100px;left:50%;transform:translateX(-50%) translateY(30px);background:#1E1E1E;border:1px solid #444;border-radius:14px;padding:16px 24px;font-size:17px;font-weight:700;color:#F0F0F0;z-index:9999;opacity:0;transition:opacity 0.3s,transform 0.3s;pointer-events:none;width:88vw;max-width:400px;text-align:center;box-shadow:0 6px 32px rgba(0,0,0,0.8);letter-spacing:0.3px;line-height:1.4;">
+  <div id="toast">
     <span id="toastMsg"></span>
   </div>
 
