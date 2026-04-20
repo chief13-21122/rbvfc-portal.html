@@ -415,11 +415,9 @@ main{padding:16px;max-width:900px;margin:0 auto;}
 @keyframes spin{to{transform:rotate(360deg);}}
 
 /* ── TOAST ── */
-#toast{position:fixed;left:50%;transform:translateX(-50%) translateY(40px);bottom:calc(var(--bottom-nav-h) + var(--safe-bottom) + 16px);width:90vw;max-width:480px;background:#1C1C1C;border:1px solid rgba(255,255,255,0.12);border-radius:16px;padding:18px 24px;font-size:17px;font-weight:600;color:#F0F0F0;box-shadow:0 8px 40px rgba(0,0,0,0.75);transition:opacity 0.3s ease,transform 0.3s cubic-bezier(.175,.885,.32,1.275);z-index:9999;opacity:0;pointer-events:none;text-align:center;line-height:1.5;letter-spacing:0.2px;}
-
-@keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+#toast{position:fixed;bottom:calc(var(--bottom-nav-h) + var(--safe-bottom) + 12px);left:16px;right:16px;transform:translateY(20px);background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:12px 16px;font-size:13px;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,.5);transition:all .35s cubic-bezier(.175,.885,.32,1.275);z-index:998;opacity:0;pointer-events:none;white-space:normal;text-align:center;line-height:1.4;}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
-@media(min-width:768px){#toast{font-size:16px;max-width:440px;bottom:32px;}}
+@media(min-width:768px){#toast{bottom:24px;}}
 
 /* ── PROFILE ── */
 #section-profile .losap-10yr th, #section-profile .losap-10yr td{ padding: 8px 10px; }
@@ -1140,7 +1138,6 @@ var state = {
   loggedIncidentNums: [],      // incident numbers already logged — skip on future syncs
   gcalClientId: '',              // Google OAuth 2.0 Client ID for Calendar integration
   gcalClientSecret: '',          // Google OAuth 2.0 Client Secret for Calendar integration
-  gcalCalendarId: '',            // ID of the dedicated 'RBVFC Co.13' Google Calendar (created on first sync)
   cadScriptUrl: '',            // separate Apps Script URL just for CAD dispatch sync
   lastCadSync: '',             // ISO timestamp of last successful CAD sync
   // Extended properties (used at runtime, safe to be undefined but declared for clarity)
@@ -1412,10 +1409,6 @@ function openMySettings() {
   if (gcalLabel) {
     var connected = gcalIsConnected();
     gcalLabel.textContent = connected ? 'Disconnect Google Calendar' : 'Connect Google Calendar';
-    var gcalSyncBtn = document.getElementById('mySettingsGcalSyncBtn');
-    if (gcalSyncBtn) gcalSyncBtn.style.display = connected ? '' : 'none';
-    var gcalNote = document.getElementById('mySettingsGcalNote');
-    if (gcalNote) gcalNote.style.display = connected ? 'none' : 'block';
     if (gcalStatus) gcalStatus.textContent = connected ? '✅' : '';
     if (gcalBtn) { gcalBtn.style.borderColor = connected ? '#27AE60' : ''; gcalBtn.style.color = connected ? '#27AE60' : ''; }
   }
@@ -1538,32 +1531,7 @@ function updateClockUI(in_) {
     if (in_) {
       pill.style.borderColor = _accent;
       pill.querySelector('span').style.color = _accent;
-      // Build a specific duty-type label for the pill
-      var _pillLabel;
-      if (_isClass) {
-        _pillLabel = 'CLOCKED IN — CLASS / TRAINING';
-      } else if (!_sess) {
-        _pillLabel = 'CLOCKED IN — SESSION ACTIVE';
-      } else if (_sess.activity === 'meeting' || _sess.activity === 'boardmeeting') {
-        _pillLabel = 'CLOCKED IN — MEETING';
-      } else if (_sess.activity === 'emergency') {
-        _pillLabel = 'CLOCKED IN — EMERGENCY RESPONSE';
-      } else if (_sess.activity === 'drill') {
-        _pillLabel = 'CLOCKED IN — DRILL';
-      } else if (_sess.activity === 'training') {
-        _pillLabel = 'CLOCKED IN — FORMAL TRAINING';
-      } else if (_sess.activity === 'fundraiser' || _sess.activity === 'event' || _sess.eventId) {
-        _pillLabel = 'CLOCKED IN — SPECIAL EVENT';
-      } else if (_sess.activity === 'collateral' || _sess.activity === 'duties') {
-        _pillLabel = 'CLOCKED IN — COLLATERAL DUTY';
-      } else if (_sess.activity === 'duty' || _sess.shiftId) {
-        _pillLabel = 'CLOCKED IN — STATION DUTY';
-      } else if (_sess.mtgId) {
-        _pillLabel = 'CLOCKED IN — MEETING';
-      } else {
-        _pillLabel = 'CLOCKED IN — SESSION ACTIVE';
-      }
-      pill.querySelector('span').textContent = _pillLabel;
+      pill.querySelector('span').textContent = _isClass ? 'CLASS IN SESSION' : 'CLOCKED IN — SESSION ACTIVE';
     }
   }
   if (nameEl) {
@@ -1605,12 +1573,7 @@ function updateClockUI(in_) {
       } else if (_sess.activity==='fundraiser') {
         _bc=ACT_COLORS.fundraiser;_bl='SPECIAL EVENT';_bt=_sess.desc||'Event';_bs='';
       } else if (_sess.activity==='duties'||_sess.activity==='collateral'||_sess.activity==='duty') {
-        _bc=ACT_COLORS.duties;_bl='COLLATERAL DUTY';
-        _bt=_sess.desc||'On Duty';_bs='';
-      } else if (_sess.activity==='event'||_sess.eventId) {
-        var _evRec=(state.specialEvents||[]).find(function(e){return e.id===(_sess.eventId||_sess.id);});
-        _bc=ACT_COLORS.fundraiser||'#1ABC9C';_bl='SPECIAL EVENT';
-        _bt=(_evRec&&_evRec.title)||_sess.notes||_sess.desc||'Event';_bs=(_evRec&&_evRec.location)||'';
+        _bc=ACT_COLORS.duties;_bl='STANDBY / COLLATERAL DUTY';_bt=_sess.desc||'On Duty';_bs='';
       } else {
         var _td=localDateStr();
         var _ms=(state.staffingShifts||[]).find(function(s){return s.date===_td&&s.memberId===state.currentUserId&&s.unitId;});
@@ -4469,7 +4432,7 @@ function renderAdminRoster() {
   if (roster.length===0) { tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:#666;">No members found.</td></tr>'; return; }
   roster.forEach(function(m) {
     var isActive=m.active!==false;
-    var isClockedIn=!!(state.currentUserId===m.id&&_getActiveClockedInSession(m.id));
+    var isClockedIn=!!(state.currentUserId===m.id&&state.currentSession);
     var positions = m.losapPositions||[];
     if (positions.length===0&&m.losapPosition) positions=[m.losapPosition];
     var tr=document.createElement('tr');
@@ -4479,16 +4442,7 @@ function renderAdminRoster() {
       '<td style="padding:8px;color:#888;font-size:12px;">'+(m.memberId?'50-'+m.memberId:'—')+'</td>'+
       '<td style="padding:8px;"><span class="pill '+(m.appRole==='admin'?'red':m.appRole==='officer'?'blue':'gray')+'" style="font-size:11px;">'+m.appRole+'</span></td>'+
       '<td style="padding:8px;font-size:11px;color:#AAA;">'+(positions.join(', ')||'—')+(m.rideReport==='ineligible'?' <span style="color:#E74C3C;font-size:10px;font-weight:700;">🚫INELIGIBLE</span>':(m.rideReport==='eligible'?' <span style="color:#27AE60;font-size:10px;">✅</span>':''))+'</td>'+
-      (function(){
-        var _cSess=_getActiveClockedInSession(m.id),_cLbl='';
-        if(_cSess){
-          if(_cSess.eventId){var _e=(state.specialEvents||[]).find(function(e){return e.id===_cSess.eventId;});_cLbl=_e?_e.title:'Event';}
-          else if(_cSess.mtgId){_cLbl=_cSess.desc||_cSess.notes||'Meeting';}
-          else if(_cSess.shiftId){var _sh=(state.staffingShifts||[]).find(function(s){return s.id===_cSess.shiftId;});_cLbl=_sh?(_sh.unitId||'').toUpperCase():'Shift';}
-          else{_cLbl=_cSess.desc||_cSess.type||_cSess.activity||'Duty';}
-        }
-        return '<td style="padding:8px;text-align:center;">'+(isClockedIn?'<span class="pill green" style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle;">🟢 '+(_cLbl||'In')+'</span>':'<span style="color:#555;font-size:12px;">—</span>')+'</td>';
-      }())+
+      '<td style="padding:8px;text-align:center;">'+(isClockedIn?'<span class="pill green" style="font-size:11px;">🟢 In</span>':'<span style="color:#555;font-size:12px;">—</span>')+'</td>'+
       '<td style="padding:8px;text-align:center;font-size:12px;color:#666;">'+(m.pin?'••••':'<span style="color:#E74C3C;font-weight:700;">⚠ No PIN</span>')+'</td>'+
       '<td style="padding:8px;white-space:nowrap;">'+
         '<button class="btn btn-sm btn-secondary" onclick="editMemberAdmin(\''+m.id+'\')">✏️ Edit</button> '+
@@ -4505,28 +4459,10 @@ function renderClockedInPanel() {
   if (active.length===0) { panel.innerHTML='<p style="color:#666;font-size:13px;text-align:center;padding:16px;">No members added yet.</p>'; return; }
   var in_=[], out_=[];
   active.forEach(function(m) {
-    var _activeSess = _getActiveClockedInSession(m.id);
-    if (_activeSess) {
-      var _sessStart = typeof _activeSess.start === 'number' ? _activeSess.start : new Date(_activeSess.start).getTime();
-      var el=Date.now()-_sessStart;
+    if (state.currentUserId===m.id&&state.currentSession) {
+      var el=Date.now()-state.currentSession.start;
       var h=Math.floor(el/3600000), min=Math.floor((el%3600000)/60000);
-      var _type;
-      if (_activeSess.eventId) {
-        var _ev2 = (state.specialEvents||[]).find(function(e){return e.id===_activeSess.eventId;});
-        _type = 'Event' + (_ev2 && _ev2.title ? ': ' + _ev2.title : '');
-      } else if (_activeSess.mtgId) {
-        var _mt2 = _activeSess.desc || _activeSess.notes;
-        _type = 'Meeting' + (_mt2 ? ': ' + _mt2 : '');
-      } else if (_activeSess.shiftId) {
-        var _sh2 = (state.staffingShifts||[]).find(function(s){return s.id===_activeSess.shiftId;});
-        _type = 'Staffing' + (_sh2 && _sh2.unitId ? ': ' + (_sh2.unitId||'').toUpperCase() : '');
-      } else if (_activeSess.activity === 'collateral' || _activeSess.activity === 'duties' || _activeSess.activity === 'duty') {
-        _type = 'Collateral Duty' + (_activeSess.desc ? ': ' + _activeSess.desc : '');
-      } else {
-        _type = _activeSess.type || _activeSess.activity || 'Duty';
-        if (_activeSess.desc) _type += ': ' + _activeSess.desc;
-      }
-      in_.push({m:m,display:h+'h '+min+'m',type:_type});
+      in_.push({m:m,display:h+'h '+min+'m',type:state.currentSession.type||'Duty'});
     } else { out_.push(m); }
   });
   var html='';
@@ -5190,16 +5126,9 @@ function showToast(msg) {
   var tm=document.getElementById('toastMsg');
   if (!t||!tm) return;
   tm.textContent=msg;
-  // Slide up from bottom
-  t.style.opacity='1';
-  t.style.transform='translateX(-50%) translateY(0)';
-  t.style.pointerEvents='auto';
+  t.style.opacity='1'; t.style.transform='translateX(-50%) translateY(0)'; t.style.pointerEvents='auto';
   if (toastTimeout) clearTimeout(toastTimeout);
-  toastTimeout=setTimeout(function(){
-    t.style.opacity='0';
-    t.style.transform='translateX(-50%) translateY(40px)'; // slide back down
-    t.style.pointerEvents='none';
-  }, 4500);
+  toastTimeout=setTimeout(function(){ t.style.opacity='0'; t.style.transform='translateX(-50%) translateY(30px)'; t.style.pointerEvents='none'; },4000);
 }
 
 // ═══════════════════════════════════════════════════
@@ -5675,13 +5604,13 @@ function renderDrillReportHistory() {
 function showSubmitConfirmation(msg, iconStr) {
   var icon = iconStr || '✅';
   var banner = document.createElement('div');
-  banner.style.cssText = 'position:fixed;bottom:calc(var(--bottom-nav-h,68px) + env(safe-area-inset-bottom,0px) + 80px);left:50%;transform:translateX(-50%);z-index:9999;'
-    + 'background:#0D1F0D;border:1.5px solid #27AE60;border-radius:14px;padding:16px 22px;'
-    + 'display:flex;align-items:center;gap:12px;max-width:90vw;width:auto;max-width:400px;'
-    + 'box-shadow:0 4px 24px rgba(39,174,96,0.35);animation:slideUp .25s ease;';
-  banner.innerHTML = '<span style="font-size:24px;">'+icon+'</span>'
-    + '<div><div style="font-size:15px;font-weight:700;color:#27AE60;">Submitted</div>'
-    + '<div style="font-size:14px;color:#CCC;margin-top:2px;">'+msg+'</div></div>';
+  banner.style.cssText = 'position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:9999;'
+    + 'background:#0D1F0D;border:1.5px solid #27AE60;border-radius:12px;padding:14px 20px;'
+    + 'display:flex;align-items:center;gap:10px;max-width:340px;width:90%;'
+    + 'box-shadow:0 4px 20px rgba(39,174,96,0.3);animation:slideDown .25s ease;';
+  banner.innerHTML = '<span style="font-size:20px;">'+icon+'</span>'
+    + '<div><div style="font-size:13px;font-weight:700;color:#27AE60;">Submitted</div>'
+    + '<div style="font-size:12px;color:#AAA;margin-top:1px;">'+msg+'</div></div>';
   document.body.appendChild(banner);
   setTimeout(function(){ banner.style.opacity='0'; banner.style.transition='opacity .4s'; 
     setTimeout(function(){ if(banner.parentNode) banner.parentNode.removeChild(banner); }, 400); }, 3000);
@@ -7069,7 +6998,6 @@ function renderStaffingBoard() {
     // Units always staff independently — no combined crew
     html += '<span style="font-size:18px;font-weight:700;letter-spacing:1.5px;color:#F0F0F0;">'+UNIT_LABELS[unitId]+'</span>';
     html += '<span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;background:'+bgStatus+';color:'+statusColor+';">'+statusText+'</span>';
-    if (isOfficer && date === _ld) html += '<button onclick="clockInAllUnit(\''+unitId+'\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;font-weight:700;white-space:nowrap;">⚡ Clock All In</button>';
     html += '</div>';
 
     // ── Position rows helper (shared for primary and linked units) ──
@@ -7459,7 +7387,7 @@ function closeSignUpModal() {
 //  No server required. Members authorize once; all signups push silently.
 // ═══════════════════════════════════════════════════════════════════════════
 
-var _GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar';
+var _GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 var _GCAL_TOKEN_KEY = 'rbvfc_gcal_token';
 var _GCAL_EXPIRY_KEY = 'rbvfc_gcal_expiry';
 var _GCAL_VERIFIER_KEY = 'rbvfc_gcal_verifier';
@@ -7520,10 +7448,6 @@ async function gcalConnect() {
     showToast('⚠️ Google Calendar Client ID not configured. Ask your admin.');
     return;
   }
-  // Clear existing tokens so we get the updated scope (calendar vs calendar.events)
-  // This ensures existing users re-authorize with the broader scope
-  _gcalClearToken();
-  try { localStorage.removeItem('rbvfc_gcal_refresh'); } catch(e){}
   var verifier = _gcalRandomString(64);
   try { localStorage.setItem(_GCAL_VERIFIER_KEY, verifier); } catch(e) {}
   var challenge = await _gcalCodeChallenge(verifier);
@@ -7537,8 +7461,7 @@ async function gcalConnect() {
     prompt: 'consent',
     code_challenge: challenge,
     code_challenge_method: 'S256',
-    state: 'gcal_oauth',
-    hd: 'rbvfc13.com'
+    state: 'gcal_oauth'
   });
   window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
 }
@@ -7567,7 +7490,7 @@ async function _gcalHandleCallback(code) {
       try { localStorage.setItem('rbvfc_gcal_refresh', data.refresh_token); } catch(e) {}
     }
     try { localStorage.removeItem(_GCAL_VERIFIER_KEY); } catch(e) {}
-    showToast('✅ Google Calendar connected! Future signups will appear on your @rbvfc13.com calendar.');
+    showToast('✅ Google Calendar connected! Future signups will appear automatically.');
     renderGcalStatus();
     // Clean URL
     window.history.replaceState({}, document.title, window.location.pathname);
@@ -7608,73 +7531,12 @@ async function _gcalGetValidToken() {
 
 function gcalDisconnect() {
   _gcalClearToken();
-  try { localStorage.removeItem('rbvfc_gcal_refresh'); } catch(e){}
-  state.gcalCalendarId = '';
-  save();
   try { localStorage.removeItem('rbvfc_gcal_refresh'); } catch(e) {}
   showToast('📅 Google Calendar disconnected.');
   renderGcalStatus();
 }
 
 // ── Create / Delete calendar events ──────────────────────────────────────
-
-
-// ── DEDICATED CALENDAR ───────────────────────────────────────────────────
-// Gets or creates the "LOSAP Portal" calendar — keeps portal events
-// separate from the member's main calendar so they can toggle it on/off.
-
-async function _gcalGetOrCreateCalendar() {
-  // Return cached calendar ID if we have it
-  if (state.gcalCalendarId) return state.gcalCalendarId;
-
-  var token = await _gcalGetValidToken();
-  if (!token) return 'primary';
-
-  try {
-    // Check if calendar already exists in their calendar list
-    var listResp = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
-      headers: { 'Authorization': 'Bearer ' + token }
-    });
-    var listData = await listResp.json();
-    var existing = (listData.items || []).find(function(cal) {
-      return cal.summary === 'LOSAP Portal';
-    });
-    if (existing) {
-      state.gcalCalendarId = existing.id;
-      save();
-      return existing.id;
-    }
-
-    // Create a new calendar
-    var createResp = await fetch('https://www.googleapis.com/calendar/v3/calendars', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        summary: 'LOSAP Portal',
-        description: 'Shifts, meetings, and events from the Riviera Beach Volunteer Fire Company Co.13 Member Portal',
-        timeZone: 'America/New_York'
-      })
-    });
-    var createData = await createResp.json();
-    if (createData.id) {
-      // Set a distinctive red color for the calendar
-      await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList/' + encodeURIComponent(createData.id), {
-        method: 'PATCH',
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ colorId: '11' }) // red/tomato
-      }).catch(function(){});
-
-      state.gcalCalendarId = createData.id;
-      save();
-      console.log('[RBVFC] Created dedicated calendar:', createData.id);
-      return createData.id;
-    }
-  } catch(e) {
-    console.warn('[RBVFC] Could not create dedicated calendar, using primary:', e);
-  }
-
-  return 'primary'; // fallback
-}
 
 async function _gcalCreateEvent(details) {
   // details: { title, startISO, endISO, description, location }
@@ -7692,8 +7554,7 @@ async function _gcalCreateEvent(details) {
     ]}
   };
   try {
-    var _calId = await _gcalGetOrCreateCalendar();
-    var resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(_calId) + '/events', {
+    var resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -7708,8 +7569,7 @@ async function _gcalDeleteEvent(gcalEventId) {
   var token = await _gcalGetValidToken();
   if (!token) return;
   try {
-    var _delCalId = state.gcalCalendarId || 'primary';
-    await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(_delCalId) + '/events/' + encodeURIComponent(gcalEventId), {
+    await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + encodeURIComponent(gcalEventId), {
       method: 'DELETE',
       headers: { 'Authorization': 'Bearer ' + token }
     });
@@ -7720,30 +7580,15 @@ async function _gcalDeleteEvent(gcalEventId) {
 
 function _gcalShiftISO(date, startHHMM, hours) {
   // date: 'YYYY-MM-DD', startHHMM: '0700' or '07:00', hours: number
-  var hhmm = String(startHHMM || '0700').replace(':','').replace(/[^0-9]/g,'');
-  var hh = parseInt(hhmm.slice(0,2) || '7') || 0;
-  var mm = parseInt(hhmm.slice(2,4) || '0') || 0;
-  if (isNaN(hh) || hh < 0 || hh > 23) hh = 7;
-  if (isNaN(mm) || mm < 0 || mm > 59) mm = 0;
-  // Build RFC3339 string directly using local time — avoids UTC conversion bugs
-  // Google Calendar API accepts YYYY-MM-DDTHH:MM:SS-05:00 format
-  var hhStr = String(hh).padStart(2,'0');
-  var mmStr = String(mm).padStart(2,'0');
-  var startISO = date + 'T' + hhStr + ':' + mmStr + ':00-05:00';
-  // Compute end by adding hours in minutes
-  var totalMins = hh * 60 + mm + Math.round((hours || 12) * 60);
-  var endHH = Math.floor(totalMins / 60) % 24;
-  var endMM = totalMins % 60;
-  // Handle multi-day shifts — just cap end at same day + 23:59
-  var endDate = date;
-  if (Math.floor(totalMins / 60) >= 24) {
-    // Shift goes past midnight — use next day
-    var d = new Date(date + 'T12:00:00');
-    d.setDate(d.getDate() + 1);
-    endDate = d.toISOString().slice(0,10);
-  }
-  var endISO = endDate + 'T' + String(endHH).padStart(2,'0') + ':' + String(endMM).padStart(2,'0') + ':00-05:00';
-  return { startISO: startISO, endISO: endISO };
+  var hhmm = String(startHHMM).replace(':','');
+  var hh = parseInt(hhmm.slice(0,2)||'7');
+  var mm = parseInt(hhmm.slice(2,4)||'0');
+  var start = new Date(date + 'T' + String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0') + ':00');
+  var end = new Date(start.getTime() + (hours || 12) * 3600000);
+  return {
+    startISO: start.toISOString().replace('Z', '-05:00').slice(0, 22) + ':00',
+    endISO:   end.toISOString().replace('Z', '-05:00').slice(0, 22) + ':00'
+  };
 }
 
 // ── Public push functions ─────────────────────────────────────────────────
@@ -7827,69 +7672,6 @@ async function gcalPushClass(cls) {
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────
-
-
-// ── BULK GCAL SYNC ────────────────────────────────────────────────────────
-// Pushes all past/future signups, meetings, and shifts to Google Calendar
-async function gcalSyncAll() {
-  if (!gcalIsConnected()) {
-    showToast('⚠️ Connect Google Calendar first (Settings → Google Calendar).');
-    return;
-  }
-  var uid = state.currentUserId;
-  if (!uid) { showToast('⚠️ Log in first.'); return; }
-
-  var pushed = 0, skipped = 0, failed = 0;
-
-  // Ensure calendar exists first (creates it if needed)
-  showToast('⏳ Setting up RBVFC Co.13 calendar and syncing...');
-  await _gcalGetOrCreateCalendar();
-
-  // ── 1. Special Events signed up for ──
-  for (var i = 0; i < (state.specialEvents||[]).length; i++) {
-    var ev = state.specialEvents[i];
-    var signup = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
-    if (!signup) continue;
-    if (signup._gcalEventId) { skipped++; continue; } // already synced
-    try {
-      var id = await gcalPushEvent(ev);
-      if (id) { signup._gcalEventId = id; pushed++; }
-      else failed++;
-    } catch(e) { failed++; }
-  }
-
-  // ── 2. Meetings signed up for ──
-  for (var j = 0; j < (state.meetingAttendance||[]).length; j++) {
-    var att = state.meetingAttendance[j];
-    if (att.memberId !== uid) continue;
-    if (att._gcalEventId) { skipped++; continue; } // already synced
-    var mtg = (state.meetings||[]).find(function(m){ return m.id===att.mtgId; });
-    if (!mtg) continue;
-    try {
-      var mid = await gcalPushMeeting(mtg, att.date);
-      if (mid) { att._gcalEventId = mid; pushed++; }
-      else failed++;
-    } catch(e) { failed++; }
-  }
-
-  // ── 3. Staffing shifts assigned to me ──
-  for (var k = 0; k < (state.staffingShifts||[]).length; k++) {
-    var shift = state.staffingShifts[k];
-    if (shift.memberId !== uid) continue;
-    if (shift._gcalEventId) { skipped++; continue; } // already synced
-    try {
-      var sid = await gcalPushShift(shift);
-      if (sid) { shift._gcalEventId = sid; pushed++; }
-      else failed++;
-    } catch(e) { failed++; }
-  }
-
-  save();
-  var msg = '✅ Google Calendar sync complete — ' + pushed + ' added';
-  if (skipped) msg += ', ' + skipped + ' already synced';
-  if (failed) msg += ', ' + failed + ' failed';
-  showToast(msg);
-}
 
 function renderGcalStatus() {
   var els = document.querySelectorAll('.gcal-status-text');
@@ -9875,17 +9657,17 @@ function _showTopBanner(id, bgColor, accentColor, icon, title, body, buttons) {
     document.body.appendChild(el);
   }
   var btnHtml = buttons.map(function(b){
-    return '<button onclick="'+b.fn+'" style="flex-shrink:0;background:'+b.bg+';color:'+b.color+';border:1px solid '+b.border+';padding:10px 18px;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap;letter-spacing:.3px;line-height:1.2;">'+b.label+'</button>';
+    return '<button onclick="'+b.fn+'" style="flex-shrink:0;background:'+b.bg+';color:'+b.color+';border:1px solid '+b.border+';padding:8px 14px;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;letter-spacing:.3px;line-height:1.2;">'+b.label+'</button>';
   }).join('');
-  el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:'+bgColor+';border-bottom:3px solid '+accentColor+';color:#F0F0F0;padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top, 0px));box-shadow:0 4px 24px rgba(0,0,0,.7);box-sizing:border-box;';
+  el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:'+bgColor+';border-bottom:3px solid '+accentColor+';color:#F0F0F0;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top, 0px));box-shadow:0 4px 24px rgba(0,0,0,.7);box-sizing:border-box;';
   el.innerHTML =
     // Top row: icon + label
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">'
     + '<span style="font-size:18px;flex-shrink:0;line-height:1;">'+icon+'</span>'
-    + '<div style="font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:'+accentColor+';">'+title+'</div>'
+    + '<div style="font-family:Barlow Condensed,sans-serif;font-size:10px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:'+accentColor+';">'+title+'</div>'
     + '</div>'
     // Middle row: body text
-    + '<div style="font-size:15px;font-weight:600;color:#F0F0F0;line-height:1.4;margin-bottom:10px;padding-left:28px;">'+body+'</div>'
+    + '<div style="font-size:13px;font-weight:600;color:#F0F0F0;line-height:1.3;margin-bottom:8px;padding-left:26px;">'+body+'</div>'
     // Bottom row: buttons
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;padding-left:26px;">'+btnHtml+'</div>';
   el.style.display = 'block';
@@ -10417,118 +10199,6 @@ function cancelSpecialEventSignup(elOrId) {
   showToast('Signup cancelled. Calendar event removed.');
 }
 
-
-// ── OFFICER BULK CLOCK-IN FUNCTIONS ──────────────────────────────────────────
-
-function clockInAllSpecialEvent(evId) {
-  if (!canManageSpecialEvents()) { showToast('⚠️ Officers only.'); return; }
-  var ev = (state.specialEvents||[]).find(function(e){ return e.id===evId; });
-  if (!ev) return;
-  var now = new Date();
-  var today = localDateStr();
-  if (ev.date !== today) { showToast('⚠️ Bulk clock-in is only available on the day of the event.'); return; }
-  var signups = (ev.signups||[]).filter(function(s){ return !s.clockedIn && !s.clockedOutAt; });
-  if (!signups.length) { showToast('⚠️ No members to clock in — all are already clocked in or have clocked out.'); return; }
-  var count = 0;
-  signups.forEach(function(s) {
-    s.clockedIn = true;
-    s.clockedInAt = now.toISOString();
-    s._clockedInBy = state.currentUserId;
-    // Set currentSession if this is the logged-in user
-    if (s.memberId === state.currentUserId && (!state.currentSession || state.currentSession.end)) {
-      state.currentSession = {
-        id: 'ev_' + ev.id + '_' + s.memberId,
-        userId: s.memberId,
-        start: now.getTime(),
-        type: 'Event',
-        activity: 'event',
-        notes: ev.title,
-        eventId: ev.id
-      };
-      try { updateClockUI(true); } catch(e) {}
-      try { startClockTimer(); } catch(e) {}
-    }
-    count++;
-  });
-  save();
-  renderBothSpecialEventViews();
-  try { updateClockStats(); } catch(e) {}
-  showToast('✅ Clocked in ' + count + ' member' + (count===1?'':'s') + ' to ' + ev.title + '.');
-}
-
-function clockInAllMeeting(mtgId, occurrenceDate) {
-  if (!canManageSpecialEvents()) { showToast('⚠️ Officers only.'); return; }
-  var mtg = (state.meetings||[]).find(function(m){ return m.id===mtgId; });
-  if (!mtg) return;
-  var now = new Date();
-  var today = localDateStr();
-  if (occurrenceDate !== today) { showToast('⚠️ Bulk clock-in is only available on the day of the meeting.'); return; }
-  if (!Array.isArray(state.meetingAttendance)) state.meetingAttendance = [];
-  // Get all members on the meeting roster (or all active if none specified)
-  var members = (mtg.members && mtg.members.length)
-    ? mtg.members
-    : (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).map(function(m){ return m.id; });
-  var count = 0;
-  members.forEach(function(mid) {
-    // Find or create attendance record
-    var att = state.meetingAttendance.find(function(a){ return a.mtgId===mtgId && a.date===occurrenceDate && a.memberId===mid; });
-    if (!att) {
-      att = { id:'ma_'+Date.now()+'_'+mid, mtgId:mtgId, date:occurrenceDate, memberId:mid,
-               signedUpAt:now.toISOString(), clockedInAt:null, clockedOutAt:null, _clockedInBy:state.currentUserId };
-      state.meetingAttendance.push(att);
-    }
-    if (att.clockedInAt && !att.clockedOutAt) return; // already in
-    att.clockedInAt = now.toISOString();
-    att.clockedOutAt = null;
-    att._clockedInBy = state.currentUserId;
-    // Set currentSession for logged-in user
-    if (mid === state.currentUserId && (!state.currentSession || state.currentSession.end)) {
-      state.currentSession = {
-        id: 'sess_mtg_'+Date.now(), userId: mid, start: now.toISOString(),
-        activity: 'meeting', desc: mtg.title, mtgId: mtgId, mtgDate: occurrenceDate, end: null, duration: null
-      };
-      try { updateClockUI(true); } catch(e) {}
-      try { updateClockStats(); } catch(e) {}
-    }
-    count++;
-  });
-  save();
-  try { renderMeetingsList(); } catch(e) {}
-  try { renderMyShifts(); } catch(e) {}
-  showToast('✅ Clocked in ' + count + ' member' + (count===1?'':'s') + ' to ' + mtg.title + '.');
-}
-
-function clockInAllUnit(unitId) {
-  if (!canManageSpecialEvents()) { showToast('⚠️ Officers only.'); return; }
-  var today = localDateStr();
-  var now = new Date();
-  var shifts = (state.staffingShifts||[]).filter(function(s){
-    return s.unitId === unitId && s.date === today && !s.clockedIn && !s.clockedOutAt;
-  });
-  if (!shifts.length) { showToast('⚠️ No unchecked members on ' + (UNIT_LABELS[unitId]||unitId) + ' today.'); return; }
-  var count = 0;
-  shifts.forEach(function(s) {
-    s.clockedIn = true;
-    s.clockedInAt = now.toISOString();
-    s.status = 'active';
-    s._clockedInBy = state.currentUserId;
-    // Set currentSession for logged-in user
-    if (s.memberId === state.currentUserId && (!state.currentSession || state.currentSession.end)) {
-      state.currentSession = {
-        id: 'sess_'+Date.now(), userId: s.memberId, start: now.toISOString(),
-        activity: 'duty', desc: (UNIT_LABELS[unitId]||unitId), shiftId: s.id, end: null, duration: null
-      };
-      try { updateClockUI(true); } catch(e) {}
-      try { updateClockStats(); } catch(e) {}
-    }
-    count++;
-  });
-  save();
-  try { renderStaffingBoard(); } catch(e) {}
-  try { renderMyShifts(); } catch(e) {}
-  showToast('✅ Clocked in ' + count + ' member' + (count===1?'':'s') + ' on ' + (UNIT_LABELS[unitId]||unitId) + '.');
-}
-
 function clockInSpecialEvent(elOrId) {
   var evId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-ev');
   var uid = state.currentUserId;
@@ -10554,20 +10224,7 @@ function clockInSpecialEvent(elOrId) {
   }
   signup.clockedIn = true;
   signup.clockedInAt = now.toISOString();
-  // Set currentSession so Clock tab and Company tab show clocked-in status
-  state.currentSession = {
-    id: 'ev_' + ev.id + '_' + uid,
-    userId: uid,
-    start: now.getTime(),
-    type: 'Event',
-    activity: 'event',
-    notes: ev.title,
-    eventId: ev.id
-  };
   save(); renderBothSpecialEventViews();
-  try { updateClockUI(true); } catch(e) {}
-  try { updateClockStats(); } catch(e) {}
-  try { startClockTimer(); } catch(e) {}
   showToast('\u26ab\ufe0f Clocked in to '+ev.title+'.');
 }
 
@@ -10605,20 +10262,7 @@ function clockOutSpecialEvent(elOrId) {
     var _evDesc = ev.title + ' — attendance';
     try { _autoAwardLosap(uid, 'fundraiser', _evDate, _evDesc, evId); } catch(e){}
   }
-  // Clear currentSession if it was linked to this event
-  if (state.currentSession && state.currentSession.eventId === evId && state.currentSession.userId === uid) {
-    var _endTime = new Date();
-    var _durSecs = Math.max(0, Math.floor((_endTime - new Date(state.currentSession.start)) / 1000));
-    state.currentSession.end = _endTime.toISOString();
-    state.currentSession.duration = _durSecs;
-    if (!Array.isArray(state.sessions)) state.sessions = [];
-    state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
-    state.currentSession = null;
-    clearInterval(_clockTimerInterval); _clockTimerInterval = null;
-  }
   save(); renderBothSpecialEventViews();
-  try { updateClockUI(false); } catch(e) {}
-  try { updateClockStats(); } catch(e) {}
   showToast('\u23f9 Clocked out of '+ev.title+'. LOSAP point awarded!');
   // Check if this is a drill event — auto-submit drill report when last person clocks out
   try { _checkDrillEventAutoSubmit(evId); } catch(e) {}
@@ -11173,7 +10817,6 @@ function renderMeetingsList() {
       +'<button onclick="openEditMeeting(\''+mtg.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#9998; Edit</button>'
       +(_canAlert?'<button data-mid="'+mtg.id+'" data-mdate="'+sd+'" class="_mtgAlertBtn" style="background:#1A1200;border:1px solid #F5A623;color:#F5A623;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;margin-top:3px;">&#128276; Send Alert</button>':'')
       +'<button onclick="deleteMeeting(\''+mtg.id+'\')" style="background:none;border:1px solid #333;color:#E74C3C;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#128465; Delete</button>'
-      +(isOfficer&&sd===today?'<button onclick="clockInAllMeeting(\''+mtg.id+'\',\''+sd+'\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;white-space:nowrap;">&#9889; Clock All In</button>':'')
       +'</div></div>'
       +(function(){
         // Member sign-up / attendance section
@@ -11332,22 +10975,8 @@ function renderSpecialEventAdmin() {
         +'<div style="background:#111;border-radius:6px;padding:4px 8px;">'+signupRows+'</div>'
       +'</div>'
       +'<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px;">'
-      +(function(){
-          var _uid=state.currentUserId,_mySig=(ev.signups||[]).find(function(s){return s.memberId===_uid;});
-          var _myCi=_mySig&&_mySig.clockedIn&&!_mySig.clockedOutAt,_myDone=_mySig&&!!_mySig.clockedOutAt,_canCi=ev.date===today,btns="";
-          if(!isPast){
-            if(!_mySig) btns+='<button onclick="signUpSpecialEvent(\''+ev.id+'\')" style="background:#0A2A0A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#9995; Sign Up</button>';
-            else if(_myCi) btns+='<button onclick="clockOutSpecialEvent(\''+ev.id+'\')" style="background:#2A0000;border:1px solid #C8102E;color:#C8102E;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#9209; Clock Out</button>';
-            else if(!_myDone&&_canCi) btns+='<button onclick="clockInSpecialEvent(\''+ev.id+'\')" style="background:#0A2A0A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#128994; Clock In</button>';
-            else if(_myDone) btns+='<span style="font-size:10px;color:#27AE60;display:block;padding:2px 0;">✓ Attended</span>';
-            else btns+='<span style="font-size:10px;color:#555;display:block;padding:2px 0;">Day-of only</span>';
-            if(_mySig&&!_myCi&&!_myDone) btns+='<button onclick="cancelSpecialEventSignup(\''+ev.id+'\')" style="background:none;border:1px solid #333;color:#888;cursor:pointer;font-size:10px;padding:3px 6px;border-radius:6px;">&#10005; Cancel</button>';
-            btns+='<button onclick="clockInAllSpecialEvent(\''+ev.id+'\')" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;">&#9889; Clock All In</button>';
-          }
-          return btns;
-        }())
       +'<button onclick="openEditSpecialEvent(\''+ev.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Edit event">&#9998; Edit</button>'
-      +'<button onclick="sendEventAlert(\''+ev.id+'\')" style="background:#1A1A00;border:1px solid #F5A623;color:#F5A623;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Send alert">&#128226; Alert</button>'
+      +'<button onclick="sendEventAlert(\''+ev.id+'\')" style="background:#1A1A00;border:1px solid #F5A623;color:#F5A623;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Send alert to signed-up members">&#128226; Alert</button>'
       +'<button onclick="deleteSpecialEvent(this)" data-ev="'+ev.id+'" style="background:none;border:1px solid #333;color:#C8102E;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Delete event">&#128465; Delete</button>'
       +'</div>'
       +'</div></div>';
@@ -13351,40 +12980,11 @@ function renderCompanyStats() {
   var onTrack      = Object.values(memberPts).filter(function(p){ return p >= 25 && p < 50; }).length;
   var qualPct      = totalMembers ? Math.round((qualified/totalMembers)*100) : 0;
 
-  // Training hours this year — aggregate all sources
-  // Source 1: Approved training submissions
+  // Training hours this year
   var trainingActs = (state.losapActivities||[]).filter(function(a){
     return a.date>=yearStart && a.date<=yearEnd && a.category==='training';
   });
   var totalTrainingHrs = trainingActs.reduce(function(s,a){ return s+(a.hours||0); }, 0);
-
-  // Source 2: Approved training & drill submissions in trainingSubmissions
-  (state.trainingSubmissions||[]).forEach(function(t){
-    if ((t.status==='approved') && t.date>=yearStart && t.date<=yearEnd) {
-      totalTrainingHrs += parseFloat(t.hours||0);
-    }
-  });
-
-  // Source 3: Clock-in sessions with training/drill/class activity
-  (state.sessions||[]).forEach(function(s){
-    var d = (s.start||s.date||'').slice(0,10);
-    if (!d || d<yearStart || d>yearEnd) return;
-    var act = s.activity||'';
-    if (act==='training'||act==='drill'||act==='class') {
-      totalTrainingHrs += s.duration ? s.duration/3600 : (parseFloat(s.hours)||0);
-    }
-  });
-
-  // Source 4: Class attendance (clockedInAt + clockedOutAt)
-  (state.classAttendance||[]).forEach(function(a){
-    if (!a.clockedInAt || !a.clockedOutAt) return;
-    var d = (a.sessionDate||a.clockedInAt||'').slice(0,10);
-    if (!d || d<yearStart || d>yearEnd) return;
-    var dur = (new Date(a.clockedOutAt) - new Date(a.clockedInAt)) / 3600000;
-    if (dur > 0) totalTrainingHrs += dur;
-  });
-
-  totalTrainingHrs = Math.round(totalTrainingHrs * 10) / 10; // 1 decimal
 
   // Drills
   var drills = (state.drills||[]).filter(function(d){ return d.date>=yearStart && d.date<=yearEnd && d.status==='approved'; }).length;
@@ -13424,20 +13024,9 @@ function renderCompanyLOSAP() {
   (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).forEach(function(m){
     var mPts = calcMemberLOSAP(m.id, yr);
     // Count hours from activities this year
-    // Hours from manually logged LOSAP activities
     var mHours = (state.losapActivities||[]).reduce(function(sum, a){
       return (a.memberId===m.id && a.date>=yearStart && a.date<=yearEnd) ? sum+(a.hours||0) : sum;
     }, 0);
-    // Hours from completed clock-in sessions (duration stored in seconds)
-    mHours += (state.sessions||[]).reduce(function(sum, s){
-      if (s.userId !== m.id) return sum;
-      var _date = s.start ? s.start.slice(0,10) : (s.date||'');
-      if (!_date || _date < yearStart || _date > yearEnd) return sum;
-      if (s.duration && s.duration > 0) return sum + (s.duration / 3600);
-      // Fall back to hours field if present
-      return sum + (parseFloat(s.hours)||0);
-    }, 0);
-    mHours = Math.round(mHours * 10) / 10; // round to 1 decimal
     // Count responses this year
     var mResponses = (state.emergencyResponses||[]).filter(function(er){
       return er.date>=yearStart && er.date<=yearEnd && (er.members||[]).indexOf(m.id)>=0;
@@ -16932,12 +16521,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           📅 <span id="mySettingsGcalLabel">Connect Google Calendar</span>
           <span id="mySettingsGcalStatus" style="position:absolute;top:50%;right:14px;transform:translateY(-50%);font-size:11px;"></span>
         </button>
-        <button class="btn btn-full" id="mySettingsGcalSyncBtn" onclick="gcalSyncAll();closeMySettings()" style="margin-top:6px;display:none;background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;">
-          🔄 Sync All Events to Google Calendar
-        </button>
-        <div id="mySettingsGcalNote" style="margin-top:8px;display:none;background:#1A1200;border:1px solid rgba(245,166,35,0.3);border-radius:8px;padding:8px 12px;font-size:11px;color:#F5A623;line-height:1.5;">
-          ⚠️ Use your <strong>@rbvfc13.com</strong> Google account when connecting — not a personal Gmail.
-        </div>
       </div>
 
       <!-- Notifications -->
@@ -17905,7 +17488,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <div class="card">
         <div class="card-header">
           <div class="icon">&#127941;</div>
-          <h2>Company LOSAP Board</h2>
+          <h2>Company LOSAP Leaderboard</h2>
           <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
             <select id="companyYear" onchange="renderCompanyLOSAP()" style="background:#111;border:1px solid #333;color:#F0F0F0;border-radius:6px;padding:4px 8px;font-size:12px;"></select>
           </div>
@@ -18590,8 +18173,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         </div>
         <div id="gcalCard" style="padding:16px;">
           <p style="font-size:12px;color:#666;margin-bottom:12px;">
-            Members connect their <strong style="color:#F5A623;">@rbvfc13.com Google Calendar</strong> once — after that, every shift, meeting, and event they sign up for automatically appears on their calendar without any extra steps.<br><br>
-            <strong>⚠️ Important:</strong> Members must sign in with their <strong>@rbvfc13.com Google account</strong> when prompted. Personal Gmail accounts will not work with this integration.<br><br>
+            Members connect their personal Google Calendar once — after that, every shift, meeting, and event they sign up for automatically appears on their calendar without any extra steps.<br><br>
             Paste the <strong>OAuth 2.0 Client ID</strong> (Web Application type) from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#3498DB;">Google Cloud Console ↗</a>. In the console: APIs &amp; Services → Credentials → Create Credentials → OAuth Client ID → Web Application. Add your portal URL as both an <em>Authorized JavaScript Origin</em> and an <em>Authorized Redirect URI</em>.
           </p>
           <div class="form-group">
@@ -18604,7 +18186,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-secondary btn-sm" onclick="saveGcalClientId()">💾 Save Credentials</button>
-            <button class="btn btn-sm" style="background:#1A1A2A;border:1px solid #3498DB;color:#3498DB;" onclick="gcalSyncAll()">🔄 Sync All Past Events</button>
           </div>
         </div>
       </div>
@@ -18974,7 +18555,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
 
 <!-- Toast notification -->
-<div id="toastNotif" style="display:none;position:fixed;bottom:calc(var(--bottom-nav-h, 68px) + env(safe-area-inset-bottom, 0px) + 16px);left:50%;transform:translateX(-50%);background:#1C1C1C;border:1px solid rgba(255,255,255,0.12);border-radius:16px;padding:16px 24px;font-size:16px;font-weight:600;color:#F0F0F0;z-index:9998;white-space:normal;max-width:90vw;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.75);line-height:1.5;"></div>
+<div id="toastNotif" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1A1A1A;border:1px solid #333;border-radius:10px;padding:12px 20px;font-size:13px;color:#F0F0F0;z-index:3000;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.5);"></div>
 
 <!-- ══ CREATE / EDIT CLASS MODAL ══ -->
 <div id="classModal" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;padding:16px;">
@@ -19072,7 +18653,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 </div>
 
   <!-- Toast notification -->
-  <div id="toast">
+  <div id="toast" style="position:fixed;bottom:100px;left:50%;transform:translateX(-50%) translateY(30px);background:#1E1E1E;border:1px solid #444;border-radius:14px;padding:16px 24px;font-size:17px;font-weight:700;color:#F0F0F0;z-index:9999;opacity:0;transition:opacity 0.3s,transform 0.3s;pointer-events:none;width:88vw;max-width:400px;text-align:center;box-shadow:0 6px 32px rgba(0,0,0,0.8);letter-spacing:0.3px;line-height:1.4;">
     <span id="toastMsg"></span>
   </div>
 
