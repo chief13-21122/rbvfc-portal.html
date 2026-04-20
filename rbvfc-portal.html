@@ -4377,6 +4377,8 @@ function render10yr() {
 //  ADMIN — MEMBER MANAGEMENT
 // ═══════════════════════════════════════════════════
 function saveUserFromAdmin() {
+  // Mark as production data — prevents demo seed from ever running again
+  try { localStorage.setItem('rbvfc_live', '1'); } catch(e) {}
   var editId  = (document.getElementById('umEditId')||{}).value||'';
   var first   = ((document.getElementById('umFirst')||{}).value||'').trim();
   var last    = ((document.getElementById('umLast')||{}).value||'').trim();
@@ -5305,6 +5307,10 @@ function loginSubmit() {
   applyUserSession(m);
 }
 function applyUserSession(m) {
+  // If logging in as a non-demo user, set production lock
+  if (m && m.id && m.id.indexOf('mbr_') !== 0 && m.id !== 'rbvfc_admin_001') {
+    try { localStorage.setItem('rbvfc_live', '1'); } catch(e) {}
+  }
   try { _normalizeSubmissions(); } catch(e) {}
   var hn=document.getElementById('headerName'); if(hn) hn.textContent=m.last+', '+m.first;
   var isOfficer=m.appRole==='officer'||m.appRole==='admin';
@@ -12609,11 +12615,35 @@ function boot() {
     if (saved) Object.assign(state, JSON.parse(saved));
   } catch(e) {}
 
-  // ── DEMO SEED — loads full demo on any fresh browser / device ──
-  // Check for Caruso specifically — handles stale/wiped localStorage too
-  var _adminExists = state.roster && state.roster.some(function(m){ return m.id === 'rbvfc_admin_001'; });
-  if (!state.roster || state.roster.length === 0 || !_adminExists) {
-    state.roster = []; // clear any partial/corrupted roster before re-seeding
+  // ── AUTO-SET PRODUCTION LOCK if real data already exists ──
+  // Protects portals that were running before this fix was deployed.
+  // If any member exists who is NOT a demo seed member, lock immediately.
+  var _demoIds = ['rbvfc_admin_001','mbr_002','mbr_003','mbr_004','mbr_005','mbr_006',
+                  'mbr_007','mbr_008','mbr_009','mbr_010','mbr_011','mbr_012',
+                  'mbr_013','mbr_014','mbr_015','mbr_016','mbr_017','mbr_018'];
+  var _hasRealMember = (state.roster||[]).some(function(m){
+    return _demoIds.indexOf(m.id) === -1;
+  });
+  if (_hasRealMember) {
+    try { localStorage.setItem('rbvfc_live', '1'); } catch(e) {}
+  }
+
+  // ── DEMO SEED — only runs on a genuinely empty/fresh install ──
+  // NEVER seeds if real data exists anywhere.
+  // Production lock: set by any real user action (account creation, real login, etc.)
+  var _productionLock = false;
+  try { _productionLock = localStorage.getItem('rbvfc_live') === '1'; } catch(e) {}
+
+  var _adminExists  = state.roster && state.roster.some(function(m){ return m.id === 'rbvfc_admin_001'; });
+  var _hasRealData  = (state.losapActivities && state.losapActivities.length > 0)
+                   || (state.meetings        && state.meetings.length > 0)
+                   || (state.trainingSubmissions && state.trainingSubmissions.length > 0)
+                   || (state.emergencyResponses  && state.emergencyResponses.length > 20) // demo has ~7, real would differ
+                   || _productionLock;
+
+  // Only seed if: no roster at all AND no real data AND no production lock
+  if (!_productionLock && !_hasRealData && (!state.roster || state.roster.length === 0 || !_adminExists)) {
+    state.roster = []; // safe — only here because we confirmed no real data above
     var _N = Date.now();
     var _ago = function(d,h){ return new Date(_N - d*864e5 - (h||0)*36e5).toISOString(); };
     var _ds  = function(d){   return new Date(_N - d*864e5).toISOString().split('T')[0]; };
@@ -13155,7 +13185,12 @@ function viewAsSelected() {
 function devLogin() {
   var admin = (state.roster||[]).find(function(m){ return m.id === 'rbvfc_admin_001'; });
   if (!admin) {
-    // Roster somehow still empty — force a full reload which will re-seed
+    // Only wipe if no production data exists
+    var _lock = false; try { _lock = localStorage.getItem('rbvfc_live') === '1'; } catch(e) {}
+    if (_lock) {
+      showToast('⚠️ Production data detected — reload manually if needed.');
+      return;
+    }
     localStorage.removeItem('rbvfc');
     showToast('⚠️ Cleared stale data — reloading…');
     setTimeout(function(){ location.reload(); }, 800);
