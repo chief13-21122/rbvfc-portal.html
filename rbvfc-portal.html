@@ -1285,6 +1285,16 @@ function showTab(id) {
   if (id === 'hours') renderHoursLog();
   if (id === 'emergency') initEmergencyTab();
   if (id === 'log-entry') initLogEntryTab();
+  if (id === 'manual-entry') {
+    try { initManualActivityCard(); } catch(e){}
+    // Show access-denied notice for non-officers
+    try {
+      var _meME = (state.roster||[]).find(function(x){ return x.id===state.currentUserId; });
+      var _isOffME = _meME && (_meME.appRole==='officer'||_meME.appRole==='admin');
+      var _denied = document.getElementById('manualEntryDeniedCard');
+      if (_denied) _denied.style.display = _isOffME ? 'none' : 'block';
+    } catch(e){}
+  }
   if (id === 'approvals') initApprovalsTab();
   if (id === 'history') initHistoryTab();
   // Sync collapse icons to current state
@@ -1598,21 +1608,12 @@ function updateClockUI(in_) {
 // ═══════════════════════════════════════════════════
 //  4-HOUR REMINDER
 // ═══════════════════════════════════════════════════
-function formatElapsed(elapsed) {
-  // Accept milliseconds (timestamps like Date.now() differences) or seconds.
-  // Any value >= 1e6 is treated as milliseconds; smaller values as seconds.
-  var seconds = (typeof elapsed === 'number' && isFinite(elapsed)) ? Math.max(0, Math.floor(elapsed >= 1e6 ? elapsed / 1000 : elapsed)) : 0;
-  var h = Math.floor(seconds / 3600);
-  var m = Math.floor((seconds % 3600) / 60);
-  if (h <= 0) return m + 'm';
-  return h + 'h ' + m + 'm';
-}
 function showReminder(elapsed) {
   var o = document.getElementById('reminderOverlay'); if(!o) return;
   var el = document.getElementById('reminderElapsed'); if(el) el.textContent = formatElapsed(elapsed);
   o.style.display = 'flex';
 }
-// clockOutFromReminder is defined later near clockedInReminderBanner — dead duplicate removed.
+function clockOutFromReminder() { _hideTopBanner('clockReminderTopBanner'); toggleClock(); }
 
 // ═══════════════════════════════════════════════════
 //  STATS
@@ -2115,19 +2116,6 @@ function populateEmergencyMemberList() {
   });
 }
 
-function erFilterMembers(q) {
-  var container = document.getElementById('erMemberList');
-  if (!container) return;
-  var needle = String(q || '').trim().toLowerCase();
-  var kids = container.children;
-  for (var i = 0; i < kids.length; i++) {
-    var row = kids[i];
-    if (!needle) { row.style.display = ''; continue; }
-    var txt = (row.textContent || '').toLowerCase();
-    row.style.display = txt.indexOf(needle) >= 0 ? '' : 'none';
-  }
-}
-
 function erSelectAllUnits() {
   UNITS.forEach(function(u){
     var cb = document.getElementById('unit_'+u); if(cb) cb.checked = true;
@@ -2149,7 +2137,7 @@ function erClearAll() {
 
 
 function renderApparatusAdmin() {
-  var grid = document.getElementById('erApparatusGridAdmin');
+  var grid = document.getElementById('erApparatusGrid');
   if (!grid) return;
   var defaults = Array.isArray(state.apparatusDefaults) && state.apparatusDefaults.length
     ? state.apparatusDefaults : getActiveUnits();
@@ -2160,7 +2148,7 @@ function renderApparatusAdmin() {
       var checked = defaults.indexOf(u) > -1;
       var btn = document.createElement('label');
       btn.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;background:#1E1E1E;border:1px solid #333;border-radius:7px;padding:8px 12px;transition:background .15s;user-select:none;';
-      btn.innerHTML = '<input type="checkbox" id="adminUnit_'+u+'" value="'+u+'"'+(checked?' checked':'')+' style="accent-color:#C8102E;width:15px;height:15px;cursor:pointer;flex-shrink:0;">'
+      btn.innerHTML = '<input type="checkbox" id="unit_'+u+'" value="'+u+'"'+(checked?' checked':'')+' style="accent-color:#C8102E;width:15px;height:15px;cursor:pointer;flex-shrink:0;">'
         + '<span style="font-size:13px;font-weight:600;color:#F0F0F0;">'+UNIT_LABELS[u]+'</span>';
       var cb = btn.querySelector('input');
       (function(b,c){function upd(){b.style.background=c.checked?'rgba(200,16,46,0.12)':'#1E1E1E';b.style.borderColor=c.checked?'#C8102E':'#333';}upd();c.addEventListener('change',upd);})(btn,cb);
@@ -2168,25 +2156,25 @@ function renderApparatusAdmin() {
     });
   } else {
     Object.keys(UNIT_LABELS).forEach(function(u) {
-      var cb = document.getElementById('adminUnit_'+u);
+      var cb = document.getElementById('unit_'+u);
       if (cb) cb.checked = defaults.indexOf(u) > -1;
     });
   }
 }
 function saveApparatusDefaults() {
   state.apparatusDefaults = Object.keys(UNIT_LABELS).filter(function(u) {
-    var cb = document.getElementById('adminUnit_'+u); return cb && cb.checked;
+    var cb = document.getElementById('unit_'+u); return cb && cb.checked;
   });
   save(); showToast('✅ Default apparatus saved.');
 }
 function apparatusSelectAll() {
   Object.keys(UNIT_LABELS).forEach(function(u) {
-    var cb=document.getElementById('adminUnit_'+u); if(cb){cb.checked=true;cb.dispatchEvent(new Event('change'));}
+    var cb=document.getElementById('unit_'+u); if(cb){cb.checked=true;cb.dispatchEvent(new Event('change'));}
   });
 }
 function apparatusClearAll() {
   Object.keys(UNIT_LABELS).forEach(function(u) {
-    var cb=document.getElementById('adminUnit_'+u); if(cb){cb.checked=false;cb.dispatchEvent(new Event('change'));}
+    var cb=document.getElementById('unit_'+u); if(cb){cb.checked=false;cb.dispatchEvent(new Event('change'));}
   });
 }
 function getDefaultApparatus() {
@@ -2885,8 +2873,18 @@ function renderHoursLog() {
   if (tf) tf.textContent = totalHrs.toFixed(1)+' hrs';
 }
 
-// renderRecentSessions: dead duplicate (targeted nonexistent #recentSessions) removed during audit.
-// The working version below renders into #recentSessionsContainer.
+function renderRecentSessions() {
+  var uid = state.currentUserId;
+  var container = document.getElementById('recentSessions');
+  if (!container) return;
+  var recent = (state.sessions||[]).filter(function(s){ return s.memberId===uid; }).slice(0,5);
+  if (recent.length===0) { container.innerHTML = '<p style="color:#666;font-size:13px;">No sessions logged yet.</p>'; return; }
+  container.innerHTML = recent.map(function(s){
+    return '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1E1E1E;">'+
+      '<div><div style="font-size:13px;color:#CCC;">'+s.type+'</div><div style="font-size:11px;color:#666;">'+s.date+'</div></div>'+
+      '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;color:#F0F0F0;">'+parseFloat(s.hours||0).toFixed(1)+'h</div></div>';
+  }).join('');
+}
 
 // ═══════════════════════════════════════════════════
 //  TRAINING REVIEW (Officer/Chief view)
@@ -3048,6 +3046,7 @@ function submitTraining() {
 
 function openClassModal(editId) {
   var modal = document.getElementById('classModal');
+  if (!modal) { buildClassModal(); modal = document.getElementById('classModal'); }
   if (!modal) return;
 
   // Reset all form fields
@@ -3163,6 +3162,7 @@ function deleteTrainingClass(classId) {
 function openClassDetailModal(classId) {
   var cls = (state.trainingClasses||[]).find(function(c){ return c.id===classId; });
   var modal = document.getElementById('classDetailModal');
+  if (!modal) { buildClassDetailModal(); modal = document.getElementById('classDetailModal'); }
   if (!modal || !cls) return;
 
   var body = document.getElementById('classDetailBody');
@@ -3341,12 +3341,48 @@ function enrollInClass(classId) {
   showToast('\u2705 Enrolled in '+cls.name);
 }
 
-// buildClassModal / buildClassDetailModal removed during audit:
-// Static HTML in the admin section already defines #classModal and #classDetailModal
-// (with all inner ids cmName, cmDesc, cmStartDate, cmEndDate, cmStartTime, cmEndTime,
-// cmInstructor, cmEditId, cmModalTitle, classDetailTitle, classDetailBody).
-// The builders' own guards ensured they never ran, so deleting them is a no-op at runtime
-// and removes the only source of duplicate ids for these two modals.
+function buildClassModal() {
+  if (document.getElementById('classModal')) return;
+  var m = document.createElement('div');
+  m.id = 'classModal';
+  m.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center;padding:20px;';
+  m.innerHTML = '<div style="background:#1A1A1A;border:1px solid #333;border-radius:14px;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">'
+    + '<h2 id="cmModalTitle" style="margin:0;font-size:16px;color:#F0F0F0;">Create Training Class</h2>'
+    + '<button onclick="closeClassModal()" style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;">&#10005;</button>'
+    + '</div>'
+    + '<input type="hidden" id="cmEditId">'
+    + '<div class="form-group"><label>Class Name *</label><input type="text" id="cmName" placeholder="e.g. Firefighter I Operations"></div>'
+    + '<div class="form-group"><label>Description</label><textarea id="cmDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;" placeholder="Class overview…"></textarea></div>'
+    + '<div class="form-group"><label>Instructor</label><input type="text" id="cmInstructor" placeholder="e.g. Chief Smith"></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
+    + '<div class="form-group"><label>Start Date *</label><input type="date" id="cmStartDate"></div>'
+    + '<div class="form-group"><label>End Date</label><input type="date" id="cmEndDate"></div>'
+    + '<div class="form-group"><label>Start Time</label><input type="time" id="cmStartTime"></div>'
+    + '<div class="form-group"><label>End Time</label><input type="time" id="cmEndTime"></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;margin-top:8px;">'
+    + '<button class="btn btn-primary btn-full" onclick="saveTrainingClass()">&#128190; Save Class</button>'
+    + '<button class="btn btn-secondary" onclick="closeClassModal()">Cancel</button>'
+    + '</div>'
+    + '</div>';
+  document.body.appendChild(m);
+}
+
+function buildClassDetailModal() {
+  if (document.getElementById('classDetailModal')) return;
+  var m = document.createElement('div');
+  m.id = 'classDetailModal';
+  m.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center;padding:20px;';
+  m.innerHTML = '<div style="background:#1A1A1A;border:1px solid #333;border-radius:14px;padding:20px;width:100%;max-width:440px;max-height:80vh;overflow-y:auto;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'
+    + '<h2 id="classDetailTitle" style="margin:0;font-size:16px;color:#F0F0F0;"></h2>'
+    + '<button onclick="closeClassDetailModal()" style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;">&#10005;</button>'
+    + '</div>'
+    + '<div id="classDetailBody"></div>'
+    + '</div>';
+  document.body.appendChild(m);
+}
 
 
 
@@ -3382,9 +3418,11 @@ function initTrainingTab() {
   // Populate drill form fields for officers
   var ddEl = document.getElementById('drillDate');
   if (ddEl && !ddEl.value) ddEl.value = new Date().toISOString().slice(0,10);
-  // Reset hours input to 2 each time Training tab opens
-  var dhEl = document.getElementById('drillReportHours');
+  // Reset hours stepper to 2 each time Training tab opens
+  var dhEl = document.getElementById('drillHours');
+  var dhDisp = document.getElementById('drillHoursDisplay');
   if (dhEl) dhEl.value = '2';
+  if (dhDisp) dhDisp.textContent = '2';
   if (isOfficer) {
     try { populateDrillReportBy(); try { populateDrillPIC(); } catch(e){} }   catch(e){}
     try { populateDrillMemberList(); } catch(e){}
@@ -4534,6 +4572,7 @@ function onAdminTabShow() {
     'staffingUnitsCard',         // Staffing Unit Visibility
     'notificationsCard',         // Push Notifications
     'monthlyEmailCard',          // Monthly LOSAP Reports
+    'gcalAdminCard',             // Google Calendar Integration
   ];
   _adminOnly.forEach(function(cardId) {
     var el = document.getElementById(cardId);
@@ -5151,6 +5190,7 @@ function applyUserSession(m) {
   var hn=document.getElementById('headerName'); if(hn) hn.textContent=m.last+', '+m.first;
   var isOfficer=m.appRole==='officer'||m.appRole==='admin';
   var mab=document.getElementById('moreAdminBtn'); if(mab) mab.style.display=isOfficer?'block':'none';
+  var mmeb=document.getElementById('moreManualEntryBtn'); if(mmeb) mmeb.style.display=isOfficer?'block':'none';
   var mapb=document.getElementById('moreApprovalsBtn'); if(mapb) mapb.style.display=isOfficer?'block':'none';
   var ahb=document.getElementById('adminHeaderBtn'); if(ahb) ahb.style.display='inline-flex'; // gear shows for all members
   var sub=document.getElementById('switchUserBtn');
@@ -5373,7 +5413,8 @@ function loadDrillFromSchedule(scheduledId) {
     }
     drillTypeChanged && drillTypeChanged();
   }
-  var he = document.getElementById('drillReportHours'); if(he) he.value=d.hours||2;
+  var he = document.getElementById('drillHours'); if(he) he.value=d.hours||2;
+  var hd = document.getElementById('drillHoursDisplay'); if(hd) hd.textContent=d.hours||2;
   var le = document.getElementById('drillLocation'); if(le) le.value=d.location||'';
   var ne = document.getElementById('drillNotes'); if(ne) ne.value=d.notes||'';
   var sid = document.getElementById('drillScheduledId'); if(sid) sid.value=scheduledId;
@@ -5413,7 +5454,8 @@ function editDrillReport(reportId) {
     }
     drillTypeChanged && drillTypeChanged();
   }
-  var he = document.getElementById('drillReportHours'); if(he) he.value=r.hours||2;
+  var he = document.getElementById('drillHours'); if(he) he.value=r.hours||2;
+  var hd = document.getElementById('drillHoursDisplay'); if(hd) hd.textContent=r.hours||2;
   var le = document.getElementById('drillLocation'); if(le) le.value=r.location||'';
   var ne = document.getElementById('drillNotes'); if(ne) ne.value=r.notes||'';
   var eid = document.getElementById('drillEditId'); if(eid) eid.value=reportId;
@@ -5659,11 +5701,11 @@ function saveDrillReport() {
   }
   console.log('[DRILL] type:', JSON.stringify(drillTypeVal), 'idx:', _drillTypeEl ? _drillTypeEl.selectedIndex : -1, 'method1:', _drillTypeEl ? JSON.stringify(_drillTypeEl.value) : 'n/a');
   // Blur hours field first to commit any in-progress mobile keyboard input
-  // Training tab uses visible #drillReportHours (Log Entry tab has its own stepper with #drillHours)
-  var _hoursEl = document.getElementById('drillReportHours');
+  // Hours is stored in a hidden input managed by adjustDrillHours() stepper
+  var _hoursEl = document.getElementById('drillHours');
   var hours = _hoursEl ? (parseFloat(_hoursEl.value) || 0) : 0;
   if (isNaN(hours) || hours < 0) hours = 0;
-  console.log('[DRILL] hours:', hours, 'from input value:', _hoursEl ? _hoursEl.value : 'MISSING');
+  console.log('[DRILL] hours:', hours, 'from hidden input value:', _hoursEl ? _hoursEl.value : 'MISSING');
   var location     = ((document.getElementById('drillLocation')||{}).value||'').trim();
   var notes        = ((document.getElementById('drillNotes')||{}).value||'').trim();
 
@@ -5849,7 +5891,8 @@ function clearDrillForm() {
   if (drillDate) drillDate.value = localDateStr();
   var drillType = document.getElementById('drillType'); if(drillType) drillType.value='';
   var drillCode = document.getElementById('drillCodeDisplay'); if(drillCode) drillCode.value='';
-  var drillHours = document.getElementById('drillReportHours'); if(drillHours) drillHours.value='2';
+  var drillHours = document.getElementById('drillHours'); if(drillHours) drillHours.value='2';
+  var dhd = document.getElementById('drillHoursDisplay'); if(dhd) dhd.textContent='2';
   var drillLoc = document.getElementById('drillLocation'); if(drillLoc) drillLoc.value='';
   var drillNotes = document.getElementById('drillNotes'); if(drillNotes) drillNotes.value='';
   // Reset edit/schedule mode
@@ -12580,6 +12623,8 @@ function launchApp(member) {
     }
   }
   if (moreAdminBtn) moreAdminBtn.style.display = isOfficer ? '' : 'none';
+  var moreManualEntryBtn = document.getElementById('moreManualEntryBtn');
+  if (moreManualEntryBtn) moreManualEntryBtn.style.display = isOfficer ? '' : 'none';
   var moreApprBtn = document.getElementById('moreApprovalsBtn');
   if (moreApprBtn) moreApprBtn.style.display = isOfficer ? '' : 'none';
 
@@ -14083,57 +14128,6 @@ function updateClockStats() {
   set('statPoints', pts);
 }
 
-function renderMyClassesToday() {
-  var card = document.getElementById('myClassesTodayCard');
-  var container = document.getElementById('myClassesTodayContainer');
-  if (!container) return;
-  var uid = state.currentUserId;
-  var today = (typeof localDateStr === 'function') ? localDateStr() : new Date().toISOString().slice(0,10);
-
-  // Enrolled, active classes meeting today
-  var myClasses = (state.trainingClasses||[]).filter(function(c){
-    return c.active !== false && (c.members||[]).indexOf(uid) >= 0;
-  });
-  var todaysItems = [];
-  myClasses.forEach(function(cls) {
-    var sessions = [];
-    try { sessions = generateClassSessions(cls) || []; } catch(e) { sessions = []; }
-    if (sessions.indexOf(today) >= 0) todaysItems.push(cls);
-  });
-
-  if (!todaysItems.length) {
-    if (card) card.style.display = 'none';
-    container.innerHTML = '';
-    return;
-  }
-
-  if (card) card.style.display = '';
-  var html = '';
-  todaysItems.forEach(function(cls) {
-    var att = (state.classAttendance||[]).find(function(a){
-      return a.classId===cls.id && a.memberId===uid && a.sessionDate===today;
-    });
-    var isIn = att && att.clockedInAt && !att.clockedOutAt;
-    var isDone = att && att.clockedOutAt;
-    var border = isIn ? '#27AE60' : (isDone ? '#555' : '#F5A623');
-    var timeLbl = (cls.startTime||'') + (cls.endTime ? (' – ' + cls.endTime) : '');
-    var statusLbl = isIn
-      ? '<span style="font-size:11px;color:#27AE60;font-weight:700;">&#10003; Clocked In</span>'
-      : (isDone
-          ? '<span style="font-size:11px;color:#888;">Completed</span>'
-          : '<span style="font-size:11px;color:#F5A623;font-weight:700;">&#9888; Meets today</span>');
-    html += '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#181818;'
-      + 'border:1px solid ' + border + ';border-left:4px solid ' + border + ';border-radius:10px;margin-bottom:8px;flex-wrap:wrap;">'
-      + '<div style="flex:1;min-width:0;">'
-      + '<div style="font-weight:700;font-size:14px;color:#F0F0F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (cls.name||'Training Class') + '</div>'
-      + '<div style="font-size:12px;color:#888;margin-top:2px;">' + (timeLbl || 'Today') + (cls.instructor?(' &nbsp;&middot;&nbsp; '+cls.instructor):'') + '</div>'
-      + '<div style="margin-top:4px;">' + statusLbl + '</div>'
-      + '</div>'
-      + '</div>';
-  });
-  container.innerHTML = html;
-}
-
 function renderRecentSessions() {
   var uid = state.currentUserId;
   var container = document.getElementById('recentSessionsContainer');
@@ -14414,8 +14408,20 @@ function initPublicLinkCard() {
   }
 }
 
-// copyPublicLink defined earlier (robust version that builds URL from window.location.href).
-// Fragile duplicate that read from #publicLinkText element removed during audit.
+function copyPublicLink() {
+  var el = document.getElementById('publicLinkText');
+  if (!el) return;
+  var text = el.textContent;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function() { showToast('✅ Link copied!'); });
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('✅ Link copied!');
+  }
+}
 
 function openPublicView() {
   var base = window.location.href.split('?')[0].split('#')[0];
@@ -17030,7 +17036,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           <div class="form-group">
             <label>Certificate (optional)</label>
             <div class="cert-upload-zone"
-              ondragover="certDragOver(event)" ondragleave="certDragLeave(event)" ondrop="certDrop(event)">
+              ondragover="handleCertDragOver(event)" ondragleave="handleCertDragLeave(event)" ondrop="handleCertDrop(event)">
               <div style="font-size:28px;">📎</div>
               <div style="font-size:13px;color:#888;">Click or drag to upload certificate</div>
               <span style="font-size:11px;color:#666;">PDF, JPG, PNG — max 10MB</span>
@@ -17076,6 +17082,76 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       </div>
 
     </div>
+
+    <!-- ══════════════ MANUAL ACTIVITY ENTRY TAB ══════════════ -->
+    <div id="section-manual-entry" class="section">
+
+      <!-- Officer Manual Activity Entry -->
+      <div class="card" id="manualActivityCard" style="display:none;">
+        <div class="card-header" onclick="toggleAdminCardById('manualActivityBody')" style="cursor:pointer;user-select:none;">
+          <div class="icon">✏️</div>
+          <h2>Manual Activity Entry</h2>
+          <span style="font-size:11px;color:#555;margin-left:8px;">Officers &amp; Admin</span>
+          <span id="manualActivityChevron" style="margin-left:auto;font-size:13px;color:#555;transition:transform .2s;display:inline-block;">&#9660;</span>
+        </div>
+        <div id="manualActivityBody">
+          <!-- Logged By Banner -->
+          <div style="display:flex;align-items:center;gap:10px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+            <span style="font-size:18px;">🔒</span>
+            <div>
+              <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Entry Recorded By</div>
+              <div id="manualEntryByName" style="font-size:14px;font-weight:700;color:#27AE60;"></div>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1;">
+              <label>Member *</label>
+              <select id="manualMemberId" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+                <option value="">— Select member —</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Activity Type *</label>
+              <select id="manualCategory" onchange="manualCategoryChanged()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+                <option value="">— Select type —</option>
+                <option value="meeting">Company Meeting</option>
+                <option value="boardmeeting">Board Meeting</option>
+                <option value="duties">Standby / Collateral Duty</option>
+                <option value="training">Training</option>
+                <option value="drill">Drill / In-House Training</option>
+                <option value="fundraiser">Fundraiser / Special Event</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Date *</label>
+              <input type="date" id="manualDate">
+            </div>
+            <div class="form-group" id="manualHoursGroup">
+              <label>Hours <span id="manualHoursHint" style="color:#666;font-size:10px;"></span></label>
+              <input type="number" id="manualHours" min="0.5" step="0.5" placeholder="e.g. 2">
+            </div>
+            <div class="form-group" style="grid-column:1/-1;">
+              <label>Description / Notes *</label>
+              <input type="text" id="manualDesc" placeholder="e.g. Monthly Company Meeting, Station coverage 1800-0600…">
+            </div>
+          </div>
+          <button class="btn btn-primary btn-full" onclick="saveManualActivity()" style="margin-top:4px;">✅ Record Activity</button>
+          <!-- Recent manual entries -->
+          <div id="manualRecentEntries" style="margin-top:14px;"></div>
+        </div>
+      </div>
+
+      <!-- Access denied notice for non-officers -->
+      <div class="card" id="manualEntryDeniedCard" style="display:none;">
+        <div style="padding:30px 16px;text-align:center;color:#888;">
+          <div style="font-size:36px;margin-bottom:10px;">🔒</div>
+          <div style="font-size:14px;color:#F5A623;font-weight:700;margin-bottom:6px;">Officers &amp; Admin Only</div>
+          <div style="font-size:12px;">Manual Activity Entry is restricted to officers and administrators.</div>
+        </div>
+      </div>
+
+    </div><!-- end section-manual-entry -->
 
     <!-- ══════════════ EMERGENCY TAB ══════════════ -->
     <div id="section-emergency" class="section">
@@ -17328,134 +17404,10 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           </div>
         </div>
 
-        <!-- Special Events Manager -->
-        <div class="card" id="specialEventsManagerCard" style="display:none;">
-          <div class="card-header" onclick="toggleStaffCard('specialEventsManagerBody','specialEventsManagerChevron')" style="cursor:pointer;user-select:none;">
-            <div class="icon">&#127920;</div><h2>Special Events</h2>
-            <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
-          </div>
-          <div id="specialEventsManagerBody">
-            <!-- Create New Event form — always in HTML for reliability -->
-            <div id="seCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
-              <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">&#127920; Create New Event</div>
-              <!-- Created By / In Charge row -->
-              <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
-                <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:8px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:8px 12px;">
-                  <span style="font-size:16px;">&#128274;</span>
-                  <div>
-                    <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Created By</div>
-                    <div id="seCreatedByDisplay" style="font-size:13px;font-weight:700;color:#27AE60;"></div>
-                  </div>
-                </div>
-                <div style="flex:1;min-width:180px;">
-                  <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">&#128100; Person in Charge</label>
-                  <select id="seInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;">
-                    <option value="">&#8212; Select officer &#8212;</option>
-                  </select>
-                </div>
-              </div>
-              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>
-              <input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>
-                <input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>
-                <input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time *</label>
-                <input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time *</label>
-                <input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              </div>
-              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location <span style="color:#555;font-size:10px;">(optional)</span></label>
-              <input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>
-              <textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Total Members Needed <span style="color:#555;">(for staffing bar)</span></label>
-                <input id="seTotalNeeded" type="number" min="0" max="999" placeholder="e.g. 10" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-                <div style="display:flex;flex-direction:column;justify-content:flex-end;">
-                <div style="font-size:10px;color:#555;line-height:1.5;padding-bottom:8px;">Staffing progress bar shows when set. Position slot counts also count toward this total.</div></div>
-              </div>
-              <div style="margin-bottom:12px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                  <label style="font-size:11px;color:#888;">Positions / Roles Needed</label>
-                  <button onclick="addEventPosition()" style="background:#1A3A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">+ Add Position</button>
-                </div>
-                <div style="font-size:10px;color:#555;margin-bottom:6px;">Each position can have a slot count.</div>
-                <div id="sePositionsContainer"></div>
-              </div>
-              <input type="hidden" id="seEditId" value="">
-              <div style="display:flex;gap:8px;">
-                <button class="btn btn-primary" id="seSubmitBtn" onclick="saveSpecialEvent()" style="flex:1;">&#10003; Create Event</button>
-                <button class="btn btn-secondary" id="seCancelEditBtn" onclick="cancelEditSpecialEvent()" style="display:none;">Cancel</button>
-              </div>
-            </div>
-            <div id="specialEventsManagerContainer"></div>
-          </div>
-        </div>
-
       </div><!-- end staffingOfficerControls -->
 
 
       <!-- Daily Staffing Board -->
-
-      <!-- Officer Manual Activity Entry -->
-      <div class="card" id="manualActivityCard" style="display:none;">
-        <div class="card-header" onclick="toggleAdminCardById('manualActivityBody')" style="cursor:pointer;user-select:none;">
-          <div class="icon">✏️</div>
-          <h2>Manual Activity Entry</h2>
-          <span style="font-size:11px;color:#555;margin-left:8px;">Officers &amp; Admin</span>
-          <span id="manualActivityChevron" style="margin-left:auto;font-size:13px;color:#555;transition:transform .2s;display:inline-block;">&#9660;</span>
-        </div>
-        <div id="manualActivityBody">
-          <!-- Logged By Banner -->
-          <div style="display:flex;align-items:center;gap:10px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
-            <span style="font-size:18px;">🔒</span>
-            <div>
-              <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Entry Recorded By</div>
-              <div id="manualEntryByName" style="font-size:14px;font-weight:700;color:#27AE60;"></div>
-            </div>
-          </div>
-          <div class="form-grid">
-            <div class="form-group" style="grid-column:1/-1;">
-              <label>Member *</label>
-              <select id="manualMemberId" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
-                <option value="">— Select member —</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Activity Type *</label>
-              <select id="manualCategory" onchange="manualCategoryChanged()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
-                <option value="">— Select type —</option>
-                <option value="meeting">Company Meeting</option>
-                <option value="boardmeeting">Board Meeting</option>
-                <option value="duties">Standby / Collateral Duty</option>
-                <option value="training">Training</option>
-                <option value="drill">Drill / In-House Training</option>
-                <option value="fundraiser">Fundraiser / Special Event</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Date *</label>
-              <input type="date" id="manualDate">
-            </div>
-            <div class="form-group" id="manualHoursGroup">
-              <label>Hours <span id="manualHoursHint" style="color:#666;font-size:10px;"></span></label>
-              <input type="number" id="manualHours" min="0.5" step="0.5" placeholder="e.g. 2">
-            </div>
-            <div class="form-group" style="grid-column:1/-1;">
-              <label>Description / Notes *</label>
-              <input type="text" id="manualDesc" placeholder="e.g. Monthly Company Meeting, Station coverage 1800-0600…">
-            </div>
-          </div>
-          <button class="btn btn-primary btn-full" onclick="saveManualActivity()" style="margin-top:4px;">✅ Record Activity</button>
-          <!-- Recent manual entries -->
-          <div id="manualRecentEntries" style="margin-top:14px;"></div>
-        </div>
-      </div>
 
       <!-- ═══ SPECIAL EVENTS SECTION ═══ -->
       <div class="card" id="specialEventsSection" style="padding:0;overflow:visible;border-radius:12px;">
@@ -17465,6 +17417,73 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           <span id="specialEventsSectionChev" style="margin-left:auto;color:#27AE60;font-size:15px;display:inline-block;transition:transform .2s;">▼</span>
         </div>
         <div id="specialEventsSectionBody">
+          <!-- Special Events Manager View (officers, admin, Community Relations Chair) -->
+      <div class="card" id="specialEventsManagerCard" style="display:none;">
+        <div class="card-header" onclick="toggleStaffCard('specialEventsManagerBody','specialEventsManagerChevron')" style="cursor:pointer;user-select:none;">
+          <div class="icon">&#127920;</div><h2>Special Events</h2>
+          <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
+        </div>
+        <div id="specialEventsManagerBody">
+          <!-- Create New Event form — always in HTML for reliability -->
+          <div id="seCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+            <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">&#127920; Create New Event</div>
+            <!-- Created By / In Charge row -->
+            <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+              <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:8px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:8px 12px;">
+                <span style="font-size:16px;">&#128274;</span>
+                <div>
+                  <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Created By</div>
+                  <div id="seCreatedByDisplay" style="font-size:13px;font-weight:700;color:#27AE60;"></div>
+                </div>
+              </div>
+              <div style="flex:1;min-width:180px;">
+                <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">&#128100; Person in Charge</label>
+                <select id="seInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;">
+                  <option value="">&#8212; Select officer &#8212;</option>
+                </select>
+              </div>
+            </div>
+            <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>
+            <input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+              <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>
+              <input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>
+              <input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+              <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time *</label>
+              <input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time *</label>
+              <input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+            </div>
+            <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location <span style="color:#555;font-size:10px;">(optional)</span></label>
+            <input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+            <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>
+            <textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+              <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Total Members Needed <span style="color:#555;">(for staffing bar)</span></label>
+              <input id="seTotalNeeded" type="number" min="0" max="999" placeholder="e.g. 10" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div style="display:flex;flex-direction:column;justify-content:flex-end;">
+              <div style="font-size:10px;color:#555;line-height:1.5;padding-bottom:8px;">Staffing progress bar shows when set. Position slot counts also count toward this total.</div></div>
+            </div>
+            <div style="margin-bottom:12px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <label style="font-size:11px;color:#888;">Positions / Roles Needed</label>
+                <button onclick="addEventPosition()" style="background:#1A3A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">+ Add Position</button>
+              </div>
+              <div style="font-size:10px;color:#555;margin-bottom:6px;">Each position can have a slot count.</div>
+              <div id="sePositionsContainer"></div>
+            </div>
+            <input type="hidden" id="seEditId" value="">
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-primary" id="seSubmitBtn" onclick="saveSpecialEvent()" style="flex:1;">&#10003; Create Event</button>
+              <button class="btn btn-secondary" id="seCancelEditBtn" onclick="cancelEditSpecialEvent()" style="display:none;">Cancel</button>
+            </div>
+          </div>
+          <div id="specialEventsManagerContainer"></div>
+        </div>
+      </div>
           <!-- Special Events Member View -->
       <div class="card" id="specialEventsMemberCard" style="display:none;">
         <div class="card-header" onclick="toggleStaffCard('specialEventsMemberBody','specialEventsMemberChevron')" style="cursor:pointer;user-select:none;">
@@ -17595,7 +17614,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           </div>
           <div class="form-group">
             <label>Duration (hours) *</label>
-            <input type="number" id="drillReportHours" min="0.5" step="0.5" placeholder="e.g. 2">
+            <input type="number" id="drillHours" min="0.5" step="0.5" placeholder="e.g. 2">
           </div>
           <div class="form-group">
             <label>Location</label>
@@ -18023,7 +18042,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           </div>
           <div id="respondingApparatusBody" style="padding:0 4px 14px;">
             <p style="font-size:12px;color:#888;margin-bottom:12px;">Set which units respond by default when logging emergency incidents. Admins can adjust per-incident when logging a response.</p>
-            <div id="erApparatusGridAdmin" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#181818;border:1px solid #2A2A2A;border-radius:8px;padding:10px;"></div>
+            <div id="erApparatusGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#181818;border:1px solid #2A2A2A;border-radius:8px;padding:10px;"></div>
             <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
               <button class="btn btn-sm btn-secondary" onclick="apparatusSelectAll()">Select All</button>
               <button class="btn btn-sm btn-secondary" onclick="apparatusClearAll()">Clear All</button>
@@ -18174,9 +18193,10 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
 
       <!-- Google Calendar Integration -->
-      <div class="card" style="margin-top:16px;">
+      <div class="card" id="gcalAdminCard" style="margin-top:16px;">
         <div class="card-header" onclick="toggleAdminCardById('gcalCard')" style="cursor:pointer;user-select:none;">
           <div class="icon">📅</div><h2>Google Calendar</h2>
+          <span style="font-size:11px;color:#555;margin-left:8px;">Admin</span>
           <span id="gcalCardChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;">&#9660;</span>
         </div>
         <div id="gcalCard" style="padding:16px;">
@@ -18357,7 +18377,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
 
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreManualEntryBtn" onclick="showTab('manual-entry');closeMoreMenu()">✏️ Manual Activity Entry</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
 
     </div>
