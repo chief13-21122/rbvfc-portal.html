@@ -8243,11 +8243,12 @@ function notifyUnderstaffedDay(date) {
 // ───────────────────────────────────────────────────────────────
 var _clockedInReminderInterval = null;
 var REMINDER_THRESHOLD_HRS  = 3.5;  // warn 30 min before the 4-hour mark
-var AUTO_CLOCKOUT_GRACE_MINS = 30;  // auto-close if no ack in 30 min
+var AUTO_CLOCKOUT_GRACE_MINS = 5;   // auto-close if no ack in 5 min (per policy)
+var PRE_SHIFT_REMINDER_MINS = 30;   // remind 30 min prior to shift/meeting/event start
 
 function startClockedInReminderPoller() {
   if (_clockedInReminderInterval) clearInterval(_clockedInReminderInterval);
-  _clockedInReminderInterval = setInterval(checkClockedInReminders, 5 * 60 * 1000); // every 5 min
+  _clockedInReminderInterval = setInterval(checkClockedInReminders, 60 * 1000); // every 1 min for 5-min grace accuracy
   checkClockedInReminders(); // run immediately on load
 }
 
@@ -8317,10 +8318,21 @@ function _getActiveClockedInSession(uid) {
 
 function _performAutoClockOut(sess, record) {
   var uid = sess.userId;
-  var endTime = new Date(record._reminderSentAt || new Date());
+  var endTime = new Date(record._reminderSentAt
+    ? new Date(record._reminderSentAt).getTime() + AUTO_CLOCKOUT_GRACE_MINS * 60000
+    : new Date());
+  // Don't log an end time that's in the future
+  if (endTime > new Date()) endTime = new Date();
   var startTime = new Date(sess.start);
   var durSecs = Math.max(0, Math.floor((endTime - startTime) / 1000));
-  var reason = 'Auto clocked out — no response to 30-min reminder.';
+  var reason = 'Auto clocked out — no response to ' + AUTO_CLOCKOUT_GRACE_MINS + '-min reminder.';
+
+  // Track what kind of activity this was so we can award LOSAP + tell the member
+  var activityKind = 'duty';         // human-readable kind ('Shift', 'Meeting', 'Event', 'Duty')
+  var activityLabel = 'Duty';        // friendly label for notification
+  var losapCategory = null;          // CAT_CONFIG key
+  var losapAwardDesc = '';           // desc for the LOSAP entry
+  var losapSourceId = '';            // source id for dedup
 
   if (sess._synthetic) {
     // ── Synthetic: shift / event / meeting ─────────────────────
@@ -8331,6 +8343,11 @@ function _performAutoClockOut(sess, record) {
         shift.clockedOutAt = endTime.toISOString();
         shift.status = 'completed';
         shift._autoClockoutReason = reason;
+        activityKind = 'shift';
+        activityLabel = (UNIT_LABELS[shift.unitId]||shift.unitId) + (shift.position ? ' · '+shift.position : '') + ' Shift';
+        losapCategory = 'duties'; // Standby/Sleep-In/Collateral Duty — 1 pt per 4-hr block
+        losapAwardDesc = activityLabel + ' (auto clock-out)';
+        losapSourceId = shift.id;
       }
       // Also close currentSession if it is linked to this shift
       if (state.currentSession && state.currentSession.shiftId === sess.shiftId && !state.currentSession.end) {
@@ -8349,6 +8366,12 @@ function _performAutoClockOut(sess, record) {
         record.clockedOutAt = endTime.toISOString();
         record._autoClockoutReason = reason;
       }
+      var ev = (state.specialEvents||[]).find(function(e){ return e.id===sess.eventId; });
+      activityKind = 'event';
+      activityLabel = ev ? ev.title : 'Special Event';
+      losapCategory = 'fundraiser'; // matches other event clock-outs
+      losapAwardDesc = activityLabel + ' — attendance (auto clock-out)';
+      losapSourceId = sess.eventId;
     } else if (sess.mtgId) {
       if (record) {
         record.clockedOutAt = endTime.toISOString();
@@ -8364,6 +8387,12 @@ function _performAutoClockOut(sess, record) {
         clearInterval(_clockTimerInterval); _clockTimerInterval = null;
         try { updateClockUI(false); } catch(e) {}
       }
+      var mtg = (state.meetings||[]).find(function(m){ return m.id===sess.mtgId; });
+      activityKind = 'meeting';
+      activityLabel = mtg ? mtg.title : 'Meeting';
+      losapCategory = 'meeting';
+      losapAwardDesc = activityLabel + ' — attendance (auto clock-out)';
+      losapSourceId = sess.mtgId;
     }
   } else {
     // ── Real currentSession ─────────────────────────────────────
@@ -8380,34 +8409,105 @@ function _performAutoClockOut(sess, record) {
     if (sess.shiftId) {
       var sh2 = (state.staffingShifts||[]).find(function(s){ return s.id===sess.shiftId; });
       if (sh2) { sh2.clockedIn=false; sh2.clockedOutAt=endTime.toISOString(); sh2.status='completed'; }
+      activityKind = 'shift';
+      activityLabel = sh2 ? ((UNIT_LABELS[sh2.unitId]||sh2.unitId) + (sh2.position?' · '+sh2.position:'') + ' Shift') : 'Shift';
+      losapCategory = 'duties';
+      losapAwardDesc = activityLabel + ' (auto clock-out)';
+      losapSourceId = sess.shiftId;
+    } else if (sess.mtgId) {
+      var mtg2 = (state.meetings||[]).find(function(m){ return m.id===sess.mtgId; });
+      activityKind = 'meeting';
+      activityLabel = mtg2 ? mtg2.title : 'Meeting';
+      losapCategory = 'meeting';
+      losapAwardDesc = activityLabel + ' — attendance (auto clock-out)';
+      losapSourceId = sess.mtgId;
+    } else {
+      // Generic duty session
+      activityKind = 'duty';
+      activityLabel = sess.desc || 'Duty';
+      losapCategory = 'duties';
+      losapAwardDesc = activityLabel + ' (auto clock-out)';
+      losapSourceId = sess.id || '';
     }
   }
 
   save();
+
+  // ── Award LOSAP points for the completed clock-in session ──────
+  var pointsAwarded = 0;
+  var pointsLabel = '';
+  try {
+    if (losapCategory) {
+      var hoursWorked = durSecs / 3600;
+      // Compute points preview (what will be awarded)
+      pointsAwarded = (typeof calcActivityPts === 'function')
+        ? (calcActivityPts(losapCategory, hoursWorked) || 0)
+        : 0;
+      var catLabel = (typeof typeLabel === 'function') ? typeLabel(losapCategory) : losapCategory;
+      pointsLabel = catLabel;
+      // Auto-award via the shared helper (handles dedup + member notification)
+      if (typeof _autoAwardLosap === 'function' && losapSourceId) {
+        _autoAwardLosap(uid, losapCategory, endTime.toISOString().slice(0,10), losapAwardDesc, losapSourceId);
+      }
+    }
+  } catch(e) {}
 
   // ── UI cleanup ──────────────────────────────────────────────────
   var banner = document.getElementById('clockedInReminderBanner');
   if (banner) { banner.style.display='none'; _adjustAppTopPad(); }
   var modal = document.getElementById('_dutyOverTimeModal');
   if (modal) modal.remove();
+  var stayModal = document.getElementById('_stayClockInModal');
+  if (stayModal) stayModal.remove();
   try { updateClockUI(false); } catch(e) {}
   try { renderMyShifts(); }       catch(e) {}
   try { renderRecentSessions(); } catch(e) {}
   try { updateClockStats(); }     catch(e) {}
   try { renderStaffingBoard(); }  catch(e) {}
+  try { renderLOSAP(); }          catch(e) {}
+
+  // ── Build the notification message (includes LOSAP info) ───────
+  var timeStr = endTime.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  var ptsStr = pointsAwarded > 0
+    ? ' · Earned ' + pointsAwarded + ' ' + pointsLabel + ' LOSAP point' + (pointsAwarded===1?'':'s')
+    : (losapCategory ? ' · No LOSAP point' + (pointsAwarded===1?'':'s') + ' earned (below threshold)' : '');
+  var bodyMsg = 'Auto clocked out of ' + activityLabel + ' at ' + timeStr + ptsStr + '.';
 
   // ── Push notification: you were auto clocked out ───────────────
   try {
     var _alertId = 'auto_clockout_' + uid + '_' + new Date().toISOString().slice(0,13);
     sendPushToMembers([uid],
       '🔴 You were auto clocked out',
-      'No response to the 30-min check-in reminder. Portal clocked you out at ' +
-        endTime.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '.',
+      bodyMsg,
       _alertId
     );
   } catch(e) {}
 
-  showToast('🔴 Auto clocked out — no response to 30-min reminder.');
+  // ── Toast + in-app banner ───────────────────────────────────────
+  showToast('🔴 Auto clocked out — ' + activityLabel +
+    (pointsAwarded>0 ? ' · +' + pointsAwarded + ' LOSAP pt' + (pointsAwarded===1?'':'s') : ''));
+
+  // Persist an in-app alert so they see it next time they open the portal
+  try {
+    if (!Array.isArray(state.staffingAlerts)) state.staffingAlerts = [];
+    state.staffingAlerts.unshift({
+      id: 'auto_co_' + Date.now(),
+      msg: '🔴 You were auto clocked out of ' + activityLabel + ' at ' + timeStr +
+        (pointsAwarded>0
+          ? '. You earned ' + pointsAwarded + ' ' + pointsLabel + ' LOSAP point' + (pointsAwarded===1?'':'s') + '.'
+          : (losapCategory ? '. No LOSAP points awarded (below minimum threshold).' : '.')),
+      sentBy: 'system',
+      sentAt: new Date().toISOString(),
+      group: 'individual',
+      targetMembers: [uid],
+      clears: [],
+      needsAck: true,
+      _autoClockout: true
+    });
+    save();
+    try { renderStaffingAlerts(); } catch(e) {}
+    try { renderMemberAlertBanner(); } catch(e) {}
+  } catch(e) {}
 }
 
 function checkClockedInReminders() {
@@ -8454,16 +8554,16 @@ function checkClockedInReminders() {
     record._pushSent = false;
     save();
     _showClockedInReminderBanner(openSess, hrs);
-    // Push: warning 30 min before auto clock-out
+    // Push: warning — grace window before auto clock-out
     try {
       var _warnId = 'duty_warn_' + uid + '_' + now.toISOString().slice(0,13);
       if (!record._pushSent) {
         record._pushSent = true;
         save();
         sendPushToMembers([uid],
-          '⏰ Still on duty? (30-min warning)',
+          '⏰ Still on duty? (' + AUTO_CLOCKOUT_GRACE_MINS + '-min warning)',
           'You\'ve been clocked in for ' + hrs.toFixed(1) + ' hrs. ' +
-            'Confirm within 30 min or you will be auto clocked out.',
+            'Confirm within ' + AUTO_CLOCKOUT_GRACE_MINS + ' min or you will be auto clocked out.',
           _warnId
         );
       }
@@ -9480,17 +9580,21 @@ function checkStaffingReminders() {
   var hour  = new Date().getHours();
   var now   = new Date();
 
+  // ── 30-MIN-PRIOR reminders run whether or not the member is clocked in,
+  //    since they need to know about their *upcoming* commitments.
+  try { checkUpcomingReminders(uid, now); } catch(e) {}
+
   // Use authoritative check across all clock-in types
   var alreadyClocked = !!_getActiveClockedInSession(uid);
 
   // ── Duty over-time warning now handled by checkClockedInReminders ─────
-  // (which runs every 5 min and covers all clock-in types)
+  // (which runs every 1 min and covers all clock-in types)
   if (alreadyClocked) {
     if (hour >= 6) checkClassReminders(uid, today);
     return;
   }
 
-  // ── Staffing shift clock-in reminders ────────────────────────────────
+  // ── Staffing shift clock-in reminders (legacy 6-AM reminder) ─────────
   (state.staffingShifts||[]).forEach(function(s) {
     if (s.memberId!==uid || s.date!==today || s.clockedIn || s.reminded) return;
     var win = _checkShiftClockWindow(s);
@@ -9498,6 +9602,122 @@ function checkStaffingReminders() {
     if (hour >= 6) { s.reminded = true; save(); showStaffingReminder(s); }
   });
   if (hour >= 6) checkClassReminders(uid, today);
+}
+
+// ── 30-MIN-PRIOR REMINDERS ───────────────────────────────────────────
+// Fires a single reminder (banner + push) 30 min before a shift,
+// meeting, or special event the member is scheduled for. Each
+// scheduled item has a _preReminded30 flag so it fires only once.
+function checkUpcomingReminders(uid, now) {
+  if (!uid) return;
+  now = now || new Date();
+  var windowMs = PRE_SHIFT_REMINDER_MINS * 60000;
+  var today = localDateStr(now);
+  var changed = false;
+
+  // ─ SHIFTS ─
+  (state.staffingShifts||[]).forEach(function(s) {
+    if (s.memberId !== uid) return;
+    if (s.date !== today) return;
+    if (s.clockedIn || s.clockedOutAt) return;
+    if (s._preReminded30) return;
+    var sh = parseInt((s.shiftStart||'0700').slice(0,2));
+    var sm = parseInt((s.shiftStart||'0700').slice(2,4)||'0');
+    var startMs = new Date(s.date+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00').getTime();
+    var diffMs = startMs - now.getTime();
+    // Fire within the final 30 min (but not after start)
+    if (diffMs > 0 && diffMs <= windowMs) {
+      s._preReminded30 = true; changed = true;
+      var mins = Math.max(1, Math.round(diffMs / 60000));
+      var unitLabel = (UNIT_LABELS[s.unitId]||s.unitId) + (s.position ? ' · '+s.position : '');
+      var startStr = (sh%12||12) + ':' + (sm<10?'0':'')+sm + ' ' + (sh>=12?'PM':'AM');
+      _showUpcomingReminderBanner('shift', s.id, unitLabel, startStr, mins, function(){
+        try { staffClockInFromBanner(s.id); } catch(e){}
+      });
+      try {
+        sendPushToMembers([uid],
+          '\u23f0 Shift in ' + mins + ' min',
+          unitLabel + ' starts at ' + startStr + '. Please be ready to clock in.',
+          'pre30_shift_' + s.id + '_' + now.toISOString().slice(0,13));
+      } catch(e) {}
+    }
+  });
+
+  // ─ MEETINGS ─
+  (state.meetingAttendance||[]).forEach(function(att) {
+    if (att.memberId !== uid) return;
+    if (att.date !== today) return;
+    if (att.clockedInAt || att.clockedOutAt) return;
+    if (att._preReminded30) return;
+    var mtg = (state.meetings||[]).find(function(m){ return m.id===att.mtgId; });
+    if (!mtg || !mtg.time) return;
+    var startMs = new Date(att.date+'T'+mtg.time+':00').getTime();
+    var diffMs = startMs - now.getTime();
+    if (diffMs > 0 && diffMs <= windowMs) {
+      att._preReminded30 = true; changed = true;
+      var mins = Math.max(1, Math.round(diffMs / 60000));
+      var parts = mtg.time.split(':');
+      var mh = parseInt(parts[0]||'0'), mm = parseInt(parts[1]||'0');
+      var tStr = (mh%12||12)+':'+(mm<10?'0':'')+mm+' '+(mh>=12?'PM':'AM');
+      _showUpcomingReminderBanner('meeting', att.mtgId, mtg.title, tStr, mins, function(){
+        try { clockInMeeting(att.mtgId, att.date); } catch(e){}
+      });
+      try {
+        sendPushToMembers([uid],
+          '\u23f0 Meeting in ' + mins + ' min',
+          (mtg.title||'Meeting') + ' starts at ' + tStr + '.' + (mtg.location ? ' ' + mtg.location : ''),
+          'pre30_mtg_' + att.mtgId + '_' + att.date);
+      } catch(e) {}
+    }
+  });
+
+  // ─ SPECIAL EVENTS ─
+  (state.specialEvents||[]).forEach(function(ev) {
+    if (!ev.date || ev.date !== today) return;
+    if (!ev.startTime) return;
+    var signup = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
+    if (!signup) return;
+    if (signup.clockedIn || signup.clockedOutAt) return;
+    if (signup._preReminded30) return;
+    var startMs = new Date(ev.date+'T'+ev.startTime+':00').getTime();
+    var diffMs = startMs - now.getTime();
+    if (diffMs > 0 && diffMs <= windowMs) {
+      signup._preReminded30 = true; changed = true;
+      var mins = Math.max(1, Math.round(diffMs / 60000));
+      var parts = ev.startTime.split(':');
+      var eh = parseInt(parts[0]||'0'), em = parseInt(parts[1]||'0');
+      var etStr = (eh%12||12)+':'+(em<10?'0':'')+em+' '+(eh>=12?'PM':'AM');
+      _showUpcomingReminderBanner('event', ev.id, ev.title, etStr, mins, null);
+      try {
+        sendPushToMembers([uid],
+          '\u23f0 Event in ' + mins + ' min',
+          (ev.title||'Event') + ' starts at ' + etStr + '.' + (ev.location ? ' ' + ev.location : ''),
+          'pre30_evt_' + ev.id + '_' + ev.date);
+      } catch(e) {}
+    }
+  });
+
+  if (changed) save();
+}
+
+// Top banner for upcoming shift/meeting/event — reuses _showTopBanner style.
+function _showUpcomingReminderBanner(type, entityId, entityTitle, startStr, minsUntil, clockInFn) {
+  var typeLabel_ = type === 'shift' ? 'SHIFT' : (type === 'meeting' ? 'MEETING' : 'EVENT');
+  var label = '\u23f0 ' + typeLabel_ + ' IN ' + minsUntil + ' MIN';
+  var body = entityTitle + ' starts at ' + startStr + '.';
+  var buttons = [];
+  if (clockInFn) {
+    // Attach handler globally for banner inline-onclick use
+    var fnName = '_preReminderAction_' + type + '_' + String(entityId).replace(/[^A-Za-z0-9_]/g,'_');
+    window[fnName] = function() {
+      try { clockInFn(); } catch(e) {}
+      _hideTopBanner('upcomingReminderBanner');
+    };
+    buttons.push({ label:'\u270A Open Shift Page', fn: fnName + '()', bg:'#F5A623', color:'#000', border:'#F5A623' });
+  }
+  buttons.push({ label:'Dismiss', fn:"_hideTopBanner('upcomingReminderBanner')",
+    bg:'transparent', color:'#F5A623', border:'#F5A623' });
+  _showTopBanner('upcomingReminderBanner', '#1A1200', '#F5A623', '\u23f0', label, body, buttons);
 }
 
 function _showDutyOverTimeWarning(session, warnHrs, autoOutMins) {
@@ -9682,7 +9902,7 @@ function _adjustAppTopPad() {
   // Use requestAnimationFrame to ensure banner has rendered before measuring
   requestAnimationFrame(function() {
     var totalH = 0;
-    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner','classReminderTopBanner','losapPointsBanner'].forEach(function(id){
+    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner','classReminderTopBanner','losapPointsBanner','clockedInReminderBanner','upcomingReminderBanner'].forEach(function(id){
       var el = document.getElementById(id);
       if (el && el.style.display !== 'none') totalH += el.offsetHeight;
     });
@@ -9690,7 +9910,7 @@ function _adjustAppTopPad() {
     var header = document.getElementById('appHeader');
     if (header) { header.style.transition='margin-top .2s ease'; header.style.marginTop = totalH > 0 ? totalH+'px' : ''; }
     // Also update banners z-index so they sit above everything
-    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner'].forEach(function(id){
+    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner','clockedInReminderBanner','upcomingReminderBanner'].forEach(function(id){
       var el = document.getElementById(id);
       if (el) el.style.zIndex = '10000';
     });
@@ -10356,22 +10576,6 @@ function showMeetingsSheet() {
   var sheet = document.getElementById('meetingsSheet');
   if (!sheet) return;
   sheet.style.display = 'block';
-  // Special Events: show correct panel based on role (officer vs member)
-  try {
-    var canManage = canManageSpecialEvents();
-    var mgCard = document.getElementById('specialEventsManagerCard');
-    var mbCard = document.getElementById('specialEventsMemberCard');
-    if (canManage) {
-      if (mgCard) mgCard.style.display = 'block';
-      if (mbCard) mbCard.style.display = 'none';
-      renderSpecialEvents('specialEventsManagerContainer');
-      renderSpecialEventAdmin();
-    } else {
-      if (mgCard) mgCard.style.display = 'none';
-      if (mbCard) mbCard.style.display = 'block';
-      renderSpecialEvents('specialEventsContainer');
-    }
-  } catch(e){}
   try { initMeetingsCard(); } catch(e){}
   try { initMeetingForm(); }  catch(e){}
 }
@@ -10581,127 +10785,242 @@ function clockOutMeeting(mtgId, occurrenceDate) {
 }
 
 
-function _askStayClockIn(type, entityId, entityTitle, scheduledEnd) {
-  // Don't show if modal already visible
+// ── END-OF-ACTIVITY PROMPT ─────────────────────────────────────
+// Shows a 5-minute countdown modal asking the member whether they
+// want to stay clocked in. If they don't respond in time, the
+// calling code (checkAutoClockOuts) will fire _performAutoClockOut
+// which awards LOSAP points and notifies the member.
+function _askStayClockIn(type, entityId, entityTitle, scheduledEnd, onClockOutNow) {
+  // If a modal is already showing, don't stack another one
   if (document.getElementById('_stayClockInModal')) return;
   var endStr = scheduledEnd.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
   var wrap = document.createElement('div');
   wrap.id = '_stayClockInModal';
+  wrap.dataset.type = type || '';
+  wrap.dataset.entityId = entityId || '';
   wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px;';
   var inner = document.createElement('div');
-  inner.style.cssText = 'background:#1A1A1A;border:1px solid #F5A623;border-radius:16px;padding:24px;width:100%;max-width:380px;text-align:center;';
-  var icon  = document.createElement('div'); icon.style.cssText = 'font-size:36px;margin-bottom:10px;'; icon.textContent = '\u23f1\ufe0f';
-  var title = document.createElement('div'); title.style.cssText = 'font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:700;color:#F5A623;margin-bottom:6px;'; title.textContent = 'Event Ended';
-  var sub   = document.createElement('div'); sub.style.cssText = 'font-size:13px;color:#AAA;margin-bottom:20px;line-height:1.5;';
-  sub.textContent = '"'+entityTitle+'" ended at '+endStr+'. Are you still on duty?';
+  inner.style.cssText = 'background:#1A1A1A;border:2px solid #F5A623;border-radius:16px;padding:24px;width:100%;max-width:380px;text-align:center;';
+  var icon  = document.createElement('div'); icon.style.cssText = 'font-size:40px;margin-bottom:10px;'; icon.textContent = '\u23f1\ufe0f';
+  var title = document.createElement('div'); title.style.cssText = 'font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:700;color:#F5A623;margin-bottom:6px;letter-spacing:1px;'; title.textContent = 'Still On Duty?';
+  var sub   = document.createElement('div'); sub.style.cssText = 'font-size:13px;color:#AAA;margin-bottom:14px;line-height:1.5;';
+  var typeLabel_ = type === 'event' ? 'event' : (type === 'meeting' ? 'meeting' : 'shift');
+  sub.innerHTML = 'Your ' + typeLabel_ + ' <strong style="color:#F0F0F0;">"'+entityTitle+'"</strong> ended at <strong style="color:#F0F0F0;">'+endStr+'</strong>.<br>Do you want to stay clocked in?';
+
+  // Countdown warning
+  var warnBox = document.createElement('div');
+  warnBox.style.cssText = 'font-size:11px;color:#E74C3C;margin-bottom:16px;padding:10px;background:#2A0A0A;border-radius:8px;border:1px solid #E74C3C;font-weight:600;';
+  var countdownEl = document.createElement('span');
+  countdownEl.id = '_stayCountdown';
+  countdownEl.style.cssText = 'color:#F5A623;font-weight:700;';
+  countdownEl.textContent = AUTO_CLOCKOUT_GRACE_MINS + ':00';
+  warnBox.innerHTML = '\u26a0 No response in <span id="_stayCountdown" style="color:#F5A623;font-weight:700;">'+AUTO_CLOCKOUT_GRACE_MINS+':00</span> = automatic clock-out.';
+
   var btnRow = document.createElement('div'); btnRow.style.cssText = 'display:flex;gap:10px;';
   var yesBtn = document.createElement('button');
-  yesBtn.style.cssText = 'flex:1;background:#27AE60;border:none;color:#FFF;border-radius:10px;padding:13px;cursor:pointer;font-size:15px;font-weight:700;';
-  yesBtn.textContent = '\u2705 Still on duty';
+  yesBtn.style.cssText = 'flex:1;background:#27AE60;border:none;color:#FFF;border-radius:10px;padding:14px;cursor:pointer;font-size:15px;font-weight:700;';
+  yesBtn.textContent = '\u2705 Stay Clocked In';
   yesBtn.onclick = function() {
-    // Keep them clocked in — just dismiss
-    document.getElementById('_stayClockInModal').remove();
-  };
-  var noBtn = document.createElement('button');
-  noBtn.style.cssText = 'flex:1;background:none;border:1px solid #E74C3C;color:#E74C3C;border-radius:10px;padding:13px;cursor:pointer;font-size:15px;font-weight:700;';
-  noBtn.textContent = '\u23f9 Clock me out';
-  noBtn.onclick = function() {
-    document.getElementById('_stayClockInModal').remove();
-    // Clock out now
+    // Acknowledge — keep them clocked in, mark as acknowledged so we don't re-prompt
     if (type === 'event') {
       var ev = (state.specialEvents||[]).find(function(e){ return e.id===entityId; });
-      if (ev) {
-        (ev.signups||[]).forEach(function(s){
-          if (s.memberId===state.currentUserId && s.clockedIn && !s.clockedOutAt) {
-            s.clockedIn = false; s.clockedOutAt = new Date().toISOString();
-          }
-        });
-      }
+      if (ev) (ev.signups||[]).forEach(function(s){
+        if (s.memberId===state.currentUserId && s.clockedIn && !s.clockedOutAt) s._stayAckedAt = new Date().toISOString();
+      });
     } else if (type === 'meeting') {
       var att = (state.meetingAttendance||[]).find(function(a){
         return a.mtgId===entityId && a.memberId===state.currentUserId && !a.clockedOutAt;
       });
-      if (att) att.clockedOutAt = new Date().toISOString();
-    }
-    if (state.currentSession && !state.currentSession.end) {
-      state.currentSession.end = new Date().toISOString();
-      state.currentSession.duration = (new Date() - new Date(state.currentSession.start)) / 1000;
-      try { updateClockUI(false); } catch(e){}
+      if (att) att._stayAckedAt = new Date().toISOString();
+    } else if (type === 'shift') {
+      var sh = (state.staffingShifts||[]).find(function(s){ return s.id===entityId; });
+      if (sh) sh._stayAckedAt = new Date().toISOString();
     }
     save();
-    try { renderMyShifts(); } catch(e){}
-    showToast('\u23f9 Clocked out of '+entityTitle+'.');
+    var m = document.getElementById('_stayClockInModal'); if (m) m.remove();
+    showToast('\u2705 Got it — you are still clocked in. Reminder acknowledged.');
+  };
+  var noBtn = document.createElement('button');
+  noBtn.style.cssText = 'flex:1;background:none;border:1px solid #E74C3C;color:#E74C3C;border-radius:10px;padding:14px;cursor:pointer;font-size:15px;font-weight:700;';
+  noBtn.textContent = '\u23f9 Clock Me Out';
+  noBtn.onclick = function() {
+    var m = document.getElementById('_stayClockInModal'); if (m) m.remove();
+    if (typeof onClockOutNow === 'function') { onClockOutNow(); return; }
+    // Fallback: manual clock out
+    if (type === 'event') {
+      var ev = (state.specialEvents||[]).find(function(e){ return e.id===entityId; });
+      if (ev) (ev.signups||[]).forEach(function(s){
+        if (s.memberId===state.currentUserId && s.clockedIn && !s.clockedOutAt) {
+          try { clockOutSpecialEvent(ev.id); } catch(e){}
+        }
+      });
+    } else if (type === 'meeting') {
+      try { clockOutMeeting(entityId, (new Date()).toISOString().slice(0,10)); } catch(e){}
+    } else if (type === 'shift') {
+      try { clockOut(); } catch(e){}
+    } else if (state.currentSession && !state.currentSession.end) {
+      try { clockOut(); } catch(e){}
+    }
   };
   btnRow.appendChild(yesBtn); btnRow.appendChild(noBtn);
-  [icon, title, sub, btnRow].forEach(function(el){ inner.appendChild(el); });
+  [icon, title, sub, warnBox, btnRow].forEach(function(el){ inner.appendChild(el); });
   wrap.appendChild(inner);
   document.body.appendChild(wrap);
+
+  // Live countdown timer
+  var startMs = Date.now();
+  var totalMs = AUTO_CLOCKOUT_GRACE_MINS * 60000;
+  var tickFn = function() {
+    var m2 = document.getElementById('_stayClockInModal');
+    if (!m2) return; // modal dismissed
+    var remainMs = Math.max(0, totalMs - (Date.now() - startMs));
+    var mins = Math.floor(remainMs / 60000);
+    var secs = Math.floor((remainMs % 60000) / 1000);
+    var cdEl = document.getElementById('_stayCountdown');
+    if (cdEl) cdEl.textContent = mins + ':' + (secs<10?'0':'') + secs;
+    if (remainMs > 0) {
+      setTimeout(tickFn, 1000);
+    }
+  };
+  setTimeout(tickFn, 1000);
+
+  // Push notification to draw attention
+  try {
+    var pushId = 'end_activity_' + (entityId||'') + '_' + new Date().toISOString().slice(0,13);
+    sendPushToMembers([state.currentUserId],
+      '\u23f1\ufe0f Your ' + typeLabel_ + ' ended',
+      '"'+entityTitle+'" ended at '+endStr+'. Respond within '+AUTO_CLOCKOUT_GRACE_MINS+' min or you will be auto clocked out.',
+      pushId);
+  } catch(e) {}
 }
 
+// ── AUTO CLOCK-OUTS AT END OF SHIFT / MEETING / EVENT ──────────
+// Runs every minute. For each active clock-in:
+//  1. At scheduled end: show the "Still on duty?" prompt (once)
+//  2. If no response within AUTO_CLOCKOUT_GRACE_MINS (5 min),
+//     call _performAutoClockOut — which awards LOSAP points and
+//     sends a notification listing what kind + how many were earned.
 function checkAutoClockOuts() {
-  var now = new Date(), changed = false;
+  var now = new Date();
+  var uid = state.currentUserId;
+  if (!uid) return;
+  var changed = false;
+
+  // ── Special events ────────────────────────────────────────────
   (state.specialEvents||[]).forEach(function(ev) {
     var ts = ev.endTime || ev.startTime;
     if (!ts) return;
     var evEnd = new Date(ev.date + 'T' + ts + ':00');
     if (!ev.endTime) evEnd = new Date(evEnd.getTime() + 7200000);
-    if (now < evEnd) return;
-    // Grace period: ask within 30 min after event ends, before auto-clocking out
-    var graceEnd = new Date(evEnd.getTime() + 30 * 60000);
+    if (now < evEnd) return; // not yet ended
     (ev.signups||[]).forEach(function(s) {
       if (!s.clockedIn || s.clockedOutAt) return;
-      var uid = state.currentUserId;
-      if (s.memberId === uid && now <= graceEnd && !s._askedClockOut) {
-        // Ask this member if they want to stay clocked in
-        s._askedClockOut = true;
-        _askStayClockIn('event', ev.id, ev.title, evEnd);
-      } else if (now > graceEnd) {
-        // Grace expired — auto clock out
-        s.clockedIn = false; s.clockedOutAt = graceEnd.toISOString(); changed = true;
+      if (s.memberId !== uid) return; // only prompt the current user on this device
+
+      // First time after end: show the 5-min prompt
+      if (!s._promptedAt) {
+        s._promptedAt = now.toISOString();
+        save();
+        var synthSess = { id: ev.id, userId: uid, start: (s.clockedInAt || (ev.date+'T'+(ev.startTime||'00:00')+':00')),
+                          eventId: ev.id, _synthetic: true, _record: s };
+        // Mark the prompt-start time on the record so _performAutoClockOut
+        // uses it as the end time for grace-based auto clock-out.
+        s._reminderSentAt = now.toISOString();
+        _askStayClockIn('event', ev.id, ev.title, evEnd, function() {
+          try { clockOutSpecialEvent(ev.id); } catch(e){}
+        });
+        changed = true;
+        return;
+      }
+
+      // Already prompted — has the 5-min grace expired without an ack?
+      if (!s._stayAckedAt && s._reminderSentAt) {
+        var ageMin = (now - new Date(s._reminderSentAt)) / 60000;
+        if (ageMin >= AUTO_CLOCKOUT_GRACE_MINS) {
+          var synthSess2 = { id: ev.id, userId: uid,
+                             start: (s.clockedInAt || (ev.date+'T'+(ev.startTime||'00:00')+':00')),
+                             eventId: ev.id, _synthetic: true, _record: s };
+          try { _performAutoClockOut(synthSess2, s); } catch(e) {}
+          changed = true;
+        }
       }
     });
   });
+
+  // ── Meetings ──────────────────────────────────────────────────
   (state.meetingAttendance||[]).forEach(function(att) {
     if (!att.clockedInAt || att.clockedOutAt) return;
+    if (att.memberId !== uid) return;
     var mtg = (state.meetings||[]).find(function(m){ return m.id===att.mtgId; });
     if (!mtg) return;
     var mEnd = new Date(att.date + 'T' + mtg.time + ':00');
     mEnd = new Date(mEnd.getTime() + (mtg.duration||60)*60000);
     if (now < mEnd) return;
-    var mtgGraceEnd = new Date(mEnd.getTime() + 30 * 60000);
-    if (now <= mtgGraceEnd && !att._askedClockOut && att.memberId === state.currentUserId) {
-      att._askedClockOut = true;
-      _askStayClockIn('meeting', att.mtgId, mtg.title, mEnd);
-    } else if (now > mtgGraceEnd) {
-      att.clockedOutAt = mtgGraceEnd.toISOString(); changed = true;
-      if (state.currentSession && state.currentSession.mtgId===att.mtgId && state.currentSession.userId===att.memberId) {
-        state.currentSession.end = mtgGraceEnd.toISOString();
-        state.currentSession.duration = (mtgGraceEnd - new Date(state.currentSession.start)) / 1000;
-        if (!Array.isArray(state.sessions)) state.sessions = [];
-        state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
-        state.currentSession = null;
-        try{updateClockUI(false);}catch(e){}
+
+    if (!att._promptedAt) {
+      att._promptedAt = now.toISOString();
+      att._reminderSentAt = now.toISOString();
+      save();
+      _askStayClockIn('meeting', att.mtgId, mtg.title, mEnd, function() {
+        try { clockOutMeeting(att.mtgId, att.date); } catch(e){}
+      });
+      changed = true;
+      return;
+    }
+
+    if (!att._stayAckedAt && att._reminderSentAt) {
+      var ageM = (now - new Date(att._reminderSentAt)) / 60000;
+      if (ageM >= AUTO_CLOCKOUT_GRACE_MINS) {
+        var synthMtg = { id: att.mtgId, userId: uid, start: att.clockedInAt,
+                         mtgId: att.mtgId, _synthetic: true, _record: att };
+        try { _performAutoClockOut(synthMtg, att); } catch(e) {}
+        changed = true;
       }
     }
   });
+
+  // ── Staffing shifts ───────────────────────────────────────────
   (state.staffingShifts||[]).forEach(function(s) {
     if (!s.clockedIn || s.clockedOutAt) return;
-    var sh=parseInt((s.shiftStart||'0700').slice(0,2));
-    var sm=parseInt((s.shiftStart||'0700').slice(2,4)||'0');
-    var startMs=new Date(s.date+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00').getTime();
-    var endMs=startMs+(s.shiftHours||24)*3600000;
+    if (s.memberId !== uid) return;
+    var sh = parseInt((s.shiftStart||'0700').slice(0,2));
+    var sm = parseInt((s.shiftStart||'0700').slice(2,4)||'0');
+    var startMs = new Date(s.date+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00').getTime();
+    var endMs = startMs + (s.shiftHours||24) * 3600000;
     if (now.getTime() < endMs) return;
-    s.clockedOutAt=new Date(endMs).toISOString(); s.clockedIn=false; s.status='complete'; changed=true;
-    if (state.currentSession && state.currentSession.shiftId===s.id) {
-      state.currentSession.end=new Date(endMs).toISOString();
-      state.currentSession.duration=(endMs-new Date(state.currentSession.start).getTime())/1000;
-      if (!Array.isArray(state.sessions)) state.sessions=[];
-      state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
-      state.currentSession=null;
-      try{updateClockUI(false);}catch(e){}
+    var shiftEnd = new Date(endMs);
+
+    if (!s._promptedAt) {
+      s._promptedAt = now.toISOString();
+      s._reminderSentAt = now.toISOString();
+      save();
+      var shiftTitle = (UNIT_LABELS[s.unitId]||s.unitId) + (s.position ? ' · '+s.position : '');
+      _askStayClockIn('shift', s.id, shiftTitle, shiftEnd, function() {
+        // Manual clock out routes through clockOut() so LOSAP awarding stays consistent
+        try { clockOut(); } catch(e){}
+      });
+      changed = true;
+      return;
+    }
+
+    if (!s._stayAckedAt && s._reminderSentAt) {
+      var ageS = (now - new Date(s._reminderSentAt)) / 60000;
+      if (ageS >= AUTO_CLOCKOUT_GRACE_MINS) {
+        var synthShift = { id: s.id, userId: uid,
+                           start: new Date(startMs).toISOString(),
+                           shiftId: s.id, _synthetic: true, _record: s };
+        try { _performAutoClockOut(synthShift, s); } catch(e) {}
+        changed = true;
+      }
     }
   });
-  if (changed) { save(); try{renderMyShifts();}catch(e){} try{renderStaffingBoard();}catch(e){} }
+
+  if (changed) {
+    save();
+    try { renderMyShifts(); } catch(e){}
+    try { renderStaffingBoard(); } catch(e){}
+    try { renderStaffingAlerts(); } catch(e){}
+  }
 }
 
 function openMtgAlert(mid, mdate) {
@@ -16584,91 +16903,9 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <div style="position:absolute;bottom:0;left:0;right:0;max-height:90vh;overflow-y:auto;background:#111;border-radius:20px 20px 0 0;padding:20px;box-sizing:border-box;">
         <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 16px;"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-          <span style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;letter-spacing:2px;color:#F0F0F0;">🎪 EVENTS &amp; MEETINGS</span>
+          <span style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;letter-spacing:2px;color:#F0F0F0;">📅 MEETINGS</span>
           <button onclick="closeMeetingsSheet()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:0;">×</button>
         </div>
-
-        <!-- ═══ SPECIAL EVENTS — Manager (officers only) ═══ -->
-        <div class="card" id="specialEventsManagerCard" style="display:none;">
-          <div class="card-header" onclick="toggleStaffCard('specialEventsManagerBody','specialEventsManagerChevron')" style="cursor:pointer;user-select:none;">
-            <div class="icon">&#127920;</div><h2>Special Events</h2>
-            <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
-          </div>
-          <div id="specialEventsManagerBody">
-            <!-- Create New Event form — always in HTML for reliability -->
-            <div id="seCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
-              <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">&#127920; Create New Event</div>
-              <!-- Created By / In Charge row -->
-              <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
-                <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:8px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:8px 12px;">
-                  <span style="font-size:16px;">&#128274;</span>
-                  <div>
-                    <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Created By</div>
-                    <div id="seCreatedByDisplay" style="font-size:13px;font-weight:700;color:#27AE60;"></div>
-                  </div>
-                </div>
-                <div style="flex:1;min-width:180px;">
-                  <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">&#128100; Person in Charge</label>
-                  <select id="seInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;">
-                    <option value="">&#8212; Select officer &#8212;</option>
-                  </select>
-                </div>
-              </div>
-              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>
-              <input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>
-                <input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>
-                <input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time *</label>
-                <input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time *</label>
-                <input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              </div>
-              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location <span style="color:#555;font-size:10px;">(optional)</span></label>
-              <input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>
-              <textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Total Members Needed <span style="color:#555;">(for staffing bar)</span></label>
-                <input id="seTotalNeeded" type="number" min="0" max="999" placeholder="e.g. 10" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-                <div style="display:flex;flex-direction:column;justify-content:flex-end;">
-                <div style="font-size:10px;color:#555;line-height:1.5;padding-bottom:8px;">Staffing progress bar shows when set. Position slot counts also count toward this total.</div></div>
-              </div>
-              <div style="margin-bottom:12px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                  <label style="font-size:11px;color:#888;">Positions / Roles Needed</label>
-                  <button onclick="addEventPosition()" style="background:#1A3A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">+ Add Position</button>
-                </div>
-                <div style="font-size:10px;color:#555;margin-bottom:6px;">Each position can have a slot count.</div>
-                <div id="sePositionsContainer"></div>
-              </div>
-              <input type="hidden" id="seEditId" value="">
-              <div style="display:flex;gap:8px;">
-                <button class="btn btn-primary" id="seSubmitBtn" onclick="saveSpecialEvent()" style="flex:1;">&#10003; Create Event</button>
-                <button class="btn btn-secondary" id="seCancelEditBtn" onclick="cancelEditSpecialEvent()" style="display:none;">Cancel</button>
-              </div>
-            </div>
-            <div id="specialEventsManagerContainer"></div>
-          </div>
-        </div>
-
-        <!-- ═══ SPECIAL EVENTS — Member view ═══ -->
-        <div class="card" id="specialEventsMemberCard" style="display:none;">
-          <div class="card-header" onclick="toggleStaffCard('specialEventsMemberBody','specialEventsMemberChevron')" style="cursor:pointer;user-select:none;">
-            <div class="icon">&#127914;</div>
-            <h2>Special Events</h2>
-            <span id="specialEventsMemberChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">&#9660;</span>
-          </div>
-          <div id="specialEventsMemberBody">
-            <div id="specialEventsContainer"></div>
-          </div>
-        </div>
-
-        <!-- ═══ MEETINGS ═══ -->
         <div class="card" id="meetingsManagerCard" style="display:none;">
         <div class="card-header" onclick="toggleStaffCard('meetingsManagerBody','meetingsManagerChevron')" style="cursor:pointer;user-select:none;">
           <div class="icon">&#128203;</div><h2>Meetings</h2>
@@ -17284,6 +17521,17 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
     <!-- ══════════════ STAFFING TAB ══════════════ -->
     <div id="section-staffing" class="section">
 
+      <!-- ⚠ STAFFING ALERTS — visible to all members (pinned to top) -->
+      <div class="card" id="staffingAlertCard" style="display:none;border:2px solid #F5A623;background:#1A1200;">
+        <div class="card-header" onclick="toggleStaffCard('staffingAlertBody','staffingAlertChevron')" style="cursor:pointer;user-select:none;">
+          <div class="icon">🚨</div><h2 style="color:#F5A623;">Staffing Alerts</h2>
+          <span id="staffingAlertChevron" style="margin-left:auto;color:#F5A623;font-size:13px;transition:transform .2s;display:inline-block;">▼</span>
+        </div>
+        <div id="staffingAlertBody">
+          <div id="staffingAlertContainer"><p style="color:#666;font-size:13px;text-align:center;padding:16px;">No active staffing alerts.</p></div>
+        </div>
+      </div>
+
       <!-- My Upcoming Shifts -->
       <div class="card">
         <div class="card-header"><div class="icon">📋</div><h2>My Shifts &amp; Events</h2></div>
@@ -17313,17 +17561,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         </div>
       </div><!-- end apparatusStaffingSection -->
 
-
-            <!-- Staffing Alerts — visible to all members -->
-      <div class="card" id="staffingAlertCard" style="display:none;">
-        <div class="card-header" onclick="toggleStaffCard('staffingAlertBody','staffingAlertChevron')" style="cursor:pointer;user-select:none;">
-          <div class="icon">🚨</div><h2>Staffing Alerts</h2>
-          <span id="staffingAlertChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">▼</span>
-        </div>
-        <div id="staffingAlertBody">
-          <div id="staffingAlertContainer"><p style="color:#666;font-size:13px;text-align:center;padding:16px;">No active staffing alerts.</p></div>
-        </div>
-      </div>
 
       <!-- Officer Controls (officers/admin only) -->
       <div id="staffingOfficerControls" style="display:none;">
@@ -17418,7 +17655,73 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           </div>
         </div>
 
-        <!-- Special Events Manager — moved to "Events & Meetings" page in More menu -->
+        <!-- Special Events Manager -->
+        <div class="card" id="specialEventsManagerCard" style="display:none;">
+          <div class="card-header" onclick="toggleStaffCard('specialEventsManagerBody','specialEventsManagerChevron')" style="cursor:pointer;user-select:none;">
+            <div class="icon">&#127920;</div><h2>Special Events</h2>
+            <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
+          </div>
+          <div id="specialEventsManagerBody">
+            <!-- Create New Event form — always in HTML for reliability -->
+            <div id="seCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+              <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">&#127920; Create New Event</div>
+              <!-- Created By / In Charge row -->
+              <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:8px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:8px 12px;">
+                  <span style="font-size:16px;">&#128274;</span>
+                  <div>
+                    <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Created By</div>
+                    <div id="seCreatedByDisplay" style="font-size:13px;font-weight:700;color:#27AE60;"></div>
+                  </div>
+                </div>
+                <div style="flex:1;min-width:180px;">
+                  <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">&#128100; Person in Charge</label>
+                  <select id="seInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;">
+                    <option value="">&#8212; Select officer &#8212;</option>
+                  </select>
+                </div>
+              </div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>
+              <input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>
+                <input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>
+                <input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time *</label>
+                <input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time *</label>
+                <input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              </div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location <span style="color:#555;font-size:10px;">(optional)</span></label>
+              <input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>
+              <textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Total Members Needed <span style="color:#555;">(for staffing bar)</span></label>
+                <input id="seTotalNeeded" type="number" min="0" max="999" placeholder="e.g. 10" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div style="display:flex;flex-direction:column;justify-content:flex-end;">
+                <div style="font-size:10px;color:#555;line-height:1.5;padding-bottom:8px;">Staffing progress bar shows when set. Position slot counts also count toward this total.</div></div>
+              </div>
+              <div style="margin-bottom:12px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                  <label style="font-size:11px;color:#888;">Positions / Roles Needed</label>
+                  <button onclick="addEventPosition()" style="background:#1A3A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">+ Add Position</button>
+                </div>
+                <div style="font-size:10px;color:#555;margin-bottom:6px;">Each position can have a slot count.</div>
+                <div id="sePositionsContainer"></div>
+              </div>
+              <input type="hidden" id="seEditId" value="">
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-primary" id="seSubmitBtn" onclick="saveSpecialEvent()" style="flex:1;">&#10003; Create Event</button>
+                <button class="btn btn-secondary" id="seCancelEditBtn" onclick="cancelEditSpecialEvent()" style="display:none;">Cancel</button>
+              </div>
+            </div>
+            <div id="specialEventsManagerContainer"></div>
+          </div>
+        </div>
 
       </div><!-- end staffingOfficerControls -->
 
@@ -17481,7 +17784,27 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         </div>
       </div>
 
-      <!-- ═══ SPECIAL EVENTS — moved to "Events & Meetings" page in More menu ═══ -->
+      <!-- ═══ SPECIAL EVENTS SECTION ═══ -->
+      <div class="card" id="specialEventsSection" style="padding:0;overflow:visible;border-radius:12px;">
+        <div class="card-header" onclick="toggleStaffCard('specialEventsSectionBody','specialEventsSectionChev')" style="cursor:pointer;user-select:none;background:#001A1A;border-radius:12px 12px 0 0;margin:0;">
+          <div class="icon">🎪</div>
+          <h2 style="font-family:'Barlow Condensed',sans-serif;letter-spacing:2px;text-transform:uppercase;">Special Events</h2>
+          <span id="specialEventsSectionChev" style="margin-left:auto;color:#27AE60;font-size:15px;display:inline-block;transition:transform .2s;">▼</span>
+        </div>
+        <div id="specialEventsSectionBody">
+          <!-- Special Events Member View -->
+      <div class="card" id="specialEventsMemberCard" style="display:none;">
+        <div class="card-header" onclick="toggleStaffCard('specialEventsMemberBody','specialEventsMemberChevron')" style="cursor:pointer;user-select:none;">
+          <div class="icon">&#127914;</div>
+          <h2>Special Events</h2>
+          <span id="specialEventsMemberChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">&#9660;</span>
+        </div>
+        <div id="specialEventsMemberBody">
+          <div id="specialEventsContainer"></div>
+        </div>
+      </div>
+        </div>
+      </div><!-- end specialEventsSection -->
     </div><!-- end section-staffing -->
 
     <!-- ══════════════ COMPANY TAB ══════════════ -->
@@ -18356,7 +18679,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         ✅ Approvals
         <span id="approvalsBadge" style="display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);background:#C8102E;color:#FFF;font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;"></span>
       </button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsSheet();closeMoreMenu()">🎪 Events &amp; Meetings</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsSheet();closeMoreMenu()">📅 Meetings</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
