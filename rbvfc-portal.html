@@ -6856,6 +6856,12 @@ function renderUnitToggles() {
 }
 
 function toggleStaffingUnit(unitId) {
+  // Admin-only: Active Units is a global, shared setting — only admins may change it.
+  var _tsuMe = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+  if (!_tsuMe || _tsuMe.appRole !== 'admin') {
+    showToast('⚠️ Admin only — contact an admin to change active units.');
+    return;
+  }
   if (!state.staffingEnabled) state.staffingEnabled = {};
   var _wasOn = state.staffingEnabled[unitId] !== false;
   state.staffingEnabled[unitId] = !_wasOn;
@@ -6896,8 +6902,17 @@ function _buildOfficerAssignHtml(uId, date, uPos) {
   }
 
   var h = '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #222;">';
-  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
-  h += '<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;flex:1;">&#128100; Assign Member to '+uLabel+'</div>';
+  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">';
+  h += '<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;flex:1;min-width:140px;">&#128100; Assign Member to '+uLabel+'</div>';
+  // Count assigned-but-not-clocked-in shifts within clock window for the bulk clock-in button
+  var _pendingCi = uShifts.filter(function(s){
+    if (!s.memberId || s.clockedIn || s.clockedOutAt) return false;
+    var w = _checkShiftClockWindow(s);
+    return w.ok;
+  }).length;
+  if (_pendingCi > 0) {
+    h += '<button class="btn btn-sm" onclick="clockInAllForUnit(&quot;'+date+'&quot;,&quot;'+uId+'&quot;)" style="font-size:10px;padding:2px 8px;background:#0D2200;border-color:#27AE60;color:#27AE60;" title="Clock in everyone signed up on '+uLabel+' right now">&#9889; Clock In All ('+_pendingCi+')</button>';
+  }
   if (parseFloat(remainingHrs) > 0 && parseFloat(remainingHrs) < 24) {
     h += '<button class="btn btn-sm" onclick="fillAvailableWindow(&quot;'+uId+'&quot;,&quot;'+suggestStart+'&quot;,'+suggestHours+')" style="font-size:10px;padding:2px 8px;background:#1A3A2A;border-color:#27AE60;color:#27AE60;">&#128203; Fill Available ('+remainingHrs+'h)</button>';
   }
@@ -8247,9 +8262,7 @@ var AUTO_CLOCKOUT_GRACE_MINS = 30;  // auto-close if no ack in 30 min
 
 function startClockedInReminderPoller() {
   if (_clockedInReminderInterval) clearInterval(_clockedInReminderInterval);
-  // Poll every 60 s so the 3.5 h reminder and the 4 h auto-clockout fire on time
-  // (5-min polling could delay auto-clockout up to ~5 min past the 4-hour mark).
-  _clockedInReminderInterval = setInterval(checkClockedInReminders, 60 * 1000);
+  _clockedInReminderInterval = setInterval(checkClockedInReminders, 5 * 60 * 1000); // every 5 min
   checkClockedInReminders(); // run immediately on load
 }
 
@@ -8925,6 +8938,136 @@ function signUpAllForUnit(date, unitId) {
   } else {
     showToast('⚠️ No eligible members to sign up.');
   }
+}
+
+// ───────────────────────────────────────────────────────────────
+//  OFFICER / ADMIN: CLOCK IN EVERYONE SIGNED UP ON A UNIT
+// ───────────────────────────────────────────────────────────────
+// Bulk clocks in every member currently assigned to a shift on the
+// given unit + date, at "right now", using the same per-shift logic
+// as confirmStaffClockIn (backHours = 0). Officers and admins only.
+function clockInAllForUnit(date, unitId) {
+  // Role gate
+  var _me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+  var _role = _me && _me.appRole;
+  if (_role !== 'officer' && _role !== 'admin') {
+    showToast('⚠️ Officers and admins only.');
+    return;
+  }
+
+  // Only shifts on this unit+date that are assigned and not yet clocked in
+  var candidates = (state.staffingShifts||[]).filter(function(s){
+    return s.date === date && s.unitId === unitId && s.memberId &&
+           !s.clockedIn && !s.clockedOutAt;
+  });
+  if (!candidates.length) {
+    showToast('⚠️ No one to clock in on ' + (UNIT_LABELS[unitId]||unitId) + '.');
+    return;
+  }
+
+  // Split by clock-window eligibility (shift must have started, within grace)
+  var eligible = [];
+  var blocked  = [];
+  candidates.forEach(function(s){
+    var w = _checkShiftClockWindow(s);
+    if (w.ok) eligible.push(s);
+    else blocked.push({ shift: s, reason: w.reason });
+  });
+
+  if (!eligible.length) {
+    var first = blocked[0] && blocked[0].reason ? ' ' + blocked[0].reason : '';
+    showToast('⚠️ No shifts are within their clock-in window.' + first);
+    return;
+  }
+
+  // Build confirmation list
+  var names = eligible.slice(0,10).map(function(s){
+    var m = (state.roster||[]).find(function(x){ return x.id===s.memberId; });
+    return '• ' + (m ? m.last + ', ' + m.first : s.memberId) +
+           (s.position ? ' — ' + s.position : '');
+  }).join('\n') + (eligible.length>10 ? '\n…and ' + (eligible.length-10) + ' more' : '');
+  var skipNote = blocked.length ? '\n\n(' + blocked.length + ' shift(s) skipped — outside clock-in window.)' : '';
+  if (!confirm('Clock in ' + eligible.length + ' member(s) on ' + (UNIT_LABELS[unitId]||unitId) + ' NOW?\n\n' + names + skipNote)) return;
+
+  // Do the clock-ins (mirrors confirmStaffClockIn with backHours=0)
+  var now = new Date();
+  var nowISO = now.toISOString();
+  var myUid = state.currentUserId;
+  var count = 0;
+
+  eligible.forEach(function(shift){
+    // Clamp start to scheduled shift start if somehow before (defensive)
+    var startTime = new Date(now.getTime());
+    if (shift.shiftStart) {
+      var today = localDateStr(now);
+      var sh = parseInt(shift.shiftStart.slice(0,2));
+      var sm = parseInt(shift.shiftStart.slice(2)||'0');
+      var sched = new Date(today+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00');
+      if (startTime < sched) startTime = sched;
+    }
+
+    shift.clockedIn   = true;
+    shift.clockedInAt = startTime.toISOString();
+    shift.status      = 'active';
+
+    var shiftMemberId   = shift.memberId;
+    var isClockingForSelf = shiftMemberId === myUid;
+    var desc2 = (UNIT_LABELS[shift.unitId]||shift.unitId) +
+                (shift.position ? ' \u00b7 ' + shift.position : '');
+    var newSession = {
+      id: 'sess_'+Date.now()+'_'+count,
+      userId: shiftMemberId,
+      start: startTime.toISOString(),
+      activity: 'duty',
+      desc: desc2,
+      shiftId: shift.id,
+      end: null,
+      duration: null,
+      clockedBy: isClockingForSelf ? null : myUid
+    };
+
+    if (isClockingForSelf) {
+      if (!state.currentSession) {
+        state.currentSession = newSession;
+        if (typeof _clockTimerInterval !== 'undefined') {
+          if (_clockTimerInterval) clearInterval(_clockTimerInterval);
+          _clockTimerInterval = setInterval(tickClockTimer, 1000);
+        }
+        try { updateClockUI(true); }   catch(e){}
+        try { updateClockStats(); }    catch(e){}
+        try { updateStats(); }         catch(e){}
+      }
+    } else {
+      if (!Array.isArray(state.sessions)) state.sessions = [];
+      var existingOpen = state.sessions.find(function(ss){
+        return ss.userId===shiftMemberId && ss.shiftId===shift.id && !ss.end;
+      });
+      if (!existingOpen) state.sessions.push(newSession);
+    }
+    count++;
+  });
+
+  save();
+  try { renderStaffingBoard(); } catch(e){}
+  try { renderMyShifts(); }      catch(e){}
+  try { updateStats(); }         catch(e){}
+
+  // Push notification to the clocked-in members (exclude self to avoid self-notify)
+  try {
+    var notifyIds = eligible
+      .map(function(s){ return s.memberId; })
+      .filter(function(id){ return id && id !== myUid; });
+    if (notifyIds.length) {
+      sendPushToMembers(notifyIds,
+        '🟢 Clocked in by officer',
+        'You were clocked in on ' + (UNIT_LABELS[unitId]||unitId) + '.',
+        'bulk_clockin_' + unitId + '_' + nowISO.slice(0,13)
+      );
+    }
+  } catch(e){}
+
+  var skipMsg = blocked.length ? ' (' + blocked.length + ' skipped)' : '';
+  showToast('✅ Clocked in ' + count + ' member(s) on ' + (UNIT_LABELS[unitId]||unitId) + '.' + skipMsg);
 }
 
 function signUpAllMembers(date, unitId, posName, posIdx) {
@@ -12217,10 +12360,7 @@ function boot() {
   renderLoginMemberList();
   initFirebase();
   setInterval(tickClockTimer, 1000);
-  // NOTE: legacy `setInterval(checkClockReminder, 60000)` removed — it conflicted
-  // with the authoritative checkClockedInReminders() poller by showing a second
-  // banner AT the 4-hour mark with no auto-clockout. The new system (started via
-  // startClockedInReminderPoller) handles the 3.5h warning + 4h auto-clockout.
+  setInterval(checkClockReminder, 60000);
   // Start CAD auto-sync immediately on page load — no login required.
   // Uses cadScriptUrl from localStorage/Firestore state.
   // Runs 2s after boot so Firebase has time to connect; also triggered on
@@ -15915,23 +16055,39 @@ document.addEventListener('DOMContentLoaded', function() {
 //  RECONSTRUCTED MISSING FUNCTIONS
 // ═══════════════════════════════════════════════════
 
-// 1. Clock reminder check — legacy shim.
-//    The old implementation fired AT the 4-hour mark with no auto-clockout,
-//    which conflicted with the authoritative checkClockedInReminders() system
-//    (warn at 3.5h, auto-clockout at 4h). We now delegate to the new system
-//    so any lingering callers behave correctly.
+// 1. Clock reminder check (runs every 60s via setInterval)
 function checkClockReminder() {
-  try { checkClockedInReminders(); } catch(e) {}
+  if (!state.currentSession) return;
+  var start = state.currentSession.start;
+  if (!start) return;
+  // Don't re-show if already dismissed in the last 2 hours
+  var lastDismiss = state.currentSession.reminderDismissed;
+  if (lastDismiss && (Date.now()-new Date(lastDismiss).getTime()) < 2*3600000) return;
+  var elapsed = (Date.now() - new Date(start).getTime()) / 1000 / 60 / 60;
+  if (elapsed >= 4) {
+    var hrs = elapsed.toFixed(1);
+    _showTopBanner(
+      'clockReminderTopBanner',
+      '#0A1A0A', '#7EC850', '⏰',
+      '⏰ 4-HOUR CHECK-IN',
+      'Clocked in '+hrs+' hrs. Still on duty?',
+      [
+        { label:'✅ Still On Duty', fn:'ackClockReminder()', bg:'#27AE60', color:'#000', border:'#27AE60' },
+        { label:'🔴 Clock Me Out', fn:'clockOutFromReminder()', bg:'transparent', color:'#E74C3C', border:'#E74C3C' }
+      ]
+    );
+  }
 }
 
-// 2. Dismiss/acknowledge the 4-hour clock-in reminder — legacy shim.
-//    Delegates to the authoritative acknowledgeClockedInReminder().
+// 2. Dismiss/acknowledge the 4-hour clock-in reminder
 function dismissClockReminder() { ackClockReminder(); }
 function ackClockReminder() {
-  try { acknowledgeClockedInReminder(); } catch(e) {
-    // Fallback: hide any legacy banner if the new handler isn't available
-    try { _hideTopBanner('clockReminderTopBanner'); } catch(_e){}
+  _hideTopBanner('clockReminderTopBanner');
+  if (state.currentSession) {
+    state.currentSession.reminderDismissed = new Date().toISOString();
+    save();
   }
+  showToast('✅ Acknowledged — will check again in 2 hours.');
 }
 
 // 3. Cancel sign-up modal (standalone modal cancel button)
@@ -17267,8 +17423,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           </div>
         </div>
 
-        <!-- Unit Toggles -->
-        <div class="card" id="staffingActiveUnitsCard">
+        <!-- Unit Toggles — admin only (unhidden in initStaffingTab for admins) -->
+        <div class="card" id="staffingActiveUnitsCard" style="display:none;">
           <div class="card-header" onclick="toggleStaffCard('unitToggleBody','unitToggleChevron')" style="cursor:pointer;user-select:none;">
             <div class="icon">🚒</div><h2>Active Units</h2>
             <span id="unitToggleChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">▼</span>
