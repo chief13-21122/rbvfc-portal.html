@@ -1285,16 +1285,6 @@ function showTab(id) {
   if (id === 'hours') renderHoursLog();
   if (id === 'emergency') initEmergencyTab();
   if (id === 'log-entry') initLogEntryTab();
-  if (id === 'manual-entry') {
-    try { initManualActivityCard(); } catch(e){}
-    // Show access-denied notice for non-officers
-    try {
-      var _meME = (state.roster||[]).find(function(x){ return x.id===state.currentUserId; });
-      var _isOffME = _meME && (_meME.appRole==='officer'||_meME.appRole==='admin');
-      var _denied = document.getElementById('manualEntryDeniedCard');
-      if (_denied) _denied.style.display = _isOffME ? 'none' : 'block';
-    } catch(e){}
-  }
   if (id === 'approvals') initApprovalsTab();
   if (id === 'history') initHistoryTab();
   // Sync collapse icons to current state
@@ -4572,7 +4562,6 @@ function onAdminTabShow() {
     'staffingUnitsCard',         // Staffing Unit Visibility
     'notificationsCard',         // Push Notifications
     'monthlyEmailCard',          // Monthly LOSAP Reports
-    'gcalAdminCard',             // Google Calendar Integration
   ];
   _adminOnly.forEach(function(cardId) {
     var el = document.getElementById(cardId);
@@ -5190,7 +5179,6 @@ function applyUserSession(m) {
   var hn=document.getElementById('headerName'); if(hn) hn.textContent=m.last+', '+m.first;
   var isOfficer=m.appRole==='officer'||m.appRole==='admin';
   var mab=document.getElementById('moreAdminBtn'); if(mab) mab.style.display=isOfficer?'block':'none';
-  var mmeb=document.getElementById('moreManualEntryBtn'); if(mmeb) mmeb.style.display=isOfficer?'block':'none';
   var mapb=document.getElementById('moreApprovalsBtn'); if(mapb) mapb.style.display=isOfficer?'block':'none';
   var ahb=document.getElementById('adminHeaderBtn'); if(ahb) ahb.style.display='inline-flex'; // gear shows for all members
   var sub=document.getElementById('switchUserBtn');
@@ -8259,7 +8247,9 @@ var AUTO_CLOCKOUT_GRACE_MINS = 30;  // auto-close if no ack in 30 min
 
 function startClockedInReminderPoller() {
   if (_clockedInReminderInterval) clearInterval(_clockedInReminderInterval);
-  _clockedInReminderInterval = setInterval(checkClockedInReminders, 5 * 60 * 1000); // every 5 min
+  // Poll every 60 s so the 3.5 h reminder and the 4 h auto-clockout fire on time
+  // (5-min polling could delay auto-clockout up to ~5 min past the 4-hour mark).
+  _clockedInReminderInterval = setInterval(checkClockedInReminders, 60 * 1000);
   checkClockedInReminders(); // run immediately on load
 }
 
@@ -12227,7 +12217,10 @@ function boot() {
   renderLoginMemberList();
   initFirebase();
   setInterval(tickClockTimer, 1000);
-  setInterval(checkClockReminder, 60000);
+  // NOTE: legacy `setInterval(checkClockReminder, 60000)` removed — it conflicted
+  // with the authoritative checkClockedInReminders() poller by showing a second
+  // banner AT the 4-hour mark with no auto-clockout. The new system (started via
+  // startClockedInReminderPoller) handles the 3.5h warning + 4h auto-clockout.
   // Start CAD auto-sync immediately on page load — no login required.
   // Uses cadScriptUrl from localStorage/Firestore state.
   // Runs 2s after boot so Firebase has time to connect; also triggered on
@@ -12623,8 +12616,6 @@ function launchApp(member) {
     }
   }
   if (moreAdminBtn) moreAdminBtn.style.display = isOfficer ? '' : 'none';
-  var moreManualEntryBtn = document.getElementById('moreManualEntryBtn');
-  if (moreManualEntryBtn) moreManualEntryBtn.style.display = isOfficer ? '' : 'none';
   var moreApprBtn = document.getElementById('moreApprovalsBtn');
   if (moreApprBtn) moreApprBtn.style.display = isOfficer ? '' : 'none';
 
@@ -15924,39 +15915,23 @@ document.addEventListener('DOMContentLoaded', function() {
 //  RECONSTRUCTED MISSING FUNCTIONS
 // ═══════════════════════════════════════════════════
 
-// 1. Clock reminder check (runs every 60s via setInterval)
+// 1. Clock reminder check — legacy shim.
+//    The old implementation fired AT the 4-hour mark with no auto-clockout,
+//    which conflicted with the authoritative checkClockedInReminders() system
+//    (warn at 3.5h, auto-clockout at 4h). We now delegate to the new system
+//    so any lingering callers behave correctly.
 function checkClockReminder() {
-  if (!state.currentSession) return;
-  var start = state.currentSession.start;
-  if (!start) return;
-  // Don't re-show if already dismissed in the last 2 hours
-  var lastDismiss = state.currentSession.reminderDismissed;
-  if (lastDismiss && (Date.now()-new Date(lastDismiss).getTime()) < 2*3600000) return;
-  var elapsed = (Date.now() - new Date(start).getTime()) / 1000 / 60 / 60;
-  if (elapsed >= 4) {
-    var hrs = elapsed.toFixed(1);
-    _showTopBanner(
-      'clockReminderTopBanner',
-      '#0A1A0A', '#7EC850', '⏰',
-      '⏰ 4-HOUR CHECK-IN',
-      'Clocked in '+hrs+' hrs. Still on duty?',
-      [
-        { label:'✅ Still On Duty', fn:'ackClockReminder()', bg:'#27AE60', color:'#000', border:'#27AE60' },
-        { label:'🔴 Clock Me Out', fn:'clockOutFromReminder()', bg:'transparent', color:'#E74C3C', border:'#E74C3C' }
-      ]
-    );
-  }
+  try { checkClockedInReminders(); } catch(e) {}
 }
 
-// 2. Dismiss/acknowledge the 4-hour clock-in reminder
+// 2. Dismiss/acknowledge the 4-hour clock-in reminder — legacy shim.
+//    Delegates to the authoritative acknowledgeClockedInReminder().
 function dismissClockReminder() { ackClockReminder(); }
 function ackClockReminder() {
-  _hideTopBanner('clockReminderTopBanner');
-  if (state.currentSession) {
-    state.currentSession.reminderDismissed = new Date().toISOString();
-    save();
+  try { acknowledgeClockedInReminder(); } catch(e) {
+    // Fallback: hide any legacy banner if the new handler isn't available
+    try { _hideTopBanner('clockReminderTopBanner'); } catch(_e){}
   }
-  showToast('✅ Acknowledged — will check again in 2 hours.');
 }
 
 // 3. Cancel sign-up modal (standalone modal cancel button)
@@ -17083,76 +17058,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
     </div>
 
-    <!-- ══════════════ MANUAL ACTIVITY ENTRY TAB ══════════════ -->
-    <div id="section-manual-entry" class="section">
-
-      <!-- Officer Manual Activity Entry -->
-      <div class="card" id="manualActivityCard" style="display:none;">
-        <div class="card-header" onclick="toggleAdminCardById('manualActivityBody')" style="cursor:pointer;user-select:none;">
-          <div class="icon">✏️</div>
-          <h2>Manual Activity Entry</h2>
-          <span style="font-size:11px;color:#555;margin-left:8px;">Officers &amp; Admin</span>
-          <span id="manualActivityChevron" style="margin-left:auto;font-size:13px;color:#555;transition:transform .2s;display:inline-block;">&#9660;</span>
-        </div>
-        <div id="manualActivityBody">
-          <!-- Logged By Banner -->
-          <div style="display:flex;align-items:center;gap:10px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
-            <span style="font-size:18px;">🔒</span>
-            <div>
-              <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Entry Recorded By</div>
-              <div id="manualEntryByName" style="font-size:14px;font-weight:700;color:#27AE60;"></div>
-            </div>
-          </div>
-          <div class="form-grid">
-            <div class="form-group" style="grid-column:1/-1;">
-              <label>Member *</label>
-              <select id="manualMemberId" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
-                <option value="">— Select member —</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Activity Type *</label>
-              <select id="manualCategory" onchange="manualCategoryChanged()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
-                <option value="">— Select type —</option>
-                <option value="meeting">Company Meeting</option>
-                <option value="boardmeeting">Board Meeting</option>
-                <option value="duties">Standby / Collateral Duty</option>
-                <option value="training">Training</option>
-                <option value="drill">Drill / In-House Training</option>
-                <option value="fundraiser">Fundraiser / Special Event</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Date *</label>
-              <input type="date" id="manualDate">
-            </div>
-            <div class="form-group" id="manualHoursGroup">
-              <label>Hours <span id="manualHoursHint" style="color:#666;font-size:10px;"></span></label>
-              <input type="number" id="manualHours" min="0.5" step="0.5" placeholder="e.g. 2">
-            </div>
-            <div class="form-group" style="grid-column:1/-1;">
-              <label>Description / Notes *</label>
-              <input type="text" id="manualDesc" placeholder="e.g. Monthly Company Meeting, Station coverage 1800-0600…">
-            </div>
-          </div>
-          <button class="btn btn-primary btn-full" onclick="saveManualActivity()" style="margin-top:4px;">✅ Record Activity</button>
-          <!-- Recent manual entries -->
-          <div id="manualRecentEntries" style="margin-top:14px;"></div>
-        </div>
-      </div>
-
-      <!-- Access denied notice for non-officers -->
-      <div class="card" id="manualEntryDeniedCard" style="display:none;">
-        <div style="padding:30px 16px;text-align:center;color:#888;">
-          <div style="font-size:36px;margin-bottom:10px;">🔒</div>
-          <div style="font-size:14px;color:#F5A623;font-weight:700;margin-bottom:6px;">Officers &amp; Admin Only</div>
-          <div style="font-size:12px;">Manual Activity Entry is restricted to officers and administrators.</div>
-        </div>
-      </div>
-
-    </div><!-- end section-manual-entry -->
-
     <!-- ══════════════ EMERGENCY TAB ══════════════ -->
     <div id="section-emergency" class="section">
 
@@ -17404,10 +17309,134 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           </div>
         </div>
 
+        <!-- Special Events Manager -->
+        <div class="card" id="specialEventsManagerCard" style="display:none;">
+          <div class="card-header" onclick="toggleStaffCard('specialEventsManagerBody','specialEventsManagerChevron')" style="cursor:pointer;user-select:none;">
+            <div class="icon">&#127920;</div><h2>Special Events</h2>
+            <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
+          </div>
+          <div id="specialEventsManagerBody">
+            <!-- Create New Event form — always in HTML for reliability -->
+            <div id="seCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+              <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">&#127920; Create New Event</div>
+              <!-- Created By / In Charge row -->
+              <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:8px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:8px 12px;">
+                  <span style="font-size:16px;">&#128274;</span>
+                  <div>
+                    <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Created By</div>
+                    <div id="seCreatedByDisplay" style="font-size:13px;font-weight:700;color:#27AE60;"></div>
+                  </div>
+                </div>
+                <div style="flex:1;min-width:180px;">
+                  <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">&#128100; Person in Charge</label>
+                  <select id="seInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;">
+                    <option value="">&#8212; Select officer &#8212;</option>
+                  </select>
+                </div>
+              </div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>
+              <input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>
+                <input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>
+                <input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time *</label>
+                <input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time *</label>
+                <input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              </div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location <span style="color:#555;font-size:10px;">(optional)</span></label>
+              <input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>
+              <textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Total Members Needed <span style="color:#555;">(for staffing bar)</span></label>
+                <input id="seTotalNeeded" type="number" min="0" max="999" placeholder="e.g. 10" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div style="display:flex;flex-direction:column;justify-content:flex-end;">
+                <div style="font-size:10px;color:#555;line-height:1.5;padding-bottom:8px;">Staffing progress bar shows when set. Position slot counts also count toward this total.</div></div>
+              </div>
+              <div style="margin-bottom:12px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                  <label style="font-size:11px;color:#888;">Positions / Roles Needed</label>
+                  <button onclick="addEventPosition()" style="background:#1A3A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">+ Add Position</button>
+                </div>
+                <div style="font-size:10px;color:#555;margin-bottom:6px;">Each position can have a slot count.</div>
+                <div id="sePositionsContainer"></div>
+              </div>
+              <input type="hidden" id="seEditId" value="">
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-primary" id="seSubmitBtn" onclick="saveSpecialEvent()" style="flex:1;">&#10003; Create Event</button>
+                <button class="btn btn-secondary" id="seCancelEditBtn" onclick="cancelEditSpecialEvent()" style="display:none;">Cancel</button>
+              </div>
+            </div>
+            <div id="specialEventsManagerContainer"></div>
+          </div>
+        </div>
+
       </div><!-- end staffingOfficerControls -->
 
 
       <!-- Daily Staffing Board -->
+
+      <!-- Officer Manual Activity Entry -->
+      <div class="card" id="manualActivityCard" style="display:none;">
+        <div class="card-header" onclick="toggleAdminCardById('manualActivityBody')" style="cursor:pointer;user-select:none;">
+          <div class="icon">✏️</div>
+          <h2>Manual Activity Entry</h2>
+          <span style="font-size:11px;color:#555;margin-left:8px;">Officers &amp; Admin</span>
+          <span id="manualActivityChevron" style="margin-left:auto;font-size:13px;color:#555;transition:transform .2s;display:inline-block;">&#9660;</span>
+        </div>
+        <div id="manualActivityBody">
+          <!-- Logged By Banner -->
+          <div style="display:flex;align-items:center;gap:10px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+            <span style="font-size:18px;">🔒</span>
+            <div>
+              <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Entry Recorded By</div>
+              <div id="manualEntryByName" style="font-size:14px;font-weight:700;color:#27AE60;"></div>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1;">
+              <label>Member *</label>
+              <select id="manualMemberId" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+                <option value="">— Select member —</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Activity Type *</label>
+              <select id="manualCategory" onchange="manualCategoryChanged()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+                <option value="">— Select type —</option>
+                <option value="meeting">Company Meeting</option>
+                <option value="boardmeeting">Board Meeting</option>
+                <option value="duties">Standby / Collateral Duty</option>
+                <option value="training">Training</option>
+                <option value="drill">Drill / In-House Training</option>
+                <option value="fundraiser">Fundraiser / Special Event</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Date *</label>
+              <input type="date" id="manualDate">
+            </div>
+            <div class="form-group" id="manualHoursGroup">
+              <label>Hours <span id="manualHoursHint" style="color:#666;font-size:10px;"></span></label>
+              <input type="number" id="manualHours" min="0.5" step="0.5" placeholder="e.g. 2">
+            </div>
+            <div class="form-group" style="grid-column:1/-1;">
+              <label>Description / Notes *</label>
+              <input type="text" id="manualDesc" placeholder="e.g. Monthly Company Meeting, Station coverage 1800-0600…">
+            </div>
+          </div>
+          <button class="btn btn-primary btn-full" onclick="saveManualActivity()" style="margin-top:4px;">✅ Record Activity</button>
+          <!-- Recent manual entries -->
+          <div id="manualRecentEntries" style="margin-top:14px;"></div>
+        </div>
+      </div>
 
       <!-- ═══ SPECIAL EVENTS SECTION ═══ -->
       <div class="card" id="specialEventsSection" style="padding:0;overflow:visible;border-radius:12px;">
@@ -17417,73 +17446,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           <span id="specialEventsSectionChev" style="margin-left:auto;color:#27AE60;font-size:15px;display:inline-block;transition:transform .2s;">▼</span>
         </div>
         <div id="specialEventsSectionBody">
-          <!-- Special Events Manager View (officers, admin, Community Relations Chair) -->
-      <div class="card" id="specialEventsManagerCard" style="display:none;">
-        <div class="card-header" onclick="toggleStaffCard('specialEventsManagerBody','specialEventsManagerChevron')" style="cursor:pointer;user-select:none;">
-          <div class="icon">&#127920;</div><h2>Special Events</h2>
-          <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
-        </div>
-        <div id="specialEventsManagerBody">
-          <!-- Create New Event form — always in HTML for reliability -->
-          <div id="seCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
-            <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">&#127920; Create New Event</div>
-            <!-- Created By / In Charge row -->
-            <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
-              <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:8px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:8px 12px;">
-                <span style="font-size:16px;">&#128274;</span>
-                <div>
-                  <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Created By</div>
-                  <div id="seCreatedByDisplay" style="font-size:13px;font-weight:700;color:#27AE60;"></div>
-                </div>
-              </div>
-              <div style="flex:1;min-width:180px;">
-                <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">&#128100; Person in Charge</label>
-                <select id="seInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;">
-                  <option value="">&#8212; Select officer &#8212;</option>
-                </select>
-              </div>
-            </div>
-            <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>
-            <input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-              <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>
-              <input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>
-              <input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-              <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time *</label>
-              <input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time *</label>
-              <input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-            </div>
-            <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location <span style="color:#555;font-size:10px;">(optional)</span></label>
-            <input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-            <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>
-            <textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-              <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Total Members Needed <span style="color:#555;">(for staffing bar)</span></label>
-              <input id="seTotalNeeded" type="number" min="0" max="999" placeholder="e.g. 10" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              <div style="display:flex;flex-direction:column;justify-content:flex-end;">
-              <div style="font-size:10px;color:#555;line-height:1.5;padding-bottom:8px;">Staffing progress bar shows when set. Position slot counts also count toward this total.</div></div>
-            </div>
-            <div style="margin-bottom:12px;">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                <label style="font-size:11px;color:#888;">Positions / Roles Needed</label>
-                <button onclick="addEventPosition()" style="background:#1A3A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">+ Add Position</button>
-              </div>
-              <div style="font-size:10px;color:#555;margin-bottom:6px;">Each position can have a slot count.</div>
-              <div id="sePositionsContainer"></div>
-            </div>
-            <input type="hidden" id="seEditId" value="">
-            <div style="display:flex;gap:8px;">
-              <button class="btn btn-primary" id="seSubmitBtn" onclick="saveSpecialEvent()" style="flex:1;">&#10003; Create Event</button>
-              <button class="btn btn-secondary" id="seCancelEditBtn" onclick="cancelEditSpecialEvent()" style="display:none;">Cancel</button>
-            </div>
-          </div>
-          <div id="specialEventsManagerContainer"></div>
-        </div>
-      </div>
           <!-- Special Events Member View -->
       <div class="card" id="specialEventsMemberCard" style="display:none;">
         <div class="card-header" onclick="toggleStaffCard('specialEventsMemberBody','specialEventsMemberChevron')" style="cursor:pointer;user-select:none;">
@@ -18193,10 +18155,9 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
 
       <!-- Google Calendar Integration -->
-      <div class="card" id="gcalAdminCard" style="margin-top:16px;">
+      <div class="card" style="margin-top:16px;">
         <div class="card-header" onclick="toggleAdminCardById('gcalCard')" style="cursor:pointer;user-select:none;">
           <div class="icon">📅</div><h2>Google Calendar</h2>
-          <span style="font-size:11px;color:#555;margin-left:8px;">Admin</span>
           <span id="gcalCardChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;">&#9660;</span>
         </div>
         <div id="gcalCard" style="padding:16px;">
@@ -18377,7 +18338,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
 
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreManualEntryBtn" onclick="showTab('manual-entry');closeMoreMenu()">✏️ Manual Activity Entry</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
 
     </div>
