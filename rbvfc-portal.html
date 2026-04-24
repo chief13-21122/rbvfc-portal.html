@@ -8243,12 +8243,11 @@ function notifyUnderstaffedDay(date) {
 // ───────────────────────────────────────────────────────────────
 var _clockedInReminderInterval = null;
 var REMINDER_THRESHOLD_HRS  = 3.5;  // warn 30 min before the 4-hour mark
-var AUTO_CLOCKOUT_GRACE_MINS = 5;   // auto-close if no ack in 5 min (per policy)
-var PRE_SHIFT_REMINDER_MINS = 30;   // remind 30 min prior to shift/meeting/event start
+var AUTO_CLOCKOUT_GRACE_MINS = 30;  // auto-close if no ack in 30 min
 
 function startClockedInReminderPoller() {
   if (_clockedInReminderInterval) clearInterval(_clockedInReminderInterval);
-  _clockedInReminderInterval = setInterval(checkClockedInReminders, 60 * 1000); // every 1 min for 5-min grace accuracy
+  _clockedInReminderInterval = setInterval(checkClockedInReminders, 5 * 60 * 1000); // every 5 min
   checkClockedInReminders(); // run immediately on load
 }
 
@@ -8318,21 +8317,10 @@ function _getActiveClockedInSession(uid) {
 
 function _performAutoClockOut(sess, record) {
   var uid = sess.userId;
-  var endTime = new Date(record._reminderSentAt
-    ? new Date(record._reminderSentAt).getTime() + AUTO_CLOCKOUT_GRACE_MINS * 60000
-    : new Date());
-  // Don't log an end time that's in the future
-  if (endTime > new Date()) endTime = new Date();
+  var endTime = new Date(record._reminderSentAt || new Date());
   var startTime = new Date(sess.start);
   var durSecs = Math.max(0, Math.floor((endTime - startTime) / 1000));
-  var reason = 'Auto clocked out — no response to ' + AUTO_CLOCKOUT_GRACE_MINS + '-min reminder.';
-
-  // Track what kind of activity this was so we can award LOSAP + tell the member
-  var activityKind = 'duty';         // human-readable kind ('Shift', 'Meeting', 'Event', 'Duty')
-  var activityLabel = 'Duty';        // friendly label for notification
-  var losapCategory = null;          // CAT_CONFIG key
-  var losapAwardDesc = '';           // desc for the LOSAP entry
-  var losapSourceId = '';            // source id for dedup
+  var reason = 'Auto clocked out — no response to 30-min reminder.';
 
   if (sess._synthetic) {
     // ── Synthetic: shift / event / meeting ─────────────────────
@@ -8343,11 +8331,6 @@ function _performAutoClockOut(sess, record) {
         shift.clockedOutAt = endTime.toISOString();
         shift.status = 'completed';
         shift._autoClockoutReason = reason;
-        activityKind = 'shift';
-        activityLabel = (UNIT_LABELS[shift.unitId]||shift.unitId) + (shift.position ? ' · '+shift.position : '') + ' Shift';
-        losapCategory = 'duties'; // Standby/Sleep-In/Collateral Duty — 1 pt per 4-hr block
-        losapAwardDesc = activityLabel + ' (auto clock-out)';
-        losapSourceId = shift.id;
       }
       // Also close currentSession if it is linked to this shift
       if (state.currentSession && state.currentSession.shiftId === sess.shiftId && !state.currentSession.end) {
@@ -8366,12 +8349,6 @@ function _performAutoClockOut(sess, record) {
         record.clockedOutAt = endTime.toISOString();
         record._autoClockoutReason = reason;
       }
-      var ev = (state.specialEvents||[]).find(function(e){ return e.id===sess.eventId; });
-      activityKind = 'event';
-      activityLabel = ev ? ev.title : 'Special Event';
-      losapCategory = 'fundraiser'; // matches other event clock-outs
-      losapAwardDesc = activityLabel + ' — attendance (auto clock-out)';
-      losapSourceId = sess.eventId;
     } else if (sess.mtgId) {
       if (record) {
         record.clockedOutAt = endTime.toISOString();
@@ -8387,12 +8364,6 @@ function _performAutoClockOut(sess, record) {
         clearInterval(_clockTimerInterval); _clockTimerInterval = null;
         try { updateClockUI(false); } catch(e) {}
       }
-      var mtg = (state.meetings||[]).find(function(m){ return m.id===sess.mtgId; });
-      activityKind = 'meeting';
-      activityLabel = mtg ? mtg.title : 'Meeting';
-      losapCategory = 'meeting';
-      losapAwardDesc = activityLabel + ' — attendance (auto clock-out)';
-      losapSourceId = sess.mtgId;
     }
   } else {
     // ── Real currentSession ─────────────────────────────────────
@@ -8409,105 +8380,34 @@ function _performAutoClockOut(sess, record) {
     if (sess.shiftId) {
       var sh2 = (state.staffingShifts||[]).find(function(s){ return s.id===sess.shiftId; });
       if (sh2) { sh2.clockedIn=false; sh2.clockedOutAt=endTime.toISOString(); sh2.status='completed'; }
-      activityKind = 'shift';
-      activityLabel = sh2 ? ((UNIT_LABELS[sh2.unitId]||sh2.unitId) + (sh2.position?' · '+sh2.position:'') + ' Shift') : 'Shift';
-      losapCategory = 'duties';
-      losapAwardDesc = activityLabel + ' (auto clock-out)';
-      losapSourceId = sess.shiftId;
-    } else if (sess.mtgId) {
-      var mtg2 = (state.meetings||[]).find(function(m){ return m.id===sess.mtgId; });
-      activityKind = 'meeting';
-      activityLabel = mtg2 ? mtg2.title : 'Meeting';
-      losapCategory = 'meeting';
-      losapAwardDesc = activityLabel + ' — attendance (auto clock-out)';
-      losapSourceId = sess.mtgId;
-    } else {
-      // Generic duty session
-      activityKind = 'duty';
-      activityLabel = sess.desc || 'Duty';
-      losapCategory = 'duties';
-      losapAwardDesc = activityLabel + ' (auto clock-out)';
-      losapSourceId = sess.id || '';
     }
   }
 
   save();
-
-  // ── Award LOSAP points for the completed clock-in session ──────
-  var pointsAwarded = 0;
-  var pointsLabel = '';
-  try {
-    if (losapCategory) {
-      var hoursWorked = durSecs / 3600;
-      // Compute points preview (what will be awarded)
-      pointsAwarded = (typeof calcActivityPts === 'function')
-        ? (calcActivityPts(losapCategory, hoursWorked) || 0)
-        : 0;
-      var catLabel = (typeof typeLabel === 'function') ? typeLabel(losapCategory) : losapCategory;
-      pointsLabel = catLabel;
-      // Auto-award via the shared helper (handles dedup + member notification)
-      if (typeof _autoAwardLosap === 'function' && losapSourceId) {
-        _autoAwardLosap(uid, losapCategory, endTime.toISOString().slice(0,10), losapAwardDesc, losapSourceId);
-      }
-    }
-  } catch(e) {}
 
   // ── UI cleanup ──────────────────────────────────────────────────
   var banner = document.getElementById('clockedInReminderBanner');
   if (banner) { banner.style.display='none'; _adjustAppTopPad(); }
   var modal = document.getElementById('_dutyOverTimeModal');
   if (modal) modal.remove();
-  var stayModal = document.getElementById('_stayClockInModal');
-  if (stayModal) stayModal.remove();
   try { updateClockUI(false); } catch(e) {}
   try { renderMyShifts(); }       catch(e) {}
   try { renderRecentSessions(); } catch(e) {}
   try { updateClockStats(); }     catch(e) {}
   try { renderStaffingBoard(); }  catch(e) {}
-  try { renderLOSAP(); }          catch(e) {}
-
-  // ── Build the notification message (includes LOSAP info) ───────
-  var timeStr = endTime.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-  var ptsStr = pointsAwarded > 0
-    ? ' · Earned ' + pointsAwarded + ' ' + pointsLabel + ' LOSAP point' + (pointsAwarded===1?'':'s')
-    : (losapCategory ? ' · No LOSAP point' + (pointsAwarded===1?'':'s') + ' earned (below threshold)' : '');
-  var bodyMsg = 'Auto clocked out of ' + activityLabel + ' at ' + timeStr + ptsStr + '.';
 
   // ── Push notification: you were auto clocked out ───────────────
   try {
     var _alertId = 'auto_clockout_' + uid + '_' + new Date().toISOString().slice(0,13);
     sendPushToMembers([uid],
       '🔴 You were auto clocked out',
-      bodyMsg,
+      'No response to the 30-min check-in reminder. Portal clocked you out at ' +
+        endTime.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '.',
       _alertId
     );
   } catch(e) {}
 
-  // ── Toast + in-app banner ───────────────────────────────────────
-  showToast('🔴 Auto clocked out — ' + activityLabel +
-    (pointsAwarded>0 ? ' · +' + pointsAwarded + ' LOSAP pt' + (pointsAwarded===1?'':'s') : ''));
-
-  // Persist an in-app alert so they see it next time they open the portal
-  try {
-    if (!Array.isArray(state.staffingAlerts)) state.staffingAlerts = [];
-    state.staffingAlerts.unshift({
-      id: 'auto_co_' + Date.now(),
-      msg: '🔴 You were auto clocked out of ' + activityLabel + ' at ' + timeStr +
-        (pointsAwarded>0
-          ? '. You earned ' + pointsAwarded + ' ' + pointsLabel + ' LOSAP point' + (pointsAwarded===1?'':'s') + '.'
-          : (losapCategory ? '. No LOSAP points awarded (below minimum threshold).' : '.')),
-      sentBy: 'system',
-      sentAt: new Date().toISOString(),
-      group: 'individual',
-      targetMembers: [uid],
-      clears: [],
-      needsAck: true,
-      _autoClockout: true
-    });
-    save();
-    try { renderStaffingAlerts(); } catch(e) {}
-    try { renderMemberAlertBanner(); } catch(e) {}
-  } catch(e) {}
+  showToast('🔴 Auto clocked out — no response to 30-min reminder.');
 }
 
 function checkClockedInReminders() {
@@ -8554,16 +8454,16 @@ function checkClockedInReminders() {
     record._pushSent = false;
     save();
     _showClockedInReminderBanner(openSess, hrs);
-    // Push: warning — grace window before auto clock-out
+    // Push: warning 30 min before auto clock-out
     try {
       var _warnId = 'duty_warn_' + uid + '_' + now.toISOString().slice(0,13);
       if (!record._pushSent) {
         record._pushSent = true;
         save();
         sendPushToMembers([uid],
-          '⏰ Still on duty? (' + AUTO_CLOCKOUT_GRACE_MINS + '-min warning)',
+          '⏰ Still on duty? (30-min warning)',
           'You\'ve been clocked in for ' + hrs.toFixed(1) + ' hrs. ' +
-            'Confirm within ' + AUTO_CLOCKOUT_GRACE_MINS + ' min or you will be auto clocked out.',
+            'Confirm within 30 min or you will be auto clocked out.',
           _warnId
         );
       }
@@ -9580,21 +9480,17 @@ function checkStaffingReminders() {
   var hour  = new Date().getHours();
   var now   = new Date();
 
-  // ── 30-MIN-PRIOR reminders run whether or not the member is clocked in,
-  //    since they need to know about their *upcoming* commitments.
-  try { checkUpcomingReminders(uid, now); } catch(e) {}
-
   // Use authoritative check across all clock-in types
   var alreadyClocked = !!_getActiveClockedInSession(uid);
 
   // ── Duty over-time warning now handled by checkClockedInReminders ─────
-  // (which runs every 1 min and covers all clock-in types)
+  // (which runs every 5 min and covers all clock-in types)
   if (alreadyClocked) {
     if (hour >= 6) checkClassReminders(uid, today);
     return;
   }
 
-  // ── Staffing shift clock-in reminders (legacy 6-AM reminder) ─────────
+  // ── Staffing shift clock-in reminders ────────────────────────────────
   (state.staffingShifts||[]).forEach(function(s) {
     if (s.memberId!==uid || s.date!==today || s.clockedIn || s.reminded) return;
     var win = _checkShiftClockWindow(s);
@@ -9602,122 +9498,6 @@ function checkStaffingReminders() {
     if (hour >= 6) { s.reminded = true; save(); showStaffingReminder(s); }
   });
   if (hour >= 6) checkClassReminders(uid, today);
-}
-
-// ── 30-MIN-PRIOR REMINDERS ───────────────────────────────────────────
-// Fires a single reminder (banner + push) 30 min before a shift,
-// meeting, or special event the member is scheduled for. Each
-// scheduled item has a _preReminded30 flag so it fires only once.
-function checkUpcomingReminders(uid, now) {
-  if (!uid) return;
-  now = now || new Date();
-  var windowMs = PRE_SHIFT_REMINDER_MINS * 60000;
-  var today = localDateStr(now);
-  var changed = false;
-
-  // ─ SHIFTS ─
-  (state.staffingShifts||[]).forEach(function(s) {
-    if (s.memberId !== uid) return;
-    if (s.date !== today) return;
-    if (s.clockedIn || s.clockedOutAt) return;
-    if (s._preReminded30) return;
-    var sh = parseInt((s.shiftStart||'0700').slice(0,2));
-    var sm = parseInt((s.shiftStart||'0700').slice(2,4)||'0');
-    var startMs = new Date(s.date+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00').getTime();
-    var diffMs = startMs - now.getTime();
-    // Fire within the final 30 min (but not after start)
-    if (diffMs > 0 && diffMs <= windowMs) {
-      s._preReminded30 = true; changed = true;
-      var mins = Math.max(1, Math.round(diffMs / 60000));
-      var unitLabel = (UNIT_LABELS[s.unitId]||s.unitId) + (s.position ? ' · '+s.position : '');
-      var startStr = (sh%12||12) + ':' + (sm<10?'0':'')+sm + ' ' + (sh>=12?'PM':'AM');
-      _showUpcomingReminderBanner('shift', s.id, unitLabel, startStr, mins, function(){
-        try { staffClockInFromBanner(s.id); } catch(e){}
-      });
-      try {
-        sendPushToMembers([uid],
-          '\u23f0 Shift in ' + mins + ' min',
-          unitLabel + ' starts at ' + startStr + '. Please be ready to clock in.',
-          'pre30_shift_' + s.id + '_' + now.toISOString().slice(0,13));
-      } catch(e) {}
-    }
-  });
-
-  // ─ MEETINGS ─
-  (state.meetingAttendance||[]).forEach(function(att) {
-    if (att.memberId !== uid) return;
-    if (att.date !== today) return;
-    if (att.clockedInAt || att.clockedOutAt) return;
-    if (att._preReminded30) return;
-    var mtg = (state.meetings||[]).find(function(m){ return m.id===att.mtgId; });
-    if (!mtg || !mtg.time) return;
-    var startMs = new Date(att.date+'T'+mtg.time+':00').getTime();
-    var diffMs = startMs - now.getTime();
-    if (diffMs > 0 && diffMs <= windowMs) {
-      att._preReminded30 = true; changed = true;
-      var mins = Math.max(1, Math.round(diffMs / 60000));
-      var parts = mtg.time.split(':');
-      var mh = parseInt(parts[0]||'0'), mm = parseInt(parts[1]||'0');
-      var tStr = (mh%12||12)+':'+(mm<10?'0':'')+mm+' '+(mh>=12?'PM':'AM');
-      _showUpcomingReminderBanner('meeting', att.mtgId, mtg.title, tStr, mins, function(){
-        try { clockInMeeting(att.mtgId, att.date); } catch(e){}
-      });
-      try {
-        sendPushToMembers([uid],
-          '\u23f0 Meeting in ' + mins + ' min',
-          (mtg.title||'Meeting') + ' starts at ' + tStr + '.' + (mtg.location ? ' ' + mtg.location : ''),
-          'pre30_mtg_' + att.mtgId + '_' + att.date);
-      } catch(e) {}
-    }
-  });
-
-  // ─ SPECIAL EVENTS ─
-  (state.specialEvents||[]).forEach(function(ev) {
-    if (!ev.date || ev.date !== today) return;
-    if (!ev.startTime) return;
-    var signup = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
-    if (!signup) return;
-    if (signup.clockedIn || signup.clockedOutAt) return;
-    if (signup._preReminded30) return;
-    var startMs = new Date(ev.date+'T'+ev.startTime+':00').getTime();
-    var diffMs = startMs - now.getTime();
-    if (diffMs > 0 && diffMs <= windowMs) {
-      signup._preReminded30 = true; changed = true;
-      var mins = Math.max(1, Math.round(diffMs / 60000));
-      var parts = ev.startTime.split(':');
-      var eh = parseInt(parts[0]||'0'), em = parseInt(parts[1]||'0');
-      var etStr = (eh%12||12)+':'+(em<10?'0':'')+em+' '+(eh>=12?'PM':'AM');
-      _showUpcomingReminderBanner('event', ev.id, ev.title, etStr, mins, null);
-      try {
-        sendPushToMembers([uid],
-          '\u23f0 Event in ' + mins + ' min',
-          (ev.title||'Event') + ' starts at ' + etStr + '.' + (ev.location ? ' ' + ev.location : ''),
-          'pre30_evt_' + ev.id + '_' + ev.date);
-      } catch(e) {}
-    }
-  });
-
-  if (changed) save();
-}
-
-// Top banner for upcoming shift/meeting/event — reuses _showTopBanner style.
-function _showUpcomingReminderBanner(type, entityId, entityTitle, startStr, minsUntil, clockInFn) {
-  var typeLabel_ = type === 'shift' ? 'SHIFT' : (type === 'meeting' ? 'MEETING' : 'EVENT');
-  var label = '\u23f0 ' + typeLabel_ + ' IN ' + minsUntil + ' MIN';
-  var body = entityTitle + ' starts at ' + startStr + '.';
-  var buttons = [];
-  if (clockInFn) {
-    // Attach handler globally for banner inline-onclick use
-    var fnName = '_preReminderAction_' + type + '_' + String(entityId).replace(/[^A-Za-z0-9_]/g,'_');
-    window[fnName] = function() {
-      try { clockInFn(); } catch(e) {}
-      _hideTopBanner('upcomingReminderBanner');
-    };
-    buttons.push({ label:'\u270A Open Shift Page', fn: fnName + '()', bg:'#F5A623', color:'#000', border:'#F5A623' });
-  }
-  buttons.push({ label:'Dismiss', fn:"_hideTopBanner('upcomingReminderBanner')",
-    bg:'transparent', color:'#F5A623', border:'#F5A623' });
-  _showTopBanner('upcomingReminderBanner', '#1A1200', '#F5A623', '\u23f0', label, body, buttons);
 }
 
 function _showDutyOverTimeWarning(session, warnHrs, autoOutMins) {
@@ -9902,7 +9682,7 @@ function _adjustAppTopPad() {
   // Use requestAnimationFrame to ensure banner has rendered before measuring
   requestAnimationFrame(function() {
     var totalH = 0;
-    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner','classReminderTopBanner','losapPointsBanner','clockedInReminderBanner','upcomingReminderBanner'].forEach(function(id){
+    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner','classReminderTopBanner','losapPointsBanner'].forEach(function(id){
       var el = document.getElementById(id);
       if (el && el.style.display !== 'none') totalH += el.offsetHeight;
     });
@@ -9910,7 +9690,7 @@ function _adjustAppTopPad() {
     var header = document.getElementById('appHeader');
     if (header) { header.style.transition='margin-top .2s ease'; header.style.marginTop = totalH > 0 ? totalH+'px' : ''; }
     // Also update banners z-index so they sit above everything
-    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner','clockedInReminderBanner','upcomingReminderBanner'].forEach(function(id){
+    ['staffingReminderBanner','staffingAlertTopBanner','clockReminderTopBanner'].forEach(function(id){
       var el = document.getElementById(id);
       if (el) el.style.zIndex = '10000';
     });
@@ -10785,242 +10565,127 @@ function clockOutMeeting(mtgId, occurrenceDate) {
 }
 
 
-// ── END-OF-ACTIVITY PROMPT ─────────────────────────────────────
-// Shows a 5-minute countdown modal asking the member whether they
-// want to stay clocked in. If they don't respond in time, the
-// calling code (checkAutoClockOuts) will fire _performAutoClockOut
-// which awards LOSAP points and notifies the member.
-function _askStayClockIn(type, entityId, entityTitle, scheduledEnd, onClockOutNow) {
-  // If a modal is already showing, don't stack another one
+function _askStayClockIn(type, entityId, entityTitle, scheduledEnd) {
+  // Don't show if modal already visible
   if (document.getElementById('_stayClockInModal')) return;
   var endStr = scheduledEnd.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
   var wrap = document.createElement('div');
   wrap.id = '_stayClockInModal';
-  wrap.dataset.type = type || '';
-  wrap.dataset.entityId = entityId || '';
   wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px;';
   var inner = document.createElement('div');
-  inner.style.cssText = 'background:#1A1A1A;border:2px solid #F5A623;border-radius:16px;padding:24px;width:100%;max-width:380px;text-align:center;';
-  var icon  = document.createElement('div'); icon.style.cssText = 'font-size:40px;margin-bottom:10px;'; icon.textContent = '\u23f1\ufe0f';
-  var title = document.createElement('div'); title.style.cssText = 'font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:700;color:#F5A623;margin-bottom:6px;letter-spacing:1px;'; title.textContent = 'Still On Duty?';
-  var sub   = document.createElement('div'); sub.style.cssText = 'font-size:13px;color:#AAA;margin-bottom:14px;line-height:1.5;';
-  var typeLabel_ = type === 'event' ? 'event' : (type === 'meeting' ? 'meeting' : 'shift');
-  sub.innerHTML = 'Your ' + typeLabel_ + ' <strong style="color:#F0F0F0;">"'+entityTitle+'"</strong> ended at <strong style="color:#F0F0F0;">'+endStr+'</strong>.<br>Do you want to stay clocked in?';
-
-  // Countdown warning
-  var warnBox = document.createElement('div');
-  warnBox.style.cssText = 'font-size:11px;color:#E74C3C;margin-bottom:16px;padding:10px;background:#2A0A0A;border-radius:8px;border:1px solid #E74C3C;font-weight:600;';
-  var countdownEl = document.createElement('span');
-  countdownEl.id = '_stayCountdown';
-  countdownEl.style.cssText = 'color:#F5A623;font-weight:700;';
-  countdownEl.textContent = AUTO_CLOCKOUT_GRACE_MINS + ':00';
-  warnBox.innerHTML = '\u26a0 No response in <span id="_stayCountdown" style="color:#F5A623;font-weight:700;">'+AUTO_CLOCKOUT_GRACE_MINS+':00</span> = automatic clock-out.';
-
+  inner.style.cssText = 'background:#1A1A1A;border:1px solid #F5A623;border-radius:16px;padding:24px;width:100%;max-width:380px;text-align:center;';
+  var icon  = document.createElement('div'); icon.style.cssText = 'font-size:36px;margin-bottom:10px;'; icon.textContent = '\u23f1\ufe0f';
+  var title = document.createElement('div'); title.style.cssText = 'font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:700;color:#F5A623;margin-bottom:6px;'; title.textContent = 'Event Ended';
+  var sub   = document.createElement('div'); sub.style.cssText = 'font-size:13px;color:#AAA;margin-bottom:20px;line-height:1.5;';
+  sub.textContent = '"'+entityTitle+'" ended at '+endStr+'. Are you still on duty?';
   var btnRow = document.createElement('div'); btnRow.style.cssText = 'display:flex;gap:10px;';
   var yesBtn = document.createElement('button');
-  yesBtn.style.cssText = 'flex:1;background:#27AE60;border:none;color:#FFF;border-radius:10px;padding:14px;cursor:pointer;font-size:15px;font-weight:700;';
-  yesBtn.textContent = '\u2705 Stay Clocked In';
+  yesBtn.style.cssText = 'flex:1;background:#27AE60;border:none;color:#FFF;border-radius:10px;padding:13px;cursor:pointer;font-size:15px;font-weight:700;';
+  yesBtn.textContent = '\u2705 Still on duty';
   yesBtn.onclick = function() {
-    // Acknowledge — keep them clocked in, mark as acknowledged so we don't re-prompt
+    // Keep them clocked in — just dismiss
+    document.getElementById('_stayClockInModal').remove();
+  };
+  var noBtn = document.createElement('button');
+  noBtn.style.cssText = 'flex:1;background:none;border:1px solid #E74C3C;color:#E74C3C;border-radius:10px;padding:13px;cursor:pointer;font-size:15px;font-weight:700;';
+  noBtn.textContent = '\u23f9 Clock me out';
+  noBtn.onclick = function() {
+    document.getElementById('_stayClockInModal').remove();
+    // Clock out now
     if (type === 'event') {
       var ev = (state.specialEvents||[]).find(function(e){ return e.id===entityId; });
-      if (ev) (ev.signups||[]).forEach(function(s){
-        if (s.memberId===state.currentUserId && s.clockedIn && !s.clockedOutAt) s._stayAckedAt = new Date().toISOString();
-      });
+      if (ev) {
+        (ev.signups||[]).forEach(function(s){
+          if (s.memberId===state.currentUserId && s.clockedIn && !s.clockedOutAt) {
+            s.clockedIn = false; s.clockedOutAt = new Date().toISOString();
+          }
+        });
+      }
     } else if (type === 'meeting') {
       var att = (state.meetingAttendance||[]).find(function(a){
         return a.mtgId===entityId && a.memberId===state.currentUserId && !a.clockedOutAt;
       });
-      if (att) att._stayAckedAt = new Date().toISOString();
-    } else if (type === 'shift') {
-      var sh = (state.staffingShifts||[]).find(function(s){ return s.id===entityId; });
-      if (sh) sh._stayAckedAt = new Date().toISOString();
+      if (att) att.clockedOutAt = new Date().toISOString();
+    }
+    if (state.currentSession && !state.currentSession.end) {
+      state.currentSession.end = new Date().toISOString();
+      state.currentSession.duration = (new Date() - new Date(state.currentSession.start)) / 1000;
+      try { updateClockUI(false); } catch(e){}
     }
     save();
-    var m = document.getElementById('_stayClockInModal'); if (m) m.remove();
-    showToast('\u2705 Got it — you are still clocked in. Reminder acknowledged.');
-  };
-  var noBtn = document.createElement('button');
-  noBtn.style.cssText = 'flex:1;background:none;border:1px solid #E74C3C;color:#E74C3C;border-radius:10px;padding:14px;cursor:pointer;font-size:15px;font-weight:700;';
-  noBtn.textContent = '\u23f9 Clock Me Out';
-  noBtn.onclick = function() {
-    var m = document.getElementById('_stayClockInModal'); if (m) m.remove();
-    if (typeof onClockOutNow === 'function') { onClockOutNow(); return; }
-    // Fallback: manual clock out
-    if (type === 'event') {
-      var ev = (state.specialEvents||[]).find(function(e){ return e.id===entityId; });
-      if (ev) (ev.signups||[]).forEach(function(s){
-        if (s.memberId===state.currentUserId && s.clockedIn && !s.clockedOutAt) {
-          try { clockOutSpecialEvent(ev.id); } catch(e){}
-        }
-      });
-    } else if (type === 'meeting') {
-      try { clockOutMeeting(entityId, (new Date()).toISOString().slice(0,10)); } catch(e){}
-    } else if (type === 'shift') {
-      try { clockOut(); } catch(e){}
-    } else if (state.currentSession && !state.currentSession.end) {
-      try { clockOut(); } catch(e){}
-    }
+    try { renderMyShifts(); } catch(e){}
+    showToast('\u23f9 Clocked out of '+entityTitle+'.');
   };
   btnRow.appendChild(yesBtn); btnRow.appendChild(noBtn);
-  [icon, title, sub, warnBox, btnRow].forEach(function(el){ inner.appendChild(el); });
+  [icon, title, sub, btnRow].forEach(function(el){ inner.appendChild(el); });
   wrap.appendChild(inner);
   document.body.appendChild(wrap);
-
-  // Live countdown timer
-  var startMs = Date.now();
-  var totalMs = AUTO_CLOCKOUT_GRACE_MINS * 60000;
-  var tickFn = function() {
-    var m2 = document.getElementById('_stayClockInModal');
-    if (!m2) return; // modal dismissed
-    var remainMs = Math.max(0, totalMs - (Date.now() - startMs));
-    var mins = Math.floor(remainMs / 60000);
-    var secs = Math.floor((remainMs % 60000) / 1000);
-    var cdEl = document.getElementById('_stayCountdown');
-    if (cdEl) cdEl.textContent = mins + ':' + (secs<10?'0':'') + secs;
-    if (remainMs > 0) {
-      setTimeout(tickFn, 1000);
-    }
-  };
-  setTimeout(tickFn, 1000);
-
-  // Push notification to draw attention
-  try {
-    var pushId = 'end_activity_' + (entityId||'') + '_' + new Date().toISOString().slice(0,13);
-    sendPushToMembers([state.currentUserId],
-      '\u23f1\ufe0f Your ' + typeLabel_ + ' ended',
-      '"'+entityTitle+'" ended at '+endStr+'. Respond within '+AUTO_CLOCKOUT_GRACE_MINS+' min or you will be auto clocked out.',
-      pushId);
-  } catch(e) {}
 }
 
-// ── AUTO CLOCK-OUTS AT END OF SHIFT / MEETING / EVENT ──────────
-// Runs every minute. For each active clock-in:
-//  1. At scheduled end: show the "Still on duty?" prompt (once)
-//  2. If no response within AUTO_CLOCKOUT_GRACE_MINS (5 min),
-//     call _performAutoClockOut — which awards LOSAP points and
-//     sends a notification listing what kind + how many were earned.
 function checkAutoClockOuts() {
-  var now = new Date();
-  var uid = state.currentUserId;
-  if (!uid) return;
-  var changed = false;
-
-  // ── Special events ────────────────────────────────────────────
+  var now = new Date(), changed = false;
   (state.specialEvents||[]).forEach(function(ev) {
     var ts = ev.endTime || ev.startTime;
     if (!ts) return;
     var evEnd = new Date(ev.date + 'T' + ts + ':00');
     if (!ev.endTime) evEnd = new Date(evEnd.getTime() + 7200000);
-    if (now < evEnd) return; // not yet ended
+    if (now < evEnd) return;
+    // Grace period: ask within 30 min after event ends, before auto-clocking out
+    var graceEnd = new Date(evEnd.getTime() + 30 * 60000);
     (ev.signups||[]).forEach(function(s) {
       if (!s.clockedIn || s.clockedOutAt) return;
-      if (s.memberId !== uid) return; // only prompt the current user on this device
-
-      // First time after end: show the 5-min prompt
-      if (!s._promptedAt) {
-        s._promptedAt = now.toISOString();
-        save();
-        var synthSess = { id: ev.id, userId: uid, start: (s.clockedInAt || (ev.date+'T'+(ev.startTime||'00:00')+':00')),
-                          eventId: ev.id, _synthetic: true, _record: s };
-        // Mark the prompt-start time on the record so _performAutoClockOut
-        // uses it as the end time for grace-based auto clock-out.
-        s._reminderSentAt = now.toISOString();
-        _askStayClockIn('event', ev.id, ev.title, evEnd, function() {
-          try { clockOutSpecialEvent(ev.id); } catch(e){}
-        });
-        changed = true;
-        return;
-      }
-
-      // Already prompted — has the 5-min grace expired without an ack?
-      if (!s._stayAckedAt && s._reminderSentAt) {
-        var ageMin = (now - new Date(s._reminderSentAt)) / 60000;
-        if (ageMin >= AUTO_CLOCKOUT_GRACE_MINS) {
-          var synthSess2 = { id: ev.id, userId: uid,
-                             start: (s.clockedInAt || (ev.date+'T'+(ev.startTime||'00:00')+':00')),
-                             eventId: ev.id, _synthetic: true, _record: s };
-          try { _performAutoClockOut(synthSess2, s); } catch(e) {}
-          changed = true;
-        }
+      var uid = state.currentUserId;
+      if (s.memberId === uid && now <= graceEnd && !s._askedClockOut) {
+        // Ask this member if they want to stay clocked in
+        s._askedClockOut = true;
+        _askStayClockIn('event', ev.id, ev.title, evEnd);
+      } else if (now > graceEnd) {
+        // Grace expired — auto clock out
+        s.clockedIn = false; s.clockedOutAt = graceEnd.toISOString(); changed = true;
       }
     });
   });
-
-  // ── Meetings ──────────────────────────────────────────────────
   (state.meetingAttendance||[]).forEach(function(att) {
     if (!att.clockedInAt || att.clockedOutAt) return;
-    if (att.memberId !== uid) return;
     var mtg = (state.meetings||[]).find(function(m){ return m.id===att.mtgId; });
     if (!mtg) return;
     var mEnd = new Date(att.date + 'T' + mtg.time + ':00');
     mEnd = new Date(mEnd.getTime() + (mtg.duration||60)*60000);
     if (now < mEnd) return;
-
-    if (!att._promptedAt) {
-      att._promptedAt = now.toISOString();
-      att._reminderSentAt = now.toISOString();
-      save();
-      _askStayClockIn('meeting', att.mtgId, mtg.title, mEnd, function() {
-        try { clockOutMeeting(att.mtgId, att.date); } catch(e){}
-      });
-      changed = true;
-      return;
-    }
-
-    if (!att._stayAckedAt && att._reminderSentAt) {
-      var ageM = (now - new Date(att._reminderSentAt)) / 60000;
-      if (ageM >= AUTO_CLOCKOUT_GRACE_MINS) {
-        var synthMtg = { id: att.mtgId, userId: uid, start: att.clockedInAt,
-                         mtgId: att.mtgId, _synthetic: true, _record: att };
-        try { _performAutoClockOut(synthMtg, att); } catch(e) {}
-        changed = true;
+    var mtgGraceEnd = new Date(mEnd.getTime() + 30 * 60000);
+    if (now <= mtgGraceEnd && !att._askedClockOut && att.memberId === state.currentUserId) {
+      att._askedClockOut = true;
+      _askStayClockIn('meeting', att.mtgId, mtg.title, mEnd);
+    } else if (now > mtgGraceEnd) {
+      att.clockedOutAt = mtgGraceEnd.toISOString(); changed = true;
+      if (state.currentSession && state.currentSession.mtgId===att.mtgId && state.currentSession.userId===att.memberId) {
+        state.currentSession.end = mtgGraceEnd.toISOString();
+        state.currentSession.duration = (mtgGraceEnd - new Date(state.currentSession.start)) / 1000;
+        if (!Array.isArray(state.sessions)) state.sessions = [];
+        state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+        state.currentSession = null;
+        try{updateClockUI(false);}catch(e){}
       }
     }
   });
-
-  // ── Staffing shifts ───────────────────────────────────────────
   (state.staffingShifts||[]).forEach(function(s) {
     if (!s.clockedIn || s.clockedOutAt) return;
-    if (s.memberId !== uid) return;
-    var sh = parseInt((s.shiftStart||'0700').slice(0,2));
-    var sm = parseInt((s.shiftStart||'0700').slice(2,4)||'0');
-    var startMs = new Date(s.date+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00').getTime();
-    var endMs = startMs + (s.shiftHours||24) * 3600000;
+    var sh=parseInt((s.shiftStart||'0700').slice(0,2));
+    var sm=parseInt((s.shiftStart||'0700').slice(2,4)||'0');
+    var startMs=new Date(s.date+'T'+(sh<10?'0':'')+sh+':'+(sm<10?'0':'')+sm+':00').getTime();
+    var endMs=startMs+(s.shiftHours||24)*3600000;
     if (now.getTime() < endMs) return;
-    var shiftEnd = new Date(endMs);
-
-    if (!s._promptedAt) {
-      s._promptedAt = now.toISOString();
-      s._reminderSentAt = now.toISOString();
-      save();
-      var shiftTitle = (UNIT_LABELS[s.unitId]||s.unitId) + (s.position ? ' · '+s.position : '');
-      _askStayClockIn('shift', s.id, shiftTitle, shiftEnd, function() {
-        // Manual clock out routes through clockOut() so LOSAP awarding stays consistent
-        try { clockOut(); } catch(e){}
-      });
-      changed = true;
-      return;
-    }
-
-    if (!s._stayAckedAt && s._reminderSentAt) {
-      var ageS = (now - new Date(s._reminderSentAt)) / 60000;
-      if (ageS >= AUTO_CLOCKOUT_GRACE_MINS) {
-        var synthShift = { id: s.id, userId: uid,
-                           start: new Date(startMs).toISOString(),
-                           shiftId: s.id, _synthetic: true, _record: s };
-        try { _performAutoClockOut(synthShift, s); } catch(e) {}
-        changed = true;
-      }
+    s.clockedOutAt=new Date(endMs).toISOString(); s.clockedIn=false; s.status='complete'; changed=true;
+    if (state.currentSession && state.currentSession.shiftId===s.id) {
+      state.currentSession.end=new Date(endMs).toISOString();
+      state.currentSession.duration=(endMs-new Date(state.currentSession.start).getTime())/1000;
+      if (!Array.isArray(state.sessions)) state.sessions=[];
+      state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+      state.currentSession=null;
+      try{updateClockUI(false);}catch(e){}
     }
   });
-
-  if (changed) {
-    save();
-    try { renderMyShifts(); } catch(e){}
-    try { renderStaffingBoard(); } catch(e){}
-    try { renderStaffingAlerts(); } catch(e){}
-  }
+  if (changed) { save(); try{renderMyShifts();}catch(e){} try{renderStaffingBoard();}catch(e){} }
 }
 
 function openMtgAlert(mid, mdate) {
@@ -13355,18 +13020,45 @@ function renderCompanyLOSAP() {
   var yearEnd   = yr+'-12-31';
 
   // Build per-member totals using the same calcMemberLOSAP as the member's own tab
+  // Determine "month" window: current month if viewing current year, else December of selected year
+  var _now = new Date();
+  var _isCurYr = (yr === _now.getFullYear());
+  var _monthIdx = _isCurYr ? _now.getMonth() : 11; // 0-based
+  var _mm = ('0' + (_monthIdx+1)).slice(-2);
+  var _monthPrefix = yr + '-' + _mm; // e.g., "2026-04"
+
   var totals = {};
   (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).forEach(function(m){
     var mPts = calcMemberLOSAP(m.id, yr);
-    // Count hours from activities this year
-    var mHours = (state.losapActivities||[]).reduce(function(sum, a){
-      return (a.memberId===m.id && a.date>=yearStart && a.date<=yearEnd) ? sum+(a.hours||0) : sum;
-    }, 0);
+    // Split hours from losapActivities by category
+    var mTrainingHrs = 0, mDrillHrs = 0;
+    (state.losapActivities||[]).forEach(function(a){
+      if (a.memberId!==m.id || !a.date || a.date<yearStart || a.date>yearEnd) return;
+      var cat = (a.category||'').toLowerCase();
+      var h = parseFloat(a.hours)||0;
+      if (cat==='training' || cat==='class') mTrainingHrs += h;
+      else if (cat==='drill') mDrillHrs += h;
+    });
+    // Hours clocked from sessions (actual time on the clock)
+    var mClockedYTD = 0, mClockedMonth = 0;
+    (state.sessions||[]).forEach(function(s){
+      if (s.userId!==m.id || !s.start) return;
+      var startStr = (typeof s.start==='string') ? s.start.slice(0,10) : '';
+      if (!startStr || startStr<yearStart || startStr>yearEnd) return;
+      var hrs = (parseFloat(s.duration)||0)/3600;
+      mClockedYTD += hrs;
+      if (startStr.indexOf(_monthPrefix)===0) mClockedMonth += hrs;
+    });
     // Count responses this year
     var mResponses = (state.emergencyResponses||[]).filter(function(er){
       return er.date>=yearStart && er.date<=yearEnd && (er.members||[]).indexOf(m.id)>=0;
     }).length;
-    totals[m.id] = { member:m, pts:mPts, hours:mHours, responses:mResponses };
+    totals[m.id] = {
+      member:m, pts:mPts,
+      trainingHrs:mTrainingHrs, drillHrs:mDrillHrs,
+      clockedMonth:mClockedMonth, clockedYTD:mClockedYTD,
+      responses:mResponses
+    };
   });
 
   // Build clocked-in lookup: memberId -> { activity, note, color }
@@ -13461,7 +13153,9 @@ function renderCompanyLOSAP() {
     '<th style="width:36px;text-align:center;">#</th>' +
     '<th>Member</th><th>Position / Rank</th>' +
     '<th style="text-align:center;">Points</th>' +
-    '<th style="text-align:center;">Hours</th>' +
+    '<th style="text-align:center;">Training Hrs</th>' +
+    '<th style="text-align:center;">Drill Hrs</th>' +
+    '<th style="text-align:center;">Hours Clocked<br><span style="font-size:9px;color:#666;font-weight:400;letter-spacing:0;text-transform:none;">Month / YTD</span></th>' +
     '<th style="text-align:center;">Calls</th>' +
     '<th style="text-align:center;">Qualified</th>' +
     '<th>On Duty</th>' +
@@ -13516,7 +13210,13 @@ function renderCompanyLOSAP() {
         '<td style="font-weight:'+(p?'700':'600')+';color:'+(p?p.nameColor:'#F0F0F0')+';">'+m.last+', '+m.first+'</td>'+
         '<td style="color:#AAA;font-size:12px;">'+_posRankText+'</td>'+
         ptsCell+
-        '<td style="text-align:center;color:#AAA;">'+(row.hours||0).toFixed(1)+'</td>'+
+        '<td style="text-align:center;color:#AAA;">'+(row.trainingHrs||0).toFixed(1)+'</td>'+
+        '<td style="text-align:center;color:#AAA;">'+(row.drillHrs||0).toFixed(1)+'</td>'+
+        '<td style="text-align:center;color:#AAA;font-size:12px;line-height:1.3;">'+
+          '<span style="color:#F0F0F0;font-weight:600;">'+(row.clockedMonth||0).toFixed(1)+'</span>'+
+          '<span style="color:#555;"> / </span>'+
+          '<span>'+(row.clockedYTD||0).toFixed(1)+'</span>'+
+        '</td>'+
         '<td style="text-align:center;color:#AAA;">'+row.responses+'</td>'+
         '<td style="text-align:center;">'+(qualified?'<span style="color:#27AE60;font-weight:700;">✓ Yes</span>':'<span style="color:#555;">No</span>')+'</td>'+
         dutyCell+'</tr>';
@@ -17521,17 +17221,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
     <!-- ══════════════ STAFFING TAB ══════════════ -->
     <div id="section-staffing" class="section">
 
-      <!-- ⚠ STAFFING ALERTS — visible to all members (pinned to top) -->
-      <div class="card" id="staffingAlertCard" style="display:none;border:2px solid #F5A623;background:#1A1200;">
-        <div class="card-header" onclick="toggleStaffCard('staffingAlertBody','staffingAlertChevron')" style="cursor:pointer;user-select:none;">
-          <div class="icon">🚨</div><h2 style="color:#F5A623;">Staffing Alerts</h2>
-          <span id="staffingAlertChevron" style="margin-left:auto;color:#F5A623;font-size:13px;transition:transform .2s;display:inline-block;">▼</span>
-        </div>
-        <div id="staffingAlertBody">
-          <div id="staffingAlertContainer"><p style="color:#666;font-size:13px;text-align:center;padding:16px;">No active staffing alerts.</p></div>
-        </div>
-      </div>
-
       <!-- My Upcoming Shifts -->
       <div class="card">
         <div class="card-header"><div class="icon">📋</div><h2>My Shifts &amp; Events</h2></div>
@@ -17561,6 +17250,17 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         </div>
       </div><!-- end apparatusStaffingSection -->
 
+
+            <!-- Staffing Alerts — visible to all members -->
+      <div class="card" id="staffingAlertCard" style="display:none;">
+        <div class="card-header" onclick="toggleStaffCard('staffingAlertBody','staffingAlertChevron')" style="cursor:pointer;user-select:none;">
+          <div class="icon">🚨</div><h2>Staffing Alerts</h2>
+          <span id="staffingAlertChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">▼</span>
+        </div>
+        <div id="staffingAlertBody">
+          <div id="staffingAlertContainer"><p style="color:#666;font-size:13px;text-align:center;padding:16px;">No active staffing alerts.</p></div>
+        </div>
+      </div>
 
       <!-- Officer Controls (officers/admin only) -->
       <div id="staffingOfficerControls" style="display:none;">
@@ -17823,7 +17523,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <div class="card">
         <div class="card-header">
           <div class="icon">&#127941;</div>
-          <h2>Company LOSAP Leaderboard</h2>
+          <h2>Company LOSAP Board</h2>
           <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
             <select id="companyYear" onchange="renderCompanyLOSAP()" style="background:#111;border:1px solid #333;color:#F0F0F0;border-radius:6px;padding:4px 8px;font-size:12px;"></select>
           </div>
@@ -17836,7 +17536,9 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
                   <th style="padding:8px 10px;text-align:left;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Member</th>
                   <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Duty</th>
                   <th style="padding:8px 10px;text-align:center;color:#27AE60;font-size:14px;font-family:'Bebas Neue',sans-serif;letter-spacing:1px;">Pts</th>
-                  <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Hrs</th>
+                  <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Training Hrs</th>
+                  <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Drill Hrs</th>
+                  <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Hours Clocked</th>
                   <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Calls</th>
                   <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Status</th>
                 </tr>
@@ -18613,7 +18315,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <!-- Public Staffing / Leaderboard Link -->
       <div class="card" data-no-collapse="1" id="publicLinkCard">
         <div class="card-header" onclick="toggleAdminCardById('publicLinkCard')" style="cursor:pointer;user-select:none;"><div class="icon">🔗<span id="publicLinkChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;">&#9660;</span></div><h2>Public View Link</h2></div>
-        <p style="font-size:13px;color:#888;margin-bottom:12px;">Share this link to display today's staffing board and company LOSAP leaderboard — no login required.</p>
+        <p style="font-size:13px;color:#888;margin-bottom:12px;">Share this link to display today's staffing board and Company LOSAP Board — no login required.</p>
         <div style="background:#111;border:1px solid #333;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:8px;margin-bottom:10px;">
           <div id="publicLinkText" style="flex:1;font-size:12px;color:#AAA;word-break:break-all;font-family:monospace;"></div>
           <button class="btn btn-sm btn-secondary" style="flex-shrink:0;" onclick="copyPublicLink()">📋 Copy</button>
