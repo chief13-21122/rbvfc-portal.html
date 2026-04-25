@@ -6501,7 +6501,7 @@ function initMeetingForm() {
   // Set date default to today
   var de = document.getElementById('mtgDate');
   if (de && !de.value) de.value = localDateStr();
-  // Populate Member In Charge dropdown with officers + admin
+  // Populate Member In Charge dropdown with all active members
   var sel = document.getElementById('mtgInCharge');
   if (!sel) return;
   var currentVal = sel.value;
@@ -10929,11 +10929,11 @@ function renderSpecialEventAdmin() {
     var me = (state.roster||[]).find(function(m){ return m.id===uid; });
     var cDisp = document.getElementById('seCreatedByDisplay');
     if (cDisp) cDisp.textContent = me ? me.last+', '+me.first+' · '+((me.ranks&&me.ranks.length?me.ranks[0]:me.rank)||me.appRole) : '—';
-    // Populate In Charge dropdown (officers + admin)
+    // Populate In Charge dropdown (all active members)
     var icSel = document.getElementById('seInCharge');
     if (icSel) {
       while (icSel.options.length > 1) icSel.remove(1); // reset first
-      (state.roster||[]).filter(function(m){ return m.active!==false && (m.appRole==='officer'||m.appRole==='admin'); })
+      (state.roster||[]).filter(function(m){ return m.active!==false; })
         .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
         .forEach(function(m){
           var opt = document.createElement('option');
