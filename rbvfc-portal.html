@@ -14289,6 +14289,77 @@ function syncCadFromAdmin() {
   _fetchCadCalls(url, true);
 }
 
+// ── BACKFILL: pull historic dispatches from Gmail to fill Response History gaps
+function backfillCadDispatches(days) {
+  var url = state.cadScriptUrl;
+  if (!url) { showToast('⚠️ CAD Script URL not configured.'); return; }
+  var d = parseInt(days||14);
+  if (isNaN(d) || d < 1) d = 14;
+  if (d > 90) d = 90;
+
+  var statusEl = document.getElementById('adminBackfillStatus');
+  if (statusEl) statusEl.innerHTML = '<span style="color:#7EC8E3;">⏳ Searching Gmail for last ' + d + ' day(s)…</span>';
+
+  fetch(url + '?action=backfillCadCalls&days=' + d)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data || data.ok === false) throw new Error((data && data.error) || 'Backfill failed');
+      var calls = data.calls || [];
+      if (!calls.length) {
+        var msg = 'No matching dispatches found in the last ' + d + ' day(s).';
+        if (statusEl) statusEl.innerHTML = '<span style="color:#888;">' + msg + '</span>';
+        showToast(msg);
+        return;
+      }
+
+      var alreadyExists = 0, noStaffing = 0, newlyLogged = 0;
+
+      calls.forEach(function(call) {
+        var incKey = call.incidentNum || call.id || ((call.address||'')+'_'+(call.date||'').slice(0,10));
+        var dup = (state.emergencyResponses||[]).some(function(r) {
+          return r._cadKey === incKey || (call.incidentNum && r.incidentNum === call.incidentNum);
+        });
+        if (dup) { alreadyExists++; return; }
+
+        try { _autoLogCadCall(call); } catch(e) { console.warn('[RBVFC] Backfill log error:', e); }
+
+        // Did it log? _autoLogCadCall silently skips when no staffing
+        var afterDup = (state.emergencyResponses||[]).some(function(r) {
+          return r._cadKey === incKey || (call.incidentNum && r.incidentNum === call.incidentNum);
+        });
+        if (afterDup) newlyLogged++;
+        else noStaffing++;
+      });
+
+      // Persist + sync to cloud
+      try { save(); } catch(e){}
+      try { sheetSyncDebounce(); } catch(e){}
+      try { renderEmergencyResponses(); } catch(e){}
+      try { updateStats(); } catch(e){}
+
+      var summary = '✅ Backfill: ' + newlyLogged + ' newly logged · '
+                  + alreadyExists + ' already existed · '
+                  + noStaffing + ' skipped (no staffing).';
+      if (statusEl) statusEl.innerHTML = '<span style="color:#27AE60;">' + summary + '</span>';
+      showToast(summary);
+    })
+    .catch(function(err) {
+      var msg = '⚠️ Backfill error: ' + (err.message || err);
+      if (statusEl) statusEl.innerHTML = '<span style="color:#C8102E;">' + msg + '</span>';
+      showToast(msg);
+      console.warn('[RBVFC]', msg);
+    });
+}
+
+function backfillCadFromAdmin() {
+  var input = document.getElementById('backfillDaysInput');
+  var days  = input ? parseInt(input.value || '14') : 14;
+  if (isNaN(days) || days < 1) { showToast('⚠️ Enter days back (1–90).'); return; }
+  if (days > 90) { showToast('⚠️ Max range is 90 days.'); return; }
+  if (!confirm('Backfill emergency responses from the last ' + days + ' day(s)?\n\nThis will:\n• Pull dispatch emails from Gmail\n• Auto-log any with staffed members on that date\n• Skip duplicates\n\nNo push notifications are sent for historic calls.')) return;
+  backfillCadDispatches(days);
+}
+
 function testCadConnection() {
   var url = state.cadScriptUrl;
   if (!url) return;
@@ -18832,6 +18903,20 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
               <button class="btn btn-secondary btn-sm" onclick="openCadGmailSetup()">⚙️ Setup Guide</button>
             </div>
             <div id="adminCadSyncStatus" style="margin-top:10px;"></div>
+
+            <!-- Backfill historic dispatches (gap filler) -->
+            <div style="border-top:1px solid #2A4A5A;margin-top:14px;padding-top:12px;">
+              <div style="font-size:11px;color:#7EC8E3;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;font-weight:700;">📜 Backfill Past Dispatches</div>
+              <div style="font-size:11px;color:#888;line-height:1.5;margin-bottom:10px;">
+                Search Gmail for past dispatch emails and auto-log any with staffed members on that date. Use this to fill gaps in Response History after an outage. No push notifications are sent.
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <label style="font-size:11px;color:#AAA;">Days back:</label>
+                <input type="number" id="backfillDaysInput" value="14" min="1" max="90" style="width:70px;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:5px 8px;color:#F0F0F0;font-size:12px;">
+                <button class="btn btn-secondary btn-sm" onclick="backfillCadFromAdmin()" style="background:#0A2A1A;border-color:#27AE60;color:#7EE3A0;">📜 Backfill Now</button>
+              </div>
+              <div id="adminBackfillStatus" style="margin-top:10px;font-size:11px;line-height:1.6;"></div>
+            </div>
           </div>
         </div>
 
