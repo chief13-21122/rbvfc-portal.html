@@ -1111,15 +1111,20 @@ function renderPushStatus() {
 function showPushNotificationBanner(payload) {
   var title = (payload.notification && payload.notification.title) || 'Co.13 Alert';
   var body  = (payload.notification && payload.notification.body)  || (payload.data && payload.data.msg) || '';
+  var logo  = (typeof getLogoData === 'function' && getLogoData()) || '';
   var el = document.getElementById('fcmForegroundBanner');
   if (!el) {
     el = document.createElement('div');
     el.id = 'fcmForegroundBanner';
-    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#C8102E;color:#FFF;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;box-shadow:0 4px 20px rgba(0,0,0,.5);';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#C8102E;color:#FFF;padding:14px 20px;display:flex;align-items:center;gap:12px;box-shadow:0 4px 20px rgba(0,0,0,.5);';
     document.body.appendChild(el);
   }
-  el.innerHTML = '<div><div style="font-weight:700;font-size:14px;">\ud83d\udce2 '+title+'</div><div style="font-size:13px;margin-top:2px;">'+body+'</div></div>'
-    +'<button onclick="document.getElementById(\'fcmForegroundBanner\').style.display=\'none\'" style="background:rgba(255,255,255,.2);border:none;color:#FFF;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:700;">Dismiss</button>';
+  var logoHtml = logo
+    ? '<img src="'+logo+'" alt="" style="width:42px;height:42px;border-radius:8px;object-fit:contain;background:rgba(255,255,255,.15);padding:4px;flex-shrink:0;">'
+    : '<div style="font-size:24px;flex-shrink:0;">\ud83d\udce2</div>';
+  el.innerHTML = logoHtml
+    + '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:14px;">'+title+'</div><div style="font-size:13px;margin-top:2px;">'+body+'</div></div>'
+    + '<button onclick="document.getElementById(\'fcmForegroundBanner\').style.display=\'none\'" style="background:rgba(255,255,255,.2);border:none;color:#FFF;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:700;flex-shrink:0;">Dismiss</button>';
   el.style.display = 'flex';
   setTimeout(function(){ if(el) el.style.display='none'; }, 8000);
 }
@@ -1144,7 +1149,12 @@ function sendPushToMembers(targetMemberIds, title, body, alertId) {
       tokens: tokens,
       title: title,
       body: body,
-      data: { alertId: alertId||'', url: window.location.href.split('?')[0] }
+      data: {
+        alertId: alertId||'',
+        url: window.location.href.split('?')[0],
+        icon: window.location.origin + '/rbvfc-portal.html/icon-192.png',
+        badge: window.location.origin + '/rbvfc-portal.html/icon-96.png'
+      }
     })
   }).then(function(r){ return r.json(); })
     .then(function(d){ console.log('[RBVFC] Push sent:', JSON.stringify(d)); })
@@ -1400,7 +1410,12 @@ function sendTestPushToSelf() {
       tokens: m.fcmTokens,
       title: '🔔 Co.13 Notification Test',
       body: 'Your notifications are working! — ' + new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),
-      data: { alertId: 'test_self_' + Date.now() }
+      data: {
+        alertId: 'test_self_' + Date.now(),
+        url: window.location.href.split('?')[0],
+        icon: window.location.origin + '/rbvfc-portal.html/icon-192.png',
+        badge: window.location.origin + '/rbvfc-portal.html/icon-96.png'
+      }
     })
   })
   .then(function(r){ return r.json(); })
