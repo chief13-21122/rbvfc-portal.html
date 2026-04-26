@@ -508,6 +508,56 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
   body.public-view #appHeader { display:none !important; }
   body.public-view #tabBar { display:none !important; }
 }
+/* ─── All collapsible card windows closed by default ─── */
+#specialEventsManagerBody,
+#specialEventsMemberBody,
+#meetingsManagerBody,
+#myClassesTodayBody,
+#clockTabMyShiftsBody,
+#recentSessionsBody,
+#losapPositionsBody,
+#losapUnitBreakBody,
+#losapRankingBody,
+#myPendingTrainingBody,
+#losapActHistBody,
+#erLogBody,
+#staffingAlertBody,
+#apparatusStaffingBody,
+#alertHistoryBody,
+#customGroupsBody,
+#unitToggleBody,
+#staffingMonthBody,
+#unitFilterBody,
+#drillHistorySummaryBody,
+#trainingClassesBody,
+#respondingApparatusBody {
+  display: none;
+}
+/* Chevrons pointing right (closed state) by default */
+#specialEventsManagerChevron,
+#specialEventsMemberChevron,
+#meetingsManagerChevron,
+#myClassesTodayChevron,
+#clockTabMyShiftsChevron,
+#recentSessionsChev,
+#losapPositionsChev,
+#losapUnitBreakChev,
+#losapRankingChev,
+#myPendingTrainingChev,
+#losapActHistChev,
+#erLogChev,
+#staffingAlertChevron,
+#apparatusStaffingChev,
+#alertHistoryChevron,
+#customGroupsChevron,
+#unitToggleChevron,
+#staffingMonthChevron,
+#unitFilterChevron,
+#drillHistorySummaryChevron,
+#trainingClassesChevron,
+#respondingApparatusChev {
+  transform: rotate(-90deg);
+}
 </style>
 <!-- Firebase SDKs loaded dynamically by initFirebase() when config is saved -->
 <script>
@@ -10703,10 +10753,14 @@ function renderSpecialEvents(containerId) {
 
   var pastSection = '';
   if (past.length) {
-    pastSection = '<div style="margin-top:20px;border-top:1px solid #2A2A2A;padding-top:14px;">'
-      + '<div style="font-size:10px;color:#444;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;">Past Events</div>'
-      + '<div style="opacity:0.6;">' + renderEvList(past) + '</div>'
-      + '</div>';
+    pastSection = '<div style="margin-top:14px;border-top:1px solid #2A2A2A;padding-top:10px;">'
+      + '<div onclick="_togglePastSection(this)" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:6px;user-select:none;">'
+      + '<span style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:2px;">Past Events (' + past.length + ')</span>'
+      + '<span class="_pmChev" style="font-size:10px;color:#444;margin-left:auto;">&#9658;</span>'
+      + '</div>'
+      + '<div class="_pmBody" style="display:none;opacity:0.6;">'
+      + renderEvList(past)
+      + '</div></div>';
   }
 
   container.innerHTML = upcomingHtml + pastSection;
@@ -11315,7 +11369,7 @@ function doSendMtgAlert() {
 }
 
 
-function _togglePastMeetings(hdr) {
+function _togglePastSection(hdr) {
   var body = hdr.parentElement.querySelector('._pmBody');
   var chev = hdr.querySelector('._pmChev');
   if (!body) return;
@@ -11323,6 +11377,8 @@ function _togglePastMeetings(hdr) {
   body.style.display = shown ? 'none' : 'block';
   if (chev) chev.innerHTML = shown ? '&#9658;' : '&#9660;';
 }
+// Backwards-compatible alias
+function _togglePastMeetings(hdr) { return _togglePastSection(hdr); }
 
 function renderMeetingsList() {
   var _mUid=state.currentUserId,_mMe=_mUid?(state.roster||[]).find(function(m){return m.id===_mUid;}):null,_mOff=_mMe&&(_mMe.appRole==='officer'||_mMe.appRole==='admin');
@@ -11517,7 +11573,7 @@ function renderSpecialEventAdmin() {
     .sort(function(a,b){ return (b.date+b.time).localeCompare(a.date+a.time); });
   var events = upcoming.concat(past);
   if (!events.length) { container.innerHTML='<p style="font-size:12px;color:#555;">No events yet.</p>'; return; }
-  container.innerHTML = events.map(function(ev){
+  function _seAdminCard(ev) {
     var isPast = ev.date < today;
     var isToday = ev.date === today;
     var evDate = new Date(ev.date+'T12:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric',year:'numeric'});
@@ -11558,7 +11614,22 @@ function renderSpecialEventAdmin() {
       +'<button onclick="deleteSpecialEvent(this)" data-ev="'+ev.id+'" style="background:none;border:1px solid #333;color:#C8102E;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Delete event">&#128465; Delete</button>'
       +'</div>'
       +'</div></div>';
-  }).join('');
+  }
+  var upcomingHtml = upcoming.length
+    ? upcoming.map(_seAdminCard).join('')
+    : '<p style="font-size:11px;color:#555;padding:8px 4px;">No upcoming events.</p>';
+  var pastSection = '';
+  if (past.length) {
+    pastSection = '<div style="margin-top:14px;border-top:1px solid #2A2A2A;padding-top:10px;">'
+      + '<div onclick="_togglePastSection(this)" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:6px;user-select:none;">'
+      + '<span style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:2px;">Past Events (' + past.length + ')</span>'
+      + '<span class="_pmChev" style="font-size:10px;color:#444;margin-left:auto;">&#9658;</span>'
+      + '</div>'
+      + '<div class="_pmBody" style="display:none;">'
+      + past.map(_seAdminCard).join('')
+      + '</div></div>';
+  }
+  container.innerHTML = upcomingHtml + pastSection;
 }
 
 
