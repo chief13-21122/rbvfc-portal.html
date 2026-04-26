@@ -9928,13 +9928,16 @@ function renderMyShifts() {
       var ev = item.data;
       var signup = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
       var isClockedIn = signup && signup.clockedIn;
-      var border = isClockedIn ? '#27AE60' : (isToday ? '#C8102E' : '#1A2A3A');
+      var isDrillEv = (ev.type === 'drill');
+      var evAccent = isDrillEv ? (ACT_COLORS.drill || '#E67E22') : '#1ABC9C';
+      var evAccentRgb = (typeof _hexToRgb==='function') ? _hexToRgb(evAccent) : '26,188,156';
+      var border = isClockedIn ? '#27AE60' : (isToday ? '#C8102E' : (isDrillEv ? evAccent : '#1A2A3A'));
       html += '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#181818;'
         + 'border:1px solid ' + border + ';border-left:4px solid ' + border + ';border-radius:10px;margin-bottom:8px;flex-wrap:wrap;">';
       html += dateBox;
       html += '<div style="flex:1;">'
         + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
-        + '<span style="font-size:10px;background:#0D1A0D;color:#1ABC9C;border:1px solid rgba(26,188,156,0.5);border-radius:4px;padding:1px 5px;flex-shrink:0;">EVENT</span>'
+        + '<span style="font-size:10px;background:rgba('+evAccentRgb+',0.12);color:'+evAccent+';border:1px solid rgba('+evAccentRgb+',0.5);border-radius:4px;padding:1px 5px;flex-shrink:0;">'+(isDrillEv?'DRILL':'EVENT')+'</span>'
         + '<span style="font-weight:700;font-size:14px;color:#F0F0F0;">' + ev.title + '</span>'
         + (signup&&signup.position ? '<span style="font-size:10px;background:#1A3A1A;color:#27AE60;border:1px solid #27AE60;border-radius:4px;padding:1px 5px;margin-left:4px;">' + signup.position + '</span>' : '')
         + '</div>'+ '</div>'
@@ -13766,7 +13769,8 @@ function renderCompanyLOSAP() {
     return s.date===todayStr && s.memberId && !s.clockedOutAt && !clockedIn[s.memberId];
   }).forEach(function(s){
     var lbl = (UNIT_LABELS&&UNIT_LABELS[s.unitId]) || (s.unitId||'').toUpperCase();
-    _ciSet(s.memberId, 'duties', lbl + (s.position?' · '+s.position:''), '#555');
+    var note = (s.position ? s.position + ' · ' : '') + lbl;
+    _ciSet(s.memberId, 'staffing', note, '#555');
   });
 
   // Source 3: Active currentSession (logged-in user's own session)
@@ -13802,6 +13806,16 @@ function renderCompanyLOSAP() {
   (state.sessions||[]).filter(function(s){
     return !s.end && s.userId; // no start-date filter — shift workers may have started yesterday
   }).forEach(function(s){
+    // If this member also has a staffing shift today, treat as Staffing (not generic duty)
+    var stafShift = (state.staffingShifts||[]).find(function(ss){
+      return ss.memberId===s.userId && ss.date===todayStr && !ss.clockedOutAt;
+    });
+    if (stafShift) {
+      var _stLbl = (UNIT_LABELS&&UNIT_LABELS[stafShift.unitId]) || (stafShift.unitId||'').toUpperCase();
+      var _stNote = (stafShift.position ? stafShift.position + ' · ' : '') + _stLbl;
+      _ciSet(s.userId, 'staffing', _stNote, ACT_COLORS.emergency);
+      return;
+    }
     var act = s.activity || 'duty';
     _ciSet(s.userId, act, s.desc || s.note || _aLabels[act] || act, ACT_COLORS[act] || ACT_COLORS.duties);
   });
@@ -13873,10 +13887,11 @@ function renderCompanyLOSAP() {
       var ci = clockedIn[m.id];
       var _ciColor = ci ? (ci.color || '#27AE60') : '#27AE60';
       var _ciRgb   = _hexToRgb(_ciColor);
+      var _ciActLabel = ci ? (_aLabels[ci.activity] || (ci.activity ? ci.activity.charAt(0).toUpperCase()+ci.activity.slice(1) : '')) : '';
       var dutyCell = ci
         ? '<td><span style="display:inline-flex;align-items:center;gap:5px;background:rgba('+_ciRgb+',0.12);border:1px solid rgba('+_ciRgb+',0.35);border-radius:12px;padding:2px 8px;font-size:11px;color:'+_ciColor+';white-space:nowrap;">' +
             '<span style="width:6px;height:6px;border-radius:50%;background:'+_ciColor+';flex-shrink:0;box-shadow:0 0 5px '+_ciColor+';display:inline-block;animation:pulse 2s infinite;"></span>' +
-            '<strong>' + ci.activity + '</strong>' + (ci.note ? '<span style="color:#888;font-weight:400;"> &middot; ' + ci.note + '</span>' : '') +
+            '<strong>' + _ciActLabel + '</strong>' + (ci.note ? '<span style="color:#888;font-weight:400;"> &middot; ' + ci.note + '</span>' : '') +
           '</span>' + (_loOff ? '<button data-mid="'+m.id+'" onclick="adminClockOutMember(this.dataset.mid)" style="margin-left:6px;background:rgba(200,16,46,0.15);border:1px solid rgba(200,16,46,0.5);color:#E74C3C;border-radius:5px;padding:1px 6px;cursor:pointer;font-size:10px;font-weight:700;">⏹</button>' : '') +
           '</td>'
         : '<td style="color:#333;font-size:11px;">—</td>';
