@@ -6170,6 +6170,12 @@ var RANK_ORDER = [
   'FFI','FFII','FADO','Tiller','Mate I','Mate II','MVO','BRS','AT','ATDA',
   'Lieutenant','Captain','Assistant Chief','Fire Chief'
 ];
+// User-facing rank list (matches the Add/Edit Member "Rank" dropdown).
+// Used for Min Rank selectors in Position Rank Requirements.
+var RANK_LIST = [
+  'Student','PFF','FFI','FFII','AT','PFF/AT','ATDA',
+  'EMT-P','FF/EMT-P','Lieutenant','Captain','Assistant Chief','Fire Chief'
+];
 // Ranks that qualify for any "Driver" or "Chauffeur" position
 var DRIVER_RANKS = ['FADO','ATDA','Tiller','Lieutenant','Captain','Assistant Chief','Fire Chief'];
 
@@ -14438,7 +14444,7 @@ function renderRankEditor() {
       var currentCert = _storedReq && typeof _storedReq==='object' ? (_storedReq.reqCert||'') : '';
       var defaultRank = POSITION_MIN_RANK[pos] || '';
       // Build rank options and cert options
-      var opts = '<option value="">No minimum</option>'        + RANK_ORDER.map(function(r) {
+      var opts = '<option value="">No minimum</option>'        + RANK_LIST.map(function(r) {
             return '<option value="' + r + '"' + (currentReq === r ? ' selected' : '') + '>' + r + '</option>';
           }).join('');
       var certOpts = '<option value="">None</option>'        + AVAILABLE_CERTS.map(function(c){
