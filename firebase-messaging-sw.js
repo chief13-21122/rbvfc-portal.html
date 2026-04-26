@@ -5,83 +5,50 @@
 // ══════════════════════════════════════════════════════════════
 
 // ── Firebase SDK (compat build — matches the main portal) ─────────────
+// firebase-messaging-sw.js — Co.13 Portal
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
 
-// ── Firebase config (must match the baked-in values in the portal) ────
 firebase.initializeApp({
-  apiKey:            "AIzaSyDx14iFA-z_N3_XTGdp7WRpPhBseSwNnmc",
-  authDomain:        "rbvfc-losap.firebaseapp.com",
-  projectId:         "rbvfc-losap",
-  storageBucket:     "rbvfc-losap.firebasestorage.app",
+  apiKey: "AIzaSyDx14iFA-z_N3_XTGdp7WRpPhBseSwNnmc",
+  authDomain: "rbvfc-losap.firebaseapp.com",
+  projectId: "rbvfc-losap",
+  storageBucket: "rbvfc-losap.firebasestorage.app",
   messagingSenderId: "782412260564",
-  appId:             "1:782412260564:web:a8669ef676216300480741"
+  appId: "1:782412260564:web:a8669ef676216300480741"
 });
 
 var messaging = firebase.messaging();
 
-// ── Branding URLs ─────────────────────────────────────────────────────
-// These MUST be same-origin URLs (commit the PNGs to your repo).
-// Absolute paths so Chrome resolves them correctly no matter where the
-// notification is delivered.
-var LOGO_ICON  = '/rbvfc-portal.html/logo-192.png';   // 192×192 color PNG — main notification icon
-var LOGO_BADGE = '/rbvfc-portal.html/badge-72.png';   // 72×72 monochrome transparent PNG — Android status bar
-var LOGO_IMAGE = '/rbvfc-portal.html/logo-512.png';   // optional 512×512 large image (shown below text on some platforms)
+// Use the committed PNG; fall back to a payload-supplied icon if present
+var DEFAULT_ICON = '/rbvfc-portal.html/notification-icon.png';
 
-// ══════════════════════════════════════════════════════════════════════
-//  BACKGROUND MESSAGE HANDLER
-//  Fires only when the message is data-only (no `notification` block).
-//  The companion Apps Script change sends data-only payloads so this
-//  handler controls how every notification looks.
-// ══════════════════════════════════════════════════════════════════════
 messaging.onBackgroundMessage(function(payload) {
+  var n = payload.notification || {};
   var d = payload.data || {};
-  var title = d.title || 'Co.13 Alert';
-  var body  = d.body  || '';
+  var title = n.title || d.title || 'Co.13 Alert';
+  var body  = n.body  || d.body  || d.msg || '';
+  var icon  = d.icon  || n.icon  || DEFAULT_ICON;
 
-  var options = {
-    body:  body,
-    icon:  LOGO_ICON,
-    badge: LOGO_BADGE,
-    tag:   d.alertId || ('co13_' + Date.now()),  // collapses duplicates
-    renotify: true,
-    requireInteraction: false,
-    vibrate: [200, 100, 200],
-    data: {
-      url:     d.url     || '/rbvfc-portal.html/',
-      alertId: d.alertId || ''
-    }
-  };
-
-  // Only add `image` if you've uploaded logo-512.png. Comment out the
-  // next line if you haven't.
-  // options.image = LOGO_IMAGE;
-
-  return self.registration.showNotification(title, options);
+  return self.registration.showNotification(title, {
+    body: body,
+    icon: icon,
+    badge: icon,
+    tag: 'co13-' + (d.alertId || Date.now()),
+    data: d
+  });
 });
 
-// ══════════════════════════════════════════════════════════════════════
-//  CLICK HANDLER — focus existing tab or open portal
-// ══════════════════════════════════════════════════════════════════════
 self.addEventListener('notificationclick', function(event) {
   event.notification.close();
-  var targetUrl = (event.notification.data && event.notification.data.url) || '/rbvfc-portal.html/';
-
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(windowClients) {
-      // If the portal is already open in a tab, focus it
-      for (var i = 0; i < windowClients.length; i++) {
-        var client = windowClients[i];
-        if (client.url.indexOf('rbvfc-portal') > -1 && 'focus' in client) {
-          return client.focus();
-        }
-      }
-      // Otherwise open a new tab
-      if (clients.openWindow) return clients.openWindow(targetUrl);
-    })
-  );
+  var url = (event.notification.data && event.notification.data.url) || '/rbvfc-portal.html/';
+  event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(list) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].url.indexOf(url) !== -1 && 'focus' in list[i]) return list[i].focus();
+    }
+    if (clients.openWindow) return clients.openWindow(url);
+  }));
 });
-
 // ══════════════════════════════════════════════════════════════════════
 //  Optional: lifecycle — activate immediately on update
 // ══════════════════════════════════════════════════════════════════════
