@@ -15407,6 +15407,11 @@ function openPublicEvents() {
   window.open(base + '?view=events', '_blank');
 }
 
+function openPublicStats() {
+  var base = window.location.href.split('?')[0].split('#')[0];
+  window.open(base + '?view=stats', '_blank');
+}
+
 function checkPublicViewMode() {
   var fullHref = window.location.href;
   var hasParam = (window.location.search.indexOf('view=public') >= 0) ||
@@ -15416,7 +15421,9 @@ function checkPublicViewMode() {
     (window.location.href.indexOf('?view=staffing7') >= 0);
   var isEvents = (window.location.search.indexOf('view=events') >= 0) ||
     (window.location.href.indexOf('?view=events') >= 0);
-  if (!hasParam && !isStaffing7 && !isEvents) return false;
+  var isStats = (window.location.search.indexOf('view=stats') >= 0) ||
+    (window.location.href.indexOf('?view=stats') >= 0);
+  if (!hasParam && !isStaffing7 && !isEvents && !isStats) return false;
   document.getElementById('loginOverlay').style.display = 'none';
   document.body.classList.add('public-view');
   var app = document.getElementById('app');
@@ -15424,7 +15431,10 @@ function checkPublicViewMode() {
   app.style.flexDirection = 'column';
   var nav = document.getElementById('bottomNav');
   if (nav) nav.style.display = 'none';
-  var _renderFn = isStaffing7 ? renderPublicStaffing7Day : (isEvents ? renderPublicEvents : renderPublicView);
+  var _renderFn = isStats ? renderPublicStats
+                : isStaffing7 ? renderPublicStaffing7Day
+                : isEvents ? renderPublicEvents
+                : renderPublicView;
   // Connect Firestore for live data (no auth needed for anonymous read)
   if (_fbConfigured()) {
     initFirebase(function() {
@@ -15437,6 +15447,491 @@ function checkPublicViewMode() {
     _renderFn();
   }
   return true;
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  PUBLIC STATS — Annual statistics & performance dashboard
+//  URL: ?view=stats
+// ═══════════════════════════════════════════════════════════════
+function renderPublicStats() {
+  var sa = document.getElementById('scrollArea');
+  if (!sa) return;
+  var pad = function(n){ return String(n).padStart(2,'0'); };
+  var now = new Date();
+  var thisYear = now.getFullYear();
+  var lastYear = thisYear - 1;
+  var logoSrc = getLogoData();
+  var compName = state.companyName || 'RIVIERA BEACH VOL. FIRE CO. 13';
+  var pubBase = window.location.href.split('?')[0].split('#')[0];
+  var EMS_UNITS_LIST = (typeof EMS_UNITS !== 'undefined') ? EMS_UNITS : ['a139','Mu13'];
+  function isEmsResp(r) {
+    var u = r.units || [];
+    if (!u.length) return false;
+    return u.every(function(x){ return EMS_UNITS_LIST.indexOf(x) >= 0; });
+  }
+
+  // ── Compute stats ─────────────────────────────────────────────
+  var roster = state.roster || [];
+  var activeMembers = roster.filter(function(m){ return m.active !== false; });
+
+  var responsesYTD = (state.emergencyResponses || []).filter(function(r){
+    return r.date && String(r.date).startsWith(String(thisYear));
+  });
+  var responsesLY = (state.emergencyResponses || []).filter(function(r){
+    return r.date && String(r.date).startsWith(String(lastYear));
+  });
+
+  var fireCount = responsesYTD.filter(function(r){ return !isEmsResp(r); }).length;
+  var emsCount  = responsesYTD.filter(function(r){ return  isEmsResp(r); }).length;
+  var totalCalls = responsesYTD.length;
+  var lyTotal = responsesLY.length;
+
+  // Monthly volume — last 12 months ending this month
+  var monthly = [];
+  var monthLabels = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  for (var mo = 0; mo < 12; mo++) {
+    monthly.push({ fire:0, ems:0, label: monthLabels[mo], idx: mo });
+  }
+  responsesYTD.forEach(function(r){
+    var parts = String(r.date || '').split('-');
+    var m = parseInt(parts[1], 10) - 1;
+    if (m >= 0 && m < 12) {
+      if (isEmsResp(r)) monthly[m].ems++;
+      else monthly[m].fire++;
+    }
+  });
+
+  // Calls by apparatus
+  var unitCounts = {};
+  Object.keys(UNIT_LABELS).forEach(function(u){ unitCounts[u] = 0; });
+  responsesYTD.forEach(function(r){
+    (r.units || []).forEach(function(u){
+      if (unitCounts[u] !== undefined) unitCounts[u]++;
+    });
+  });
+  var unitArr = Object.keys(unitCounts).map(function(u){
+    return { id: u, label: UNIT_LABELS[u] || u, count: unitCounts[u], isEMS: EMS_UNITS_LIST.indexOf(u) >= 0 };
+  }).filter(function(u){ return u.count > 0; })
+    .sort(function(a, b){ return b.count - a.count; });
+
+  // LOSAP totals by category
+  var catTotals = { emergency:0, training:0, drill:0, meeting:0, duties:0, fundraiser:0, position:0, boardmeeting:0 };
+  responsesYTD.forEach(function(r){
+    var n = (r.members || []).length;
+    catTotals.emergency += 0.5 * n;
+  });
+  (state.losapActivities || []).filter(function(a){
+    return a.date && String(a.date).startsWith(String(thisYear));
+  }).forEach(function(a){
+    var cat = a.category || 'duties';
+    if (catTotals[cat] === undefined) cat = 'duties';
+    catTotals[cat] += a.pts || a.points || 0;
+  });
+  // Position points
+  if (typeof LOSAP_OFFICER_TITLES !== 'undefined') {
+    activeMembers.forEach(function(m){
+      var positions = (m.losapPositions && m.losapPositions.length) ? m.losapPositions
+                    : (m.losapPosition ? [m.losapPosition] : []);
+      if (!positions.length) return;
+      function _ml(pos, list){
+        return list.some(function(t){
+          return pos.toLowerCase().indexOf(t.toLowerCase()) >= 0
+              || t.toLowerCase().indexOf(pos.toLowerCase()) >= 0;
+        });
+      }
+      var hasOff = positions.some(function(p){ return _ml(p, LOSAP_OFFICER_TITLES); });
+      var hasCh  = positions.some(function(p){ return _ml(p, LOSAP_CHAIR_TITLES);   });
+      var hasMb  = positions.some(function(p){ return _ml(p, LOSAP_MEMBER_TITLES);  });
+      if (hasOff)      catTotals.position += 25;
+      else if (hasCh)  catTotals.position += 15;
+      else if (hasMb)  catTotals.position += 10;
+    });
+  }
+  // Merge boardmeeting -> meeting for display
+  catTotals.meeting += catTotals.boardmeeting;
+  delete catTotals.boardmeeting;
+
+  // Top responders
+  var responderCounts = {};
+  responsesYTD.forEach(function(r){
+    (r.members || []).forEach(function(uid){
+      responderCounts[uid] = (responderCounts[uid] || 0) + 1;
+    });
+  });
+  var topResp = Object.keys(responderCounts).map(function(uid){
+    var m = roster.find(function(x){ return x.id === uid; });
+    return { id: uid, name: m ? (m.first + ' ' + m.last) : 'Member', count: responderCounts[uid] };
+  }).sort(function(a, b){ return b.count - a.count; }).slice(0, 10);
+
+  // Qualified count
+  var qualCount = 0;
+  if (typeof calcMemberLOSAP === 'function') {
+    activeMembers.forEach(function(m){
+      try { if (calcMemberLOSAP(m.id, thisYear) >= 50) qualCount++; } catch(e){}
+    });
+  }
+
+  // Training hours
+  var trainingHrsYTD = 0;
+  (state.trainingSubmissions || []).filter(function(t){
+    return (t.status === 'approved' || !t.status) && t.date && String(t.date).startsWith(String(thisYear));
+  }).forEach(function(t){
+    var members = (t.members && t.members.length) || 1;
+    trainingHrsYTD += (parseFloat(t.hours) || 0) * members;
+  });
+
+  // YoY cumulative
+  var yearStart = new Date(thisYear, 0, 1);
+  var lastYearStart = new Date(lastYear, 0, 1);
+  var dayInYear = Math.floor((now - yearStart) / 86400000);
+  var cumThis = []; var cumLast = [];
+  for (var d = 0; d < 366; d++) { cumThis.push(0); cumLast.push(0); }
+  responsesYTD.forEach(function(r){
+    var dt = new Date(String(r.date) + 'T12:00:00');
+    var doy = Math.floor((dt - yearStart) / 86400000);
+    if (doy >= 0 && doy < 366) cumThis[doy]++;
+  });
+  responsesLY.forEach(function(r){
+    var dt = new Date(String(r.date) + 'T12:00:00');
+    var doy = Math.floor((dt - lastYearStart) / 86400000);
+    if (doy >= 0 && doy < 366) cumLast[doy]++;
+  });
+  for (var i = 1; i < 366; i++) {
+    cumThis[i] += cumThis[i - 1];
+    cumLast[i] += cumLast[i - 1];
+  }
+
+  // Fair same-period YoY comparison: this-YTD vs last-year-through-same-date
+  var lyToDate = cumLast[Math.min(dayInYear, 365)] || 0;
+  var lyComp = lyToDate > 0 ? Math.round(((totalCalls - lyToDate) / lyToDate) * 100) : 0;
+  var trendArrow = lyComp >= 0 ? '\u25b2 +' : '\u25bc ';
+  var lyTrend = trendArrow + Math.abs(lyComp) + '% vs ' + lastYear + ' YTD';
+  var trendColor = lyComp >= 0 ? '#27AE60' : '#E74C3C';
+
+  // ── Build HTML ────────────────────────────────────────────────
+  var h = '<div id="tvBoardStats" style="display:flex;flex-direction:column;min-height:100vh;background:#080808;font-family:Barlow Condensed,sans-serif;box-sizing:border-box;color:#F0F0F0;">';
+
+  // Header
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:#0C0C0C;border-bottom:3px solid #C8102E;flex-shrink:0;">';
+  h += (logoSrc ? '<img src="' + logoSrc + '" style="height:42px;width:auto;object-fit:contain;">'
+                : '<div style="width:50px;"></div>');
+  h += '<div style="text-align:center;">'
+     + '<div style="font-family:Bebas Neue,sans-serif;font-size:22px;letter-spacing:4px;color:#F0F0F0;line-height:1;">' + compName + '</div>'
+     + '<div style="font-size:11px;color:#C8102E;letter-spacing:3px;text-transform:uppercase;margin-top:2px;">Annual Statistics &amp; Performance &middot; ' + thisYear + '</div>'
+     + '</div>';
+  h += '<div style="display:flex;gap:8px;align-items:center;">'
+     + '<div id="tvStatsClock" style="font-family:Bebas Neue,sans-serif;font-size:28px;color:#C8102E;line-height:1;letter-spacing:2px;"></div>'
+     + '<div style="display:flex;flex-direction:column;gap:4px;">'
+     + '<a href="' + pubBase + '?view=public" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:3px 7px;text-align:center;">TV Board</a>'
+     + '<a href="' + pubBase + '?view=staffing7" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:3px 7px;text-align:center;">7-Day</a>'
+     + '<a href="' + pubBase + '?view=events" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:3px 7px;text-align:center;">Events</a>'
+     + '</div></div>';
+  h += '</div>';
+
+  // KPI Cards
+  function kpi(label, value, sub, accent) {
+    return '<div style="background:linear-gradient(135deg,#111,#0A0A0A);border:1px solid #1E1E1E;border-top:3px solid ' + accent + ';border-radius:8px;padding:14px 16px;flex:1;min-width:140px;">'
+      + '<div style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">' + label + '</div>'
+      + '<div style="font-family:Bebas Neue,sans-serif;font-size:36px;color:' + accent + ';line-height:1;letter-spacing:1px;">' + value + '</div>'
+      + (sub ? '<div style="font-size:11px;color:#777;margin-top:4px;">' + sub + '</div>' : '')
+      + '</div>';
+  }
+  var pctFire = totalCalls ? Math.round(fireCount / totalCalls * 100) : 0;
+  var pctEms  = totalCalls ? Math.round(emsCount  / totalCalls * 100) : 0;
+  var perMember = activeMembers.length ? (totalCalls / activeMembers.length).toFixed(1) : '0';
+  h += '<div style="display:flex;gap:12px;padding:16px 24px;flex-wrap:wrap;">';
+  h += kpi('Total Calls YTD', totalCalls, lyToDate > 0 ? '<span style="color:' + trendColor + ';">' + lyTrend + '</span>' : 'First year of tracking', '#C8102E');
+  h += kpi('Fire Responses', fireCount, pctFire + '% of all calls', '#3498DB');
+  h += kpi('EMS Responses', emsCount, pctEms + '% of all calls', '#27AE60');
+  h += kpi('Active Members', activeMembers.length, qualCount + ' LOSAP qualified', '#F5A623');
+  h += kpi('Training Hours', Math.round(trainingHrsYTD), 'Approved this year', '#9B59B6');
+  h += kpi('Calls / Member', perMember, 'Average per member', '#E67E22');
+  h += '</div>';
+
+  // Row 1 — Monthly chart + Donut
+  h += '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;padding:0 24px 16px;">';
+  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:18px;">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">';
+  h += '<div><div style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:3px;color:#F0F0F0;">MONTHLY CALL VOLUME</div>'
+     + '<div style="font-size:11px;color:#666;letter-spacing:1px;">Fire vs EMS &middot; ' + thisYear + '</div></div>';
+  h += '<div style="display:flex;gap:14px;font-size:11px;align-items:center;">'
+     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:12px;height:12px;background:#3498DB;border-radius:2px;"></span>Fire</span>'
+     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:12px;height:12px;background:#27AE60;border-radius:2px;"></span>EMS</span>'
+     + '</div></div>';
+  h += _statsMonthlyBarChart(monthly);
+  h += '</div>';
+
+  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:18px;">';
+  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:3px;color:#F0F0F0;">LOSAP POINTS</div>'
+     + '<div style="font-size:11px;color:#666;letter-spacing:1px;margin-bottom:14px;">Aggregate by category &middot; ' + thisYear + '</div>';
+  h += _statsDonutChart(catTotals);
+  h += '</div>';
+  h += '</div>';
+
+  // Row 2 — Apparatus + Top responders
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 24px 16px;">';
+  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:18px;">';
+  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:3px;color:#F0F0F0;">CALLS BY APPARATUS</div>'
+     + '<div style="font-size:11px;color:#666;letter-spacing:1px;margin-bottom:14px;">Top responding units &middot; ' + thisYear + '</div>';
+  h += _statsUnitBarChart(unitArr);
+  h += '</div>';
+
+  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:18px;">';
+  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:3px;color:#F0F0F0;">TOP 10 RESPONDERS</div>'
+     + '<div style="font-size:11px;color:#666;letter-spacing:1px;margin-bottom:14px;">Members ranked by call count &middot; ' + thisYear + '</div>';
+  h += _statsTopResponders(topResp);
+  h += '</div>';
+  h += '</div>';
+
+  // Row 3 — YoY trend
+  h += '<div style="padding:0 24px 24px;">';
+  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:18px;">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">';
+  h += '<div><div style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:3px;color:#F0F0F0;">CUMULATIVE CALL TREND</div>'
+     + '<div style="font-size:11px;color:#666;letter-spacing:1px;">' + thisYear + ' vs ' + lastYear + ' &middot; year-to-date running total</div></div>';
+  h += '<div style="display:flex;gap:14px;font-size:11px;align-items:center;">'
+     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:18px;height:3px;background:#C8102E;border-radius:2px;"></span>' + thisYear + '</span>'
+     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:18px;height:3px;background:#666;border-radius:2px;"></span>' + lastYear + '</span>'
+     + '</div></div>';
+  h += _statsYoYLineChart(cumThis, cumLast, dayInYear);
+  h += '</div>';
+  h += '</div>';
+
+  // Footer
+  h += '<div style="padding:14px 24px;border-top:1px solid #181818;display:flex;justify-content:space-between;font-size:10px;color:#444;letter-spacing:1px;text-transform:uppercase;flex-wrap:wrap;gap:8px;">'
+     + '<span>Data as of ' + now.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' }) + '</span>'
+     + '<span>Auto-refreshes every 5 min</span>'
+     + '</div>';
+
+  h += '</div>';
+  sa.innerHTML = h;
+  // Allow page scroll for stats dashboard
+  document.body.style.overflow = 'auto';
+  sa.style.overflow = 'auto';
+  sa.style.height = 'auto';
+
+  function tickStats() {
+    var el = document.getElementById('tvStatsClock');
+    if (!el) return;
+    var t = new Date(), hh = t.getHours(), mm = t.getMinutes();
+    var ap = hh >= 12 ? 'PM' : 'AM';
+    hh = hh % 12 || 12;
+    el.textContent = hh + ':' + pad(mm) + ' ' + ap;
+  }
+  tickStats();
+  if (window._tvStatsClock) clearInterval(window._tvStatsClock);
+  window._tvStatsClock = setInterval(tickStats, 1000);
+  if (window._pubStatsRefresh) clearInterval(window._pubStatsRefresh);
+  window._pubStatsRefresh = setInterval(renderPublicStats, 300000);
+}
+
+// === SVG chart helpers for the public stats view ===
+
+function _statsMonthlyBarChart(monthly) {
+  var W = 720, H = 250, P = { l: 38, r: 14, t: 14, b: 30 };
+  var max = 0;
+  monthly.forEach(function(m){ var t = m.fire + m.ems; if (t > max) max = t; });
+  if (max < 5) max = 5;
+  max = Math.ceil(max / 5) * 5;
+  var cw = (W - P.l - P.r) / 12;
+  var bw = cw * 0.62;
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;font-family:Inter,sans-serif;">';
+  // Y grid + labels
+  for (var g = 0; g <= 5; g++) {
+    var y = P.t + (H - P.t - P.b) * (1 - g / 5);
+    var v = Math.round(max * g / 5);
+    s += '<line x1="' + P.l + '" y1="' + y + '" x2="' + (W - P.r) + '" y2="' + y + '" stroke="#1A1A1A" stroke-width="1"/>';
+    s += '<text x="' + (P.l - 6) + '" y="' + (y + 3) + '" fill="#444" font-size="10" text-anchor="end">' + v + '</text>';
+  }
+  // Bars
+  monthly.forEach(function(m, i){
+    var x = P.l + cw * i + (cw - bw) / 2;
+    var emsH  = (H - P.t - P.b) * (m.ems  / max);
+    var fireH = (H - P.t - P.b) * (m.fire / max);
+    var yEms  = H - P.b - emsH;
+    var yFire = yEms - fireH;
+    if (m.ems > 0) {
+      s += '<rect x="' + x + '" y="' + yEms + '" width="' + bw + '" height="' + emsH + '" fill="#27AE60" rx="3" ry="3"/>';
+    }
+    if (m.fire > 0) {
+      s += '<rect x="' + x + '" y="' + yFire + '" width="' + bw + '" height="' + fireH + '" fill="#3498DB" rx="3" ry="3"/>';
+    }
+    var t = m.fire + m.ems;
+    if (t > 0) {
+      s += '<text x="' + (x + bw / 2) + '" y="' + (yFire - 5) + '" fill="#AAA" font-size="11" text-anchor="middle" font-weight="700">' + t + '</text>';
+    }
+    s += '<text x="' + (x + bw / 2) + '" y="' + (H - P.b + 16) + '" fill="#666" font-size="10" text-anchor="middle" font-family="Bebas Neue,sans-serif" letter-spacing="1">' + m.label + '</text>';
+  });
+  s += '</svg>';
+  return s;
+}
+
+function _statsDonutChart(catTotals) {
+  var labels = {
+    emergency:  { l: 'Emergency Response', c: '#C8102E' },
+    training:   { l: 'Training',           c: '#9B59B6' },
+    drill:      { l: 'Drills',             c: '#E67E22' },
+    meeting:    { l: 'Meetings',           c: '#F5A623' },
+    duties:     { l: 'Standby/Duty',       c: '#3498DB' },
+    fundraiser: { l: 'Events',             c: '#16A085' },
+    position:   { l: 'Position Pts',       c: '#E74C3C' }
+  };
+  var entries = [];
+  Object.keys(labels).forEach(function(k){
+    var v = catTotals[k] || 0;
+    if (v > 0) entries.push({ k: k, label: labels[k].l, color: labels[k].c, value: v });
+  });
+  entries.sort(function(a, b){ return b.value - a.value; });
+  var total = entries.reduce(function(s, e){ return s + e.value; }, 0);
+  if (total === 0) {
+    return '<div style="text-align:center;color:#444;padding:60px 0;font-size:13px;">No LOSAP activity recorded yet</div>';
+  }
+  var cx = 105, cy = 105, r = 85, ir = 55;
+  var s = '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">';
+  s += '<svg viewBox="0 0 210 210" width="190" style="flex-shrink:0;font-family:Bebas Neue,sans-serif;">';
+  // If only one entry, draw full ring
+  if (entries.length === 1) {
+    s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + ((r + ir) / 2) + '" fill="none" stroke="' + entries[0].color + '" stroke-width="' + (r - ir) + '"/>';
+  } else {
+    var ang = -Math.PI / 2;
+    entries.forEach(function(e){
+      var portion = e.value / total;
+      var sweep = portion * Math.PI * 2;
+      var a1 = ang, a2 = ang + sweep;
+      var large = sweep > Math.PI ? 1 : 0;
+      var x1 = cx + Math.cos(a1) * r,  y1 = cy + Math.sin(a1) * r;
+      var x2 = cx + Math.cos(a2) * r,  y2 = cy + Math.sin(a2) * r;
+      var x3 = cx + Math.cos(a2) * ir, y3 = cy + Math.sin(a2) * ir;
+      var x4 = cx + Math.cos(a1) * ir, y4 = cy + Math.sin(a1) * ir;
+      var d = 'M ' + x1 + ' ' + y1
+            + ' A ' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x2 + ' ' + y2
+            + ' L ' + x3 + ' ' + y3
+            + ' A ' + ir + ' ' + ir + ' 0 ' + large + ' 0 ' + x4 + ' ' + y4 + ' Z';
+      s += '<path d="' + d + '" fill="' + e.color + '" stroke="#0C0C0C" stroke-width="2"/>';
+      ang = a2;
+    });
+  }
+  s += '<text x="' + cx + '" y="' + (cy - 2) + '" fill="#F0F0F0" font-size="30" text-anchor="middle">' + Math.round(total) + '</text>';
+  s += '<text x="' + cx + '" y="' + (cy + 16) + '" fill="#666" font-size="9" text-anchor="middle" font-family="Inter,sans-serif" letter-spacing="2">TOTAL PTS</text>';
+  s += '</svg>';
+  // Legend
+  s += '<div style="flex:1;min-width:160px;font-size:12px;">';
+  entries.forEach(function(e){
+    var pct = Math.round(e.value / total * 100);
+    s += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #181818;">'
+       + '<span style="width:10px;height:10px;border-radius:2px;background:' + e.color + ';flex-shrink:0;"></span>'
+       + '<span style="flex:1;color:#CCC;font-size:11px;">' + e.label + '</span>'
+       + '<span style="font-family:Bebas Neue,sans-serif;color:#F0F0F0;font-size:14px;letter-spacing:1px;">' + Math.round(e.value) + '</span>'
+       + '<span style="color:#666;font-size:10px;width:32px;text-align:right;">' + pct + '%</span>'
+       + '</div>';
+  });
+  s += '</div></div>';
+  return s;
+}
+
+function _statsUnitBarChart(unitArr) {
+  if (!unitArr.length) {
+    return '<div style="text-align:center;color:#444;padding:50px 0;font-size:13px;">No emergency responses logged yet</div>';
+  }
+  var max = unitArr[0].count;
+  var s = '';
+  unitArr.slice(0, 8).forEach(function(u){
+    var pct = (u.count / max) * 100;
+    var color = u.isEMS ? '#27AE60' : '#3498DB';
+    s += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;">'
+       + '<div style="width:96px;font-size:12px;color:#AAA;letter-spacing:.5px;flex-shrink:0;">' + u.label + '</div>'
+       + '<div style="flex:1;height:20px;background:#0A0A0A;border-radius:4px;overflow:hidden;position:relative;">'
+       + '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,' + color + '66,' + color + ');border-radius:4px;transition:width .6s ease;"></div>'
+       + '</div>'
+       + '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;color:#F0F0F0;letter-spacing:1px;width:36px;text-align:right;">' + u.count + '</div>'
+       + '</div>';
+  });
+  return s;
+}
+
+function _statsTopResponders(topResp) {
+  if (!topResp.length) {
+    return '<div style="text-align:center;color:#444;padding:50px 0;font-size:13px;">No responses logged yet</div>';
+  }
+  var max = topResp[0].count;
+  var s = '';
+  topResp.forEach(function(p, i){
+    var pct = (p.count / max) * 100;
+    var rank = i + 1;
+    var rankBg = i === 0 ? '#F5A623' : i === 1 ? '#C0C0C0' : i === 2 ? '#CD7F32' : '#222';
+    var rankFg = i < 3 ? '#000' : '#888';
+    s += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">'
+       + '<div style="width:26px;height:26px;border-radius:50%;background:' + rankBg + ';color:' + rankFg + ';display:flex;align-items:center;justify-content:center;font-family:Bebas Neue,sans-serif;font-size:14px;flex-shrink:0;font-weight:700;">' + rank + '</div>'
+       + '<div style="flex:1;min-width:0;">'
+       + '<div style="font-size:13px;color:#F0F0F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (p.name || 'Member') + '</div>'
+       + '<div style="height:6px;background:#0A0A0A;border-radius:99px;overflow:hidden;margin-top:3px;">'
+       + '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#C8102E66,#C8102E);"></div>'
+       + '</div></div>'
+       + '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;color:#C8102E;letter-spacing:1px;width:38px;text-align:right;">' + p.count + '</div>'
+       + '</div>';
+  });
+  return s;
+}
+
+function _statsYoYLineChart(cumThis, cumLast, dayInYear) {
+  var W = 1100, H = 240, P = { l: 38, r: 14, t: 14, b: 30 };
+  var maxThis = dayInYear >= 0 ? cumThis[Math.min(dayInYear, cumThis.length - 1)] : 0;
+  var maxLast = cumLast[cumLast.length - 1] || 0;
+  var max = Math.max(maxThis, maxLast, 10);
+  // Round up to a "nice" number
+  if (max <= 50)        max = Math.ceil(max / 10) * 10;
+  else if (max <= 200)  max = Math.ceil(max / 25) * 25;
+  else if (max <= 1000) max = Math.ceil(max / 50) * 50;
+  else                  max = Math.ceil(max / 100) * 100;
+
+  var xScale = function(d){ return P.l + (W - P.l - P.r) * (d / 365); };
+  var yScale = function(v){ return P.t + (H - P.t - P.b) * (1 - v / max); };
+
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;font-family:Inter,sans-serif;">';
+  s += '<defs><linearGradient id="thisYearGrad" x1="0" x2="0" y1="0" y2="1">'
+     + '<stop offset="0%" stop-color="#C8102E" stop-opacity="0.45"/>'
+     + '<stop offset="100%" stop-color="#C8102E" stop-opacity="0"/>'
+     + '</linearGradient></defs>';
+
+  // Y grid + labels
+  for (var g = 0; g <= 5; g++) {
+    var y = P.t + (H - P.t - P.b) * (1 - g / 5);
+    s += '<line x1="' + P.l + '" y1="' + y + '" x2="' + (W - P.r) + '" y2="' + y + '" stroke="#1A1A1A" stroke-width="1"/>';
+    s += '<text x="' + (P.l - 6) + '" y="' + (y + 3) + '" fill="#444" font-size="10" text-anchor="end">' + Math.round(max * g / 5) + '</text>';
+  }
+  // Month gridlines + labels
+  var monthLabels = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  // Use a non-leap reference year for month positions
+  var refYearStart = new Date(2023, 0, 1);
+  for (var m = 0; m < 12; m++) {
+    var monthDoy = Math.floor((new Date(2023, m, 1) - refYearStart) / 86400000);
+    var x = xScale(monthDoy);
+    s += '<line x1="' + x + '" y1="' + P.t + '" x2="' + x + '" y2="' + (H - P.b) + '" stroke="#181818" stroke-width="1" stroke-dasharray="2,3"/>';
+    s += '<text x="' + x + '" y="' + (H - P.b + 16) + '" fill="#666" font-size="10" font-family="Bebas Neue,sans-serif" letter-spacing="1">' + monthLabels[m] + '</text>';
+  }
+
+  // Last-year line (full)
+  var lastPts = '';
+  for (var d1 = 0; d1 < 366; d1++) lastPts += xScale(d1) + ',' + yScale(cumLast[d1]) + ' ';
+  s += '<polyline points="' + lastPts.trim() + '" fill="none" stroke="#666" stroke-width="2" stroke-dasharray="6,4"/>';
+
+  // This-year filled area + line
+  if (dayInYear >= 0) {
+    var thisPts = '';
+    for (var d2 = 0; d2 <= dayInYear && d2 < 366; d2++) thisPts += xScale(d2) + ',' + yScale(cumThis[d2]) + ' ';
+    var areaPts = xScale(0) + ',' + yScale(0) + ' ' + thisPts.trim() + ' ' + xScale(Math.min(dayInYear, 365)) + ',' + yScale(0);
+    s += '<polygon points="' + areaPts + '" fill="url(#thisYearGrad)" stroke="none"/>';
+    s += '<polyline points="' + thisPts.trim() + '" fill="none" stroke="#C8102E" stroke-width="3" stroke-linejoin="round"/>';
+    var endX = xScale(Math.min(dayInYear, 365));
+    var endY = yScale(cumThis[Math.min(dayInYear, 365)]);
+    s += '<circle cx="' + endX + '" cy="' + endY + '" r="6" fill="#C8102E" stroke="#080808" stroke-width="3"/>';
+    var labelX = endX + 10;
+    if (labelX > W - 60) labelX = endX - 56;
+    s += '<text x="' + labelX + '" y="' + (endY + 4) + '" fill="#C8102E" font-size="14" font-family="Bebas Neue,sans-serif" letter-spacing="1" font-weight="700">' + cumThis[Math.min(dayInYear, 365)] + '</text>';
+  }
+  s += '</svg>';
+  return s;
 }
 
 
@@ -15510,6 +16005,7 @@ function renderPublicEvents() {
      + '<div style="display:flex;flex-direction:column;gap:4px;">'
      + '<a href="'+pubBase+'?view=public" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:3px 7px;text-align:center;">TV Board</a>'
      + '<a href="'+pubBase+'?view=staffing7" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:3px 7px;text-align:center;">7-Day</a>'
+     + '<a href="'+pubBase+'?view=stats" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:3px 7px;text-align:center;">Stats</a>'
      + '</div></div>';
   h += '</div>';
 
@@ -15689,7 +16185,10 @@ function renderPublicStaffing7Day() {
      + '</div>';
   h += '<div style="display:flex;gap:10px;align-items:center;">'
      + '<div id="tv7Clock" style="font-family:Bebas Neue,sans-serif;font-size:32px;color:#C8102E;line-height:1;letter-spacing:2px;"></div>'
-     + '<a href="'+pubBase+'?view=public" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:4px 8px;">TV Board</a>'
+     + '<div style="display:flex;flex-direction:column;gap:4px;">'
+     + '<a href="'+pubBase+'?view=public" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:3px 7px;text-align:center;">TV Board</a>'
+     + '<a href="'+pubBase+'?view=stats" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:3px 7px;text-align:center;">Stats</a>'
+     + '</div>'
      + '</div>';
   h += '</div>';
 
@@ -15769,6 +16268,7 @@ function renderPublicView() {
      + '<div id="tvClock" style="font-family:Bebas Neue,sans-serif;font-size:48px;color:#C8102E;line-height:1;letter-spacing:2px;"></div>'
      + '<a href="'+_pub7Base+'?view=staffing7" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:4px 8px;">7-Day Staffing</a>'
      + '<a href="'+_pub7Base+'?view=events" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:4px 8px;margin-top:4px;">Events</a>'
+     + '<a href="'+_pub7Base+'?view=stats" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:4px 8px;margin-top:4px;">Statistics</a>'
      + '</div>';
   h += '</div>';
 
@@ -19344,7 +19844,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <!-- Public Staffing / Leaderboard Link -->
       <div class="card" data-no-collapse="1" id="publicLinkCard">
         <div class="card-header" onclick="toggleAdminCardById('publicLinkCard')" style="cursor:pointer;user-select:none;"><div class="icon">🔗<span id="publicLinkChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;">&#9660;</span></div><h2>Public View Link</h2></div>
-        <p style="font-size:13px;color:#888;margin-bottom:12px;">Share this link to display today's staffing board and Company LOSAP Board — no login required.</p>
+        <p style="font-size:13px;color:#888;margin-bottom:12px;">Share this link to display today's staffing, the 7-day outlook, upcoming events, and the annual statistics dashboard — no login required.</p>
         <div style="background:#111;border:1px solid #333;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:8px;margin-bottom:10px;">
           <div id="publicLinkText" style="flex:1;font-size:12px;color:#AAA;word-break:break-all;font-family:monospace;"></div>
           <button class="btn btn-sm btn-secondary" style="flex-shrink:0;" onclick="copyPublicLink()">📋 Copy</button>
@@ -19352,6 +19852,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         <button class="btn btn-sm btn-secondary" style="width:100%;" onclick="openPublicView()">👁 Preview</button>
         <button class="btn btn-sm btn-secondary" style="width:100%;margin-top:6px;" onclick="openPublicStaffing7Day()">&#128197; 7-Day Staffing</button>
         <button class="btn btn-sm btn-secondary" style="width:100%;margin-top:6px;" onclick="openPublicEvents()">&#127881; Events &amp; Calendar</button>
+        <button class="btn btn-sm btn-secondary" style="width:100%;margin-top:6px;" onclick="openPublicStats()">&#128202; Statistics Dashboard</button>
       </div>
 
     
