@@ -1357,6 +1357,7 @@ function showTab(id) {
   }
   if (id === 'approvals') initApprovalsTab();
   if (id === 'history') initHistoryTab();
+  if (id === 'past-alerts') initPastAlertsTab();
   // Sync collapse icons to current state
   setTimeout(fixCollapseIcons, 10);
   // Wire up any new cards rendered in this tab
@@ -6489,17 +6490,18 @@ function renderStaffingAlerts() {
     return true;
   });
 
-  // Split: active = uncleared by me AND within 48h; past = older or already cleared by me
+  // Split: active = uncleared by me AND within 24h; past = older or already cleared by me
+  // (24h was 48h — tightened to reduce alert pile-up; auto-ack on login handles older items)
   var now = Date.now();
   var active = allAlerts.filter(function(a) {
     var age = (now - new Date(a.sentAt).getTime()) / 3600000;
     var clearedByMe = (a.clears||[]).some(function(cl){ return cl.memberId===uid; });
-    return age <= 48 && !clearedByMe;
+    return age <= 24 && !clearedByMe;
   });
   var past = allAlerts.filter(function(a) {
     var age = (now - new Date(a.sentAt).getTime()) / 3600000;
     var clearedByMe = (a.clears||[]).some(function(cl){ return cl.memberId===uid; });
-    return age > 48 || clearedByMe;
+    return age > 24 || clearedByMe;
   });
 
   if (!active.length && !past.length) {
@@ -6550,31 +6552,13 @@ function renderStaffingAlerts() {
     }
     html += '</div></div>';
   });
-  // Past alerts — collapsible section
+  // Past alerts — link to dedicated Past Alerts page in More menu (replaces inline collapsible)
   var pastHtml = '';
   if (past.length) {
-    var pastId = 'pastAlertsCollapse_' + uid;
-    pastHtml = '<div style="margin-top:14px;border-top:1px solid #2A2A2A;padding-top:10px;">'
-      + '<div data-pastid="' + pastId + '" onclick="var pid=this.getAttribute(\'data-pastid\');var el=document.getElementById(pid);var ic=document.getElementById(pid+\'_ic\');if(el){var op=el.style.display===\'none\';el.style.display=op?\'block\':\'none\';if(ic)ic.textContent=op?\'\u25bc\':\'\u25b6\';}" '
-      + 'style="cursor:pointer;display:flex;align-items:center;gap:6px;margin-bottom:8px;">'
-      + '<span style="font-size:10px;color:#444;text-transform:uppercase;letter-spacing:2px;">Past Alerts ('+past.length+')</span>'
-      + '<span id="'+pastId+'_ic" style="color:#444;font-size:12px;">&#9658;</span>'
-      + '</div>'
-      + '<div id="'+pastId+'" style="display:none;">';
-    past.forEach(function(a) {
-      var sender = (state.roster||[]).find(function(m){ return m.id===a.sentBy; });
-      var clears = a.clears || [];
-      var clearedByMe = clears.some(function(cl){ return cl.memberId===uid; });
-      var grpLabel = a.groupLabel || (a.group ? getGroupLabel(a.group) : '');
-      var ts = new Date(a.sentAt);
-      var tsStr = ts.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + ' · ' + ts.toLocaleDateString([],{month:'short',day:'numeric'});
-      pastHtml += '<div style="background:#111;border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:8px;opacity:0.7;">';
-      pastHtml += '<div style="font-size:11px;color:#555;margin-bottom:3px;">'+tsStr+(sender?' · '+sender.last+', '+sender.first:'')+(grpLabel?' · '+grpLabel:'')+'</div>';
-      pastHtml += '<div style="font-size:13px;color:#888;white-space:pre-line;">'+a.msg+'</div>';
-      if (clearedByMe) pastHtml += '<div style="font-size:10px;color:#27AE60;margin-top:4px;">✓ You acknowledged this</div>';
-      pastHtml += '</div>';
-    });
-    pastHtml += '</div></div>';
+    pastHtml = '<div style="margin-top:14px;border-top:1px solid #2A2A2A;padding-top:12px;text-align:center;">'
+      + '<button onclick="showTab(\'past-alerts\')" style="background:none;border:none;color:#7EC8E3;font-size:12px;cursor:pointer;padding:4px 8px;text-decoration:underline;">'
+      + '📜 View ' + past.length + ' past alert' + (past.length!==1?'s':'') + ' →</button>'
+      + '</div>';
   }
 
   container.innerHTML = html + pastHtml;
@@ -8632,7 +8616,7 @@ function _performAutoClockOut(sess, record) {
       sourceId: losapSourceId,
       clears: []
     });
-    state.staffingAlerts = state.staffingAlerts.slice(0, 20);
+    state.staffingAlerts = state.staffingAlerts.slice(0, 200); // cap raised from 20 for Past Alerts history
     save();
     try { renderStaffingAlerts(); } catch(e){}
   } catch(e) {}
@@ -10588,7 +10572,7 @@ function sendStaffingAlert() {
   if (!Array.isArray(state.staffingAlerts)) state.staffingAlerts = [];
   var alertId = 'alert_'+Date.now();
   state.staffingAlerts.unshift({ id:alertId, msg:msg, sentBy:state.currentUserId, sentAt:new Date().toISOString(), group:groupId, groupLabel:groupLabel, targetMembers:targets, clears:[] });
-  state.staffingAlerts = state.staffingAlerts.slice(0,20);
+  state.staffingAlerts = state.staffingAlerts.slice(0,200); // cap was 20; raised to 200 to support Past Alerts page
   save(); renderStaffingAlerts();
   renderAlertHistory(); renderMemberAlertBanner();
   var el = document.getElementById('staffingAlertMsg'); if(el) el.value='';
@@ -10599,18 +10583,197 @@ function sendStaffingAlert() {
 }
 
 
-function clearStaffingAlert(alertId) {
-  var uid = state.currentUserId;
+function clearStaffingAlert(alertId, opts) {
+  opts = opts || {};
+  var uid = opts.userId || state.currentUserId;
   var alert = (state.staffingAlerts||[]).find(function(a){ return a.id===alertId; });
   if (!alert) return;
   if (!Array.isArray(alert.clears)) alert.clears = [];
   // Check if already cleared by this member
   if (alert.clears.some(function(cl){ return cl.memberId===uid; })) return;
-  alert.clears.push({ memberId: uid, clearedAt: new Date().toISOString() });
+  var entry = { memberId: uid, clearedAt: new Date().toISOString() };
+  if (opts.auto) entry.auto = true;  // mark as auto-acknowledged on login
+  alert.clears.push(entry);
+  if (opts.silent) return;  // batch callers handle save/render themselves
   save();
   renderMemberAlertBanner();
   renderStaffingAlerts();
   showToast('\u2705 Alert cleared.');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ALERT FATIGUE MITIGATION — auto-ack, batch-ack, Past Alerts page
+// ═══════════════════════════════════════════════════════════════
+
+// Auto-acknowledge alerts older than `thresholdHrs` for the current user.
+// Called on login so members don't get buried in old alerts when they return.
+// Auto-cleared entries carry `auto: true` so the Past Alerts page can show
+// the difference between "you acknowledged this" and "this expired without response".
+function autoAcknowledgeOldStaffingAlerts(thresholdHrs) {
+  thresholdHrs = thresholdHrs || 12;
+  var uid = state.currentUserId;
+  if (!uid) return 0;
+  var now = Date.now();
+  var changed = 0;
+  (state.staffingAlerts||[]).forEach(function(a) {
+    var age = (now - new Date(a.sentAt).getTime()) / 3600000;
+    if (age <= thresholdHrs) return;
+    if (!Array.isArray(a.clears)) a.clears = [];
+    if (a.clears.some(function(cl){ return cl.memberId===uid; })) return;
+    // Only auto-ack alerts that targeted this member (or were broadcast)
+    if (a.targetMembers && a.targetMembers.length && a.targetMembers.indexOf(uid) < 0) return;
+    a.clears.push({ memberId: uid, clearedAt: new Date().toISOString(), auto: true });
+    changed++;
+  });
+  if (changed) { try { save(); } catch(e){} }
+  return changed;
+}
+
+// Manual sweep: acknowledge ALL still-unacknowledged past alerts for the current user.
+// Triggered from the Past Alerts page action bar.
+function acknowledgeAllPastAlerts() {
+  var uid = state.currentUserId;
+  if (!uid) return;
+  var changed = 0;
+  (state.staffingAlerts||[]).forEach(function(a) {
+    if (!Array.isArray(a.clears)) a.clears = [];
+    if (a.clears.some(function(cl){ return cl.memberId===uid; })) return;
+    if (a.targetMembers && a.targetMembers.length && a.targetMembers.indexOf(uid) < 0) return;
+    a.clears.push({ memberId: uid, clearedAt: new Date().toISOString() });
+    changed++;
+  });
+  if (changed) {
+    try { save(); } catch(e){}
+    try { renderMemberAlertBanner(); } catch(e){}
+    try { renderStaffingAlerts(); } catch(e){}
+    try { renderPastAlerts(); } catch(e){}
+    showToast('\u2705 Acknowledged ' + changed + ' alert' + (changed!==1?'s':'') + '.');
+  } else {
+    showToast('No pending alerts to acknowledge.');
+  }
+}
+
+function initPastAlertsTab() {
+  // Reset filters to defaults each time the tab opens for predictable behavior
+  var rangeEl = document.getElementById('pastAlertsRange');
+  var statusEl = document.getElementById('pastAlertsStatus');
+  if (rangeEl && !rangeEl.value) rangeEl.value = '30';
+  if (statusEl && !statusEl.value) statusEl.value = 'all';
+  renderPastAlerts();
+}
+
+function renderPastAlerts() {
+  var container = document.getElementById('pastAlertsContainer');
+  if (!container) return;
+  var uid = state.currentUserId;
+  var me = (state.roster||[]).find(function(m){ return m.id===uid; });
+  var isOfficer = me && (me.appRole==='officer' || me.appRole==='admin');
+
+  var range = (document.getElementById('pastAlertsRange')||{}).value || '30';
+  var statusFilter = (document.getElementById('pastAlertsStatus')||{}).value || 'all';
+  var rangeMs = range === 'all' ? Infinity : parseInt(range,10) * 86400000;
+  var now = Date.now();
+
+  // Member view: only alerts targeting them. Officer view: everything.
+  var alerts = (state.staffingAlerts||[]).filter(function(a) {
+    var age = now - new Date(a.sentAt).getTime();
+    if (age > rangeMs) return false;
+    if (!isOfficer) {
+      if (a.targetMembers && a.targetMembers.length && a.targetMembers.indexOf(uid) < 0) return false;
+    }
+    return true;
+  });
+
+  // Tag each alert with this member's status (ack / auto / missed)
+  alerts.forEach(function(a) {
+    var clear = (a.clears||[]).find(function(cl){ return cl.memberId===uid; });
+    if (clear) a._myStatus = clear.auto ? 'auto' : 'ack';
+    else a._myStatus = 'missed';
+  });
+
+  // Apply status filter (member-perspective; officers can use it too if curious)
+  var filtered = alerts.filter(function(a) {
+    if (statusFilter === 'all') return true;
+    return a._myStatus === statusFilter;
+  });
+
+  // Action bar: show only for non-officers when they have unacknowledged in range
+  var actionBar = document.getElementById('pastAlertsActionBar');
+  var actionLabel = document.getElementById('pastAlertsActionLabel');
+  if (!isOfficer && actionBar && actionLabel) {
+    var pendingCount = alerts.filter(function(a){ return a._myStatus === 'missed'; }).length;
+    if (pendingCount > 0) {
+      actionLabel.textContent = '⚠️ You have ' + pendingCount + ' alert' + (pendingCount!==1?'s':'') + ' you haven\u2019t acknowledged.';
+      actionBar.style.display = 'block';
+    } else {
+      actionBar.style.display = 'none';
+    }
+  } else if (actionBar) {
+    actionBar.style.display = 'none';
+  }
+
+  if (!filtered.length) {
+    container.innerHTML = '<div style="text-align:center;padding:32px 16px;color:#555;font-size:13px;">No alerts in this range.</div>';
+    return;
+  }
+
+  // Sort newest first
+  filtered.sort(function(a,b){ return (b.sentAt||'').localeCompare(a.sentAt||''); });
+
+  var html = '';
+  filtered.forEach(function(a) {
+    var sender = (state.roster||[]).find(function(m){ return m.id===a.sentBy; });
+    var grpLabel = a.groupLabel || (a.group ? getGroupLabel(a.group) : '');
+    var ts = new Date(a.sentAt);
+    var tsStr = ts.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + ' · ' + ts.toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'});
+
+    // Status pill from this user's perspective
+    var statusPill = '';
+    var leftBorder = '#333';
+    if (a._myStatus === 'ack') {
+      statusPill = '<span style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;font-size:10px;font-weight:700;letter-spacing:1px;padding:2px 8px;border-radius:5px;text-transform:uppercase;white-space:nowrap;">\u2713 Acknowledged</span>';
+      leftBorder = '#27AE60';
+    } else if (a._myStatus === 'auto') {
+      statusPill = '<span style="background:#1A1A1A;border:1px solid #555;color:#888;font-size:10px;font-weight:700;letter-spacing:1px;padding:2px 8px;border-radius:5px;text-transform:uppercase;white-space:nowrap;">\u23F1 Auto-cleared</span>';
+      leftBorder = '#555';
+    } else {
+      statusPill = '<span style="background:#2A1500;border:1px solid #F5A623;color:#F5A623;font-size:10px;font-weight:700;letter-spacing:1px;padding:2px 8px;border-radius:5px;text-transform:uppercase;white-space:nowrap;">\u26AA Not acknowledged</span>';
+      leftBorder = '#F5A623';
+    }
+
+    html += '<div style="background:#111;border:1px solid #2A2A2A;border-left:4px solid '+leftBorder+';border-radius:10px;padding:14px 16px;margin-bottom:10px;">';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">';
+    html += '<div style="font-size:11px;color:#888;">'+tsStr+(sender?' · '+sender.last+', '+sender.first:'')+(grpLabel?' · <span style="color:#7EC8E3;">'+grpLabel+'</span>':'')+'</div>';
+    html += statusPill;
+    html += '</div>';
+    html += '<div style="font-size:13px;color:#CCC;white-space:pre-line;line-height:1.5;">'+a.msg+'</div>';
+
+    // Officer view: roll-up of who acknowledged vs auto-cleared vs no response
+    if (isOfficer) {
+      var clears = a.clears || [];
+      var humanAcks = clears.filter(function(cl){ return !cl.auto; }).length;
+      var autoAcks  = clears.filter(function(cl){ return cl.auto; }).length;
+      var targetCount = (a.targetMembers && a.targetMembers.length) ? a.targetMembers.length : 0;
+      var noAck = targetCount > 0 ? Math.max(0, targetCount - clears.length) : 0;
+
+      html += '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #222;display:flex;flex-wrap:wrap;gap:6px;font-size:10px;">';
+      if (humanAcks > 0) html += '<span style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;padding:2px 8px;border-radius:5px;">\u2713 '+humanAcks+' acknowledged</span>';
+      if (autoAcks > 0)  html += '<span style="background:#1A1A1A;border:1px solid #555;color:#888;padding:2px 8px;border-radius:5px;">\u23F1 '+autoAcks+' auto-cleared</span>';
+      if (noAck > 0)     html += '<span style="background:#2A1500;border:1px solid #F5A623;color:#F5A623;padding:2px 8px;border-radius:5px;">\u26AA '+noAck+' no response</span>';
+      if (targetCount === 0 && clears.length === 0) html += '<span style="color:#555;font-style:italic;">No target list recorded.</span>';
+      html += '</div>';
+    }
+
+    // Member action: acknowledge inline if still pending
+    if (!isOfficer && a._myStatus === 'missed') {
+      html += '<div style="margin-top:10px;text-align:right;">';
+      html += '<button onclick="clearStaffingAlert(\''+a.id+'\');setTimeout(renderPastAlerts,100);" style="background:#1A1A00;border:1px solid #F5A623;color:#F5A623;font-size:11px;letter-spacing:1px;text-transform:uppercase;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700;">\u2713 Acknowledge</button>';
+      html += '</div>';
+    }
+    html += '</div>';
+  });
+
+  container.innerHTML = html;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -11863,10 +12026,11 @@ function renderMemberAlertBanner() {
   var uid = state.currentUserId;
   var me = (state.roster||[]).find(function(m){ return m.id===uid; });
   if (isAdminMember(me)) { _hideTopBanner('staffingAlertTopBanner'); return; }
-  // Find most recent uncleared alert within 24 hrs targeting this member
+  // Find most recent uncleared alert within 12 hrs targeting this member
+  // (12h was 24h — tightened to reduce return-visit overload; older alerts auto-ack on login)
   var latest = (state.staffingAlerts||[]).find(function(a) {
     var age = (Date.now()-new Date(a.sentAt).getTime())/3600000;
-    if (age > 24) return false;
+    if (age > 12) return false;
     if ((a.clears||[]).some(function(cl){ return cl.memberId===uid; })) return false;
     if (a.targetMembers && a.targetMembers.length) return a.targetMembers.indexOf(uid) > -1;
     return true;
@@ -13248,6 +13412,18 @@ function launchApp(member) {
 
   // ── Set the current user — this MUST happen first ──────────────────────
   state.currentUserId = member.id;
+
+  // ── Alert fatigue mitigation ──────────────────────────────────────────
+  // Capture this member's previous "last seen" timestamp BEFORE we stamp the new one,
+  // so other code can detect what's truly new since their last visit.
+  window._previousLastSeenAt = (state.memberLastSeen && state.memberLastSeen[member.id]) || null;
+  if (!state.memberLastSeen) state.memberLastSeen = {};
+  state.memberLastSeen[member.id] = new Date().toISOString();
+  // Auto-acknowledge staffing alerts older than 12h so members aren't buried
+  // in old alerts when they return after time away. Auto-cleared alerts stay
+  // visible (and distinguishable) on the Past Alerts page.
+  try { autoAcknowledgeOldStaffingAlerts(12); } catch(e){}
+
   save(); // persist to localStorage so Firestore listeners don't wipe it
 
   // Update header
@@ -13309,6 +13485,11 @@ function launchApp(member) {
 function logout() {
   // Do NOT clock out on sign-out — duty session continues in background.
   // Member remains on duty and session is restored on next login.
+  // Stamp lastSeen for this member BEFORE clearing so next-login auto-ack works correctly.
+  if (state.currentUserId) {
+    if (!state.memberLastSeen) state.memberLastSeen = {};
+    state.memberLastSeen[state.currentUserId] = new Date().toISOString();
+  }
   state.currentUserId = null;
   // Clear impersonation
   state._impersonating = null;
@@ -18466,6 +18647,44 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
     </div><!-- end section-history -->
 
+    <!-- ══════════════ PAST ALERTS TAB (More menu) ══════════════ -->
+    <div id="section-past-alerts" class="section">
+      <div class="card">
+        <div class="card-header"><div class="icon">📜</div><h2>Past Alerts</h2></div>
+        <div style="padding:14px 16px;">
+          <div style="font-size:12px;color:#888;line-height:1.5;margin-bottom:14px;">
+            All staffing alerts you've received, including ones you've acknowledged and ones that auto-cleared after expiring. Officers see the full company alert log.
+          </div>
+
+          <!-- Filter controls -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+            <select id="pastAlertsRange" onchange="renderPastAlerts()"
+              style="flex:1;min-width:130px;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:8px 10px;font-size:12px;">
+              <option value="7">Last 7 days</option>
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="all">All time</option>
+            </select>
+            <select id="pastAlertsStatus" onchange="renderPastAlerts()"
+              style="flex:1;min-width:130px;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:8px 10px;font-size:12px;">
+              <option value="all" selected>All statuses</option>
+              <option value="ack">✓ Acknowledged</option>
+              <option value="auto">⏱ Auto-cleared</option>
+              <option value="missed">⚪ Not acknowledged</option>
+            </select>
+          </div>
+
+          <!-- Pending acknowledgement bar (members only) -->
+          <div id="pastAlertsActionBar" style="display:none;margin-bottom:14px;padding:10px 12px;background:#1A1500;border:1px solid #3A2800;border-radius:8px;">
+            <div style="font-size:12px;color:#F5A623;margin-bottom:8px;" id="pastAlertsActionLabel"></div>
+            <button class="btn btn-sm" style="background:#F5A623;color:#000;border:none;font-size:12px;font-weight:700;padding:6px 12px;border-radius:6px;cursor:pointer;" onclick="acknowledgeAllPastAlerts()">✓ Acknowledge All</button>
+          </div>
+
+          <div id="pastAlertsContainer"></div>
+        </div>
+      </div>
+    </div><!-- end section-past-alerts -->
+
     <div id="section-approvals" class="section">
 
       <!-- Summary bar -->
@@ -19197,6 +19416,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       </button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsSheet();closeMoreMenu()">🎪 Events &amp; Meetings</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('past-alerts');closeMoreMenu()">📜 Past Alerts</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
 
