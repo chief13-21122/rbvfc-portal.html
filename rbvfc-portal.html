@@ -17846,36 +17846,33 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
       <!-- My Classes Today -->
       <div class="card" id="myClassesTodayCard" style="display:none;padding:0;overflow:hidden;">
-        <div class="card-header" onclick="toggleStaffCard('myClassesTodayBody','myClassesTodayChevron')" style="cursor:pointer;user-select:none;padding:14px 16px;">
+        <div class="card-header" style="padding:14px 16px;">
           <div class="icon">📚</div>
           <h2>My Classes Today</h2>
-          <span id="myClassesTodayChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span>
         </div>
-        <div id="myClassesTodayBody" style="padding:0 16px 16px;">
+        <div id="myClassesTodayBody" style="padding:0 16px 16px;display:block;">
           <div id="myClassesTodayContainer"></div>
         </div>
       </div>
 
       <!-- ── My Shifts & Events (duplicate at bottom for easy clock-in) ── -->
       <div class="card" id="clockTabMyShiftsCard">
-        <div class="card-header" onclick="toggleStaffCard('clockTabMyShiftsBody','clockTabMyShiftsChevron')" style="cursor:pointer;user-select:none;">
+        <div class="card-header">
           <div class="icon">📋</div>
           <h2>My Shifts &amp; Events</h2>
-          <span id="clockTabMyShiftsChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">&#9660;</span>
         </div>
-        <div id="clockTabMyShiftsBody" style="">
+        <div id="clockTabMyShiftsBody" style="display:block;">
           <div id="clockTabMyShiftsContainer"></div>
         </div>
       </div>
 
       <!-- Recent Sessions card — last 3 clock-outs with LOSAP credit -->
       <div class="card" id="recentSessionsCard" style="padding:0;overflow:hidden;">
-        <div class="card-header" onclick="toggleStaffCard('recentSessionsBody','recentSessionsChev')" style="cursor:pointer;user-select:none;">
+        <div class="card-header">
           <div class="icon">🕐</div>
           <h2>Recent Time Captures</h2>
-          <span id="recentSessionsChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span>
         </div>
-        <div id="recentSessionsBody" style="padding:0 0 4px;">
+        <div id="recentSessionsBody" style="padding:0 0 4px;display:block;">
           <div id="recentSessionsContainer"></div>
         </div>
       </div>
@@ -17908,36 +17905,35 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
       <!-- Elected Positions & Points -->
       <div class="card" id="losapPositionsCard" style="display:none;">
-        <div class="card-header" onclick="toggleStaffCard('losapPositionsBody','losapPositionsChev')" style="cursor:pointer;user-select:none;">
+        <div class="card-header">
           <div class="icon">🏆</div>
           <h2>Elected Positions &amp; LOSAP Credit</h2>
-          <span id="losapPositionsChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span>
         </div>
-        <div id="losapPositionsBody"><div id="losapPositionsContent"></div></div>
+        <div id="losapPositionsBody" style="display:block;"><div id="losapPositionsContent"></div></div>
       </div>
 
       <!-- Unit Response Breakdown -->
       <div class="card" id="losapUnitBreakdownCard">
-        <div class="card-header" onclick="toggleStaffCard('losapUnitBreakBody','losapUnitBreakChev')" style="cursor:pointer;user-select:none;"><div class="icon">🚒</div><h2>Response Breakdown</h2><span id="losapUnitBreakChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span></div>
-        <div id="losapUnitBreakBody"><div id="losapUnitBreakdown"></div></div>
+        <div class="card-header"><div class="icon">🚒</div><h2>Response Breakdown</h2></div>
+        <div id="losapUnitBreakBody" style="display:block;"><div id="losapUnitBreakdown"></div></div>
       </div>
 
       <!-- Ranking Status -->
       <div class="card" id="losapRankingCard">
-        <div class="card-header" onclick="toggleStaffCard('losapRankingBody','losapRankingChev')" style="cursor:pointer;user-select:none;"><div class="icon">🏆</div><h2>Company Response Standing</h2><span id="losapRankingChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span></div>
-        <div id="losapRankingBody"><div id="losapRankingStatus"></div></div>
+        <div class="card-header"><div class="icon">🏆</div><h2>Company Response Standing</h2></div>
+        <div id="losapRankingBody" style="display:block;"><div id="losapRankingStatus"></div></div>
       </div>
 
       <!-- Pending Training Submissions (member view) -->
       <div id="myPendingTrainingCard" class="card">
-        <div class="card-header" onclick="toggleStaffCard('myPendingTrainingBody','myPendingTrainingChev')" style="cursor:pointer;user-select:none;"><div class="icon">⏳</div><h2>Pending Training</h2><span id="myPendingTrainingChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span></div>
-        <div id="myPendingTrainingBody"><div id="myPendingTrainingList"></div></div>
+        <div class="card-header"><div class="icon">⏳</div><h2>Pending Training</h2></div>
+        <div id="myPendingTrainingBody" style="display:block;"><div id="myPendingTrainingList"></div></div>
       </div>
 
       <!-- LOSAP Activity History -->
       <div class="card">
-        <div class="card-header" onclick="toggleStaffCard('losapActHistBody','losapActHistChev')" style="cursor:pointer;user-select:none;"><div class="icon">📊</div><h2>Activity History</h2><span id="losapActHistChev" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">▼</span></div>
-        <div id="losapActHistBody"><div id="activityHistoryContainer">
+        <div class="card-header"><div class="icon">📊</div><h2>Activity History</h2></div>
+        <div id="losapActHistBody" style="display:block;"><div id="activityHistoryContainer">
           <table style="width:100%;border-collapse:collapse;">
             <thead><tr>
               <th style="text-align:left;padding:8px 10px;font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid #222;">Date</th>
