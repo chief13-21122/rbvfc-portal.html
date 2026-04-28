@@ -8406,8 +8406,59 @@ function _getActiveClockedInSession(uid) {
 
 function _performAutoClockOut(sess, record) {
   var uid = sess.userId;
-  var endTime = new Date(record._reminderSentAt || new Date());
+  var now = new Date();
   var startTime = new Date(sess.start);
+
+  // ── Determine the correct end time for this auto clock-out ────────────
+  // Scheduled activities (shifts, events, meetings) → scheduled end time.
+  // General duty → exactly 4 hours from start (the fatigue limit).
+  // Either way, capped at "now" so we never project an end into the future,
+  // and never before "start" so duration can't go negative.
+  var schedEnd = null;
+  var sId = sess.shiftId, eId = sess.eventId, mId = sess.mtgId;
+
+  if (sId) {
+    var _aShift = (state.staffingShifts||[]).find(function(s){ return s.id===sId; });
+    if (_aShift) {
+      var _ws = _shiftScheduleWindow(_aShift);
+      if (_ws) schedEnd = _ws.end;
+    }
+  } else if (eId) {
+    var _aEv = (state.specialEvents||[]).find(function(e){ return e.id===eId; });
+    if (_aEv) {
+      var _we = _eventScheduleWindow(_aEv);
+      if (_we) schedEnd = _we.end;
+    }
+  } else if (mId) {
+    var _aMtg = (state.meetings||[]).find(function(m){ return m.id===mId; });
+    if (_aMtg) {
+      var _mtgDate = (record && record.date) || _aMtg.date;
+      var _wm = _meetingScheduleWindow(_aMtg, _mtgDate);
+      if (_wm) schedEnd = _wm.end;
+    }
+  }
+
+  var endTime;
+  if (schedEnd) {
+    // Scheduled activity — land exactly on the scheduled end.
+    // (The end-of-activity modal only fires AT or after schedEnd, so by the
+    // time grace expires, schedEnd is in the past and this is also <= now.)
+    endTime = schedEnd;
+  } else if (!sId && !eId && !mId) {
+    // General duty — land exactly on the 4-hour mark.
+    // The warning fires at 3h30m and grace expires at 3h35m, so this projects
+    // the end timestamp ~25 min into the (very near) future, giving the
+    // member full credit for a clean 4-hour block. Acceptable trade-off:
+    // by the time anyone reviews the session, "now" is well past 4h.
+    endTime = new Date(startTime.getTime() + 4 * 3600000);
+  } else {
+    // Couldn't resolve schedule for a scheduled activity — fall back.
+    endTime = new Date(record._reminderSentAt || now);
+  }
+
+  // Safety: never land before start
+  if (endTime < startTime) endTime = new Date(startTime);
+
   var durSecs = Math.max(0, Math.floor((endTime - startTime) / 1000));
   var durHrs  = durSecs / 3600;
   var reason = 'Auto clocked out — no response to ' + AUTO_CLOCKOUT_GRACE_MINS + '-min reminder.';
@@ -8936,6 +8987,16 @@ function checkClockedInReminders() {
   if (!openSess) {
     var el = document.getElementById('clockedInReminderBanner');
     if (el) { el.style.display='none'; _adjustAppTopPad(); }
+    return;
+  }
+
+  // ── Skip the 4-hour reminder for scheduled activities ──────────────────
+  // Staffing shifts, special events, and meetings all have known end times
+  // and are handled by the end-of-activity modal in checkUpcomingReminders().
+  // Only the generic "still on duty?" nag is needed for ad-hoc clock-ins.
+  if (openSess.shiftId || openSess.eventId || openSess.mtgId) {
+    var el2 = document.getElementById('clockedInReminderBanner');
+    if (el2) { el2.style.display='none'; _adjustAppTopPad(); }
     return;
   }
 
