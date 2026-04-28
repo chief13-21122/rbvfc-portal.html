@@ -10968,12 +10968,15 @@ function renderSpecialEvents(containerId) {
       if (isSignedUp && !isClockedIn && !canClockIn) {
         actions += '<span style="font-size:10px;color:#555;display:block;text-align:right;">Clock-in available day of event</span>';
       }
-      if (isClockedIn) {
-        actions += '<button class="btn btn-sm btn-danger" onclick="clockOutSpecialEvent(this)" data-ev="'+ev.id+'">⏹ Clock Out</button>';
-      }
       if (isSignedUp && !isClockedIn) {
         actions += '<button class="btn btn-sm btn-secondary" style="font-size:10px;" onclick="cancelSpecialEventSignup(this)" data-ev="'+ev.id+'">✕ Cancel</button>';
       }
+    }
+    // ── Clock Out — always show when still flagged clocked-in ─────────────
+    // Lives OUTSIDE the !isPast gate so members stranded by missed
+    // auto-clock-out on a past event can still rescue themselves.
+    if (isClockedIn) {
+      actions += '<button class="btn btn-sm btn-danger" onclick="clockOutSpecialEvent(this)" data-ev="'+ev.id+'">⏹ Clock Out</button>';
     }
 
     var borderColor = isPast ? '#2A2A2A' : (isToday ? '#C8102E' : '#2A2A2A');
@@ -11118,8 +11121,22 @@ function clockOutSpecialEvent(elOrId) {
   if (!ev) return;
   var signup = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
   if (!signup) return;
+
+  // ── Determine clock-out timestamp ──────────────────────────────────────
+  // If the event has already ended, cap at the scheduled end time. This
+  // prevents inflated hours/credit when a stranded member clocks out
+  // hours or days after the event finished.
+  var now = new Date();
+  var clockOutTime = now;
+  try {
+    var evWindow = (typeof _eventScheduleWindow === 'function') ? _eventScheduleWindow(ev) : null;
+    if (evWindow && now > evWindow.end) {
+      clockOutTime = evWindow.end;
+    }
+  } catch(e){}
+
   signup.clockedIn = false;
-  signup.clockedOutAt = new Date().toISOString();
+  signup.clockedOutAt = clockOutTime.toISOString();
   // Auto-award LOSAP if both clock-in and clock-out recorded
   if (signup.clockedInAt && signup.clockedOutAt) {
     var _evDate = ev.date || new Date().toISOString().slice(0,10);
@@ -11127,7 +11144,8 @@ function clockOutSpecialEvent(elOrId) {
     try { _autoAwardLosap(uid, 'fundraiser', _evDate, _evDesc, evId); } catch(e){}
   }
   save(); renderBothSpecialEventViews();
-  showToast('\u23f9 Clocked out of '+ev.title+'. LOSAP point awarded!');
+  var _capped = clockOutTime.getTime() < now.getTime() - 60000;
+  showToast('\u23f9 Clocked out of '+ev.title+'.' + (_capped ? ' (Time capped at event end.)' : ' LOSAP point awarded!'));
   // Check if this is a drill event — auto-submit drill report when last person clocks out
   try { _checkDrillEventAutoSubmit(evId); } catch(e) {}
 }
