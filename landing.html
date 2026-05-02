@@ -23,17 +23,8 @@
     a { color: inherit; text-decoration: none; }
 
     /* ── LAYOUT ── */
-    .container {
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 0 40px;
-    }
-    section {
-      padding: 60px 40px;
-    }
-    section + section {
-      border-top: 1px solid #141414;
-    }
+    section { padding: 72px 40px; }
+    section + section { border-top: 1px solid #141414; }
 
     /* ── TYPOGRAPHY ── */
     .label {
@@ -62,26 +53,21 @@
       align-items: center;
       text-align: center;
       padding: 60px 40px 48px;
-      position: relative;
     }
     .hero-badge {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      background: rgba(200,16,46,0.12);
-      border: 1px solid rgba(200,16,46,0.35);
+      background: rgba(245,166,35,0.10);
+      border: 1px solid rgba(245,166,35,0.30);
       border-radius: 50px;
-      padding: 8px 18px;
-      font-family: 'Barlow', sans-serif;
+      padding: 7px 16px;
       font-size: 11px;
       font-weight: 700;
       letter-spacing: 2px;
       text-transform: uppercase;
       color: #f5a623;
       margin-bottom: 32px;
-      width: fit-content;
-      margin-left: auto;
-      margin-right: auto;
     }
     .hero-badge .dot {
       width: 8px;
@@ -90,198 +76,66 @@
       border-radius: 50%;
       animation: pulse 2s infinite;
     }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-    .hero-title-white { text-align: center;
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+    .hero-title-white,
+    .hero-title-red {
       font-family: 'Barlow Condensed', sans-serif;
       font-weight: 900;
       font-size: clamp(72px, 14vw, 140px);
       text-transform: uppercase;
       line-height: 0.88;
-      color: #fff;
       display: block;
+      text-align: center;
     }
-    .hero-title-red { text-align: center;
-      font-family: 'Barlow Condensed', sans-serif;
-      font-weight: 900;
-      font-size: clamp(72px, 14vw, 140px);
-      text-transform: uppercase;
-      line-height: 0.88;
-      color: #C8102E;
-      display: block;
-      margin-bottom: 28px;
-    }
+    .hero-title-white { color: #fff; }
+    .hero-title-red   { color: #C8102E; margin-bottom: 28px; }
     .hero-subtitle {
       font-size: clamp(15px, 2vw, 18px);
       color: #888;
       max-width: 620px;
       line-height: 1.6;
-      text-align: center;
-      margin-left: auto;
-      margin-right: auto;
+      margin: 0 auto 36px;
     }
-
-    /* ── DIVIDER ── */
-    .divider {
-      width: 80px;
-      height: 2px;
+    .hero-cta {
+      display: inline-block;
       background: #C8102E;
-      margin: 40px 0;
-      opacity: 0.6;
-    }
-
-    /* ── R&D SECTION ── */
-    #rd { text-align: center; }
-    #rd .rd-intro {
-      font-size: 15px;
-      color: #aaa;
-      line-height: 1.7;
-      margin-bottom: 24px;
-      text-align: center;
-    }
-    #rd .rd-intro strong { color: #f0f0f0; }
-    .rd-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 14px;
-      margin-bottom: 20px;
-    }
-    .rd-card {
-      background: rgba(0,0,0,0.4);
-      border: 1px solid rgba(245,166,35,0.18);
-      border-radius: 10px;
-      padding: 18px;
-    }
-    .rd-card-title {
-      font-family: 'Barlow Condensed', sans-serif;
-      font-weight: 800;
+      color: #fff;
       font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: #f5a623;
-      margin-bottom: 8px;
-    }
-    .rd-card p {
-      font-size: 13px;
-      color: #666;
-      line-height: 1.55;
-    }
-    .rd-footnote {
-      font-size: 12px;
-      color: #444;
-      font-style: italic;
-    }
-
-    /* ── STATS BAR ── */
-    #stats {
-      padding: 0 40px 48px;
-    }
-    .stats-label {
-      font-family: 'Barlow', sans-serif;
-      font-size: 11px;
       font-weight: 700;
-      letter-spacing: 3px;
-      text-transform: uppercase;
-      color: #C8102E;
-      margin-bottom: 16px;
-    }
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      border: 1px solid #1a1a1a;
-      border-radius: 12px;
-      overflow: hidden;
-    }
-    .stat-cell {
-      background: #111;
-      text-align: center;
-      padding: 28px 16px;
-      border-right: 1px solid #1a1a1a;
-    }
-    .stat-cell:last-child { border-right: none; }
-    .stat-num {
-      font-family: 'Barlow Condensed', sans-serif;
-      font-weight: 900;
-      font-size: 52px;
-      color: #C8102E;
-      line-height: 1;
-    }
-    .stat-label {
-      font-family: 'Barlow', sans-serif;
-      font-size: 10px;
       letter-spacing: 2px;
       text-transform: uppercase;
-      color: #555;
-      margin-top: 8px;
+      padding: 16px 40px;
+      border-radius: 4px;
+      transition: background 0.2s, transform 0.15s;
     }
-
-    /* ── WHERE WE ARE TODAY ── */
-    #effort {
-      background: #0A0A0A;
-      border-top: 1px solid #141414;
-      border-bottom: 1px solid #141414;
-    }
-    .effort-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1px;
-      background: #1a1a1a;
-      border: 1px solid #1a1a1a;
-      border-radius: 12px;
-      overflow: hidden;
-      margin-top: 24px;
-    }
-    .effort-cell {
-      background: #111;
-      text-align: center;
-      padding: 32px 16px;
-    }
-    .effort-num {
-      font-family: 'Barlow Condensed', sans-serif;
-      font-weight: 900;
-      font-size: 56px;
-      color: #C8102E;
-      line-height: 1;
-    }
-    .effort-label {
-      font-size: 10px;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      color: #555;
-      margin-top: 8px;
-    }
-    .effort-footnote {
-      font-size: 11px;
-      color: #2a2a2a;
-      letter-spacing: 1px;
-      text-align: center;
-      margin-top: 16px;
-    }
+    .hero-cta:hover { background: #a00d24; transform: translateY(-1px); }
 
     /* ── FEATURES ── */
+    #features { text-align: center; }
     #features .section-heading {
       font-size: clamp(40px, 7vw, 72px);
       margin-bottom: 12px;
     }
     #features .section-heading span { color: #C8102E; }
-    #features .features-sub { text-align: center; }
-    #features .features-sub_unused {
+    .features-sub {
       font-size: 15px;
-      color: #555;
-      margin-bottom: 36px;
+      color: #777;
+      margin: 0 auto 36px;
+      max-width: 520px;
     }
     .features-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      max-width: 1100px;
+      margin: 0 auto;
     }
     .feature-card {
       background: #111;
       border: 1px solid #1e1e1e;
       border-radius: 12px;
       padding: 22px;
+      text-align: left;
       transition: border-color 0.2s;
     }
     .feature-card:hover { border-color: #333; }
@@ -297,39 +151,22 @@
     }
     .feature-desc {
       font-size: 13px;
-      color: #555;
+      color: #666;
       line-height: 1.55;
-      margin-bottom: 12px;
     }
-    .feature-tag {
-      display: inline-block;
-      font-family: 'Barlow', sans-serif;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      padding: 3px 8px;
-      border-radius: 4px;
-    }
-    .tag-red    { background: rgba(200,16,46,0.15);  color: #C8102E; }
-    .tag-gold   { background: rgba(245,166,35,0.15); color: #f5a623; }
-    .tag-blue   { background: rgba(30,120,200,0.15); color: #7EC8E3; }
-    .tag-green  { background: rgba(39,174,96,0.15);  color: #27AE60; }
 
     /* ── STEPS ── */
+    #steps { text-align: center; }
     #steps .section-heading {
       font-size: clamp(36px, 6vw, 64px);
       margin-bottom: 8px;
     }
-    .steps-sub {
-      font-size: 15px;
-      color: #555;
-      margin-bottom: 36px;
-    }
+    .steps-sub { font-size: 15px; color: #777; margin-bottom: 36px; }
     .steps-list {
       display: flex;
       flex-direction: column;
-      gap: 20px;
-      max-width: 620px;
+      gap: 22px;
+      max-width: 540px;
       margin: 0 auto;
     }
     .step {
@@ -337,7 +174,6 @@
       flex-direction: column;
       align-items: center;
       gap: 10px;
-      text-align: center;
     }
     .step-num {
       width: 44px;
@@ -351,7 +187,6 @@
       font-weight: 900;
       font-size: 18px;
       color: #fff;
-      flex-shrink: 0;
     }
     .step-title {
       font-family: 'Barlow Condensed', sans-serif;
@@ -361,88 +196,70 @@
       color: #fff;
       margin-bottom: 4px;
     }
-    .step-desc { font-size: 13px; color: #555; line-height: 1.55; }
+    .step-desc { font-size: 13px; color: #666; line-height: 1.55; }
 
-    /* ── FAQ ── */
-    #faq .section-heading {
-      font-size: clamp(44px, 8vw, 80px);
+    /* ── TRUST ── */
+    #trust { background: #0A0A0A; text-align: center; }
+    #trust .section-heading {
+      font-size: clamp(36px, 6vw, 60px);
       margin-bottom: 12px;
     }
-    #faq .section-heading .red { color: #C8102E; }
-    .faq-sub { font-size: 15px; color: #555; margin-bottom: 28px; }
-    .faq-callout {
-      background: linear-gradient(135deg, rgba(200,16,46,0.1), rgba(200,16,46,0.04));
-      border: 1px solid rgba(200,16,46,0.25);
-      border-left: 4px solid #C8102E;
-      border-radius: 10px;
-      padding: 18px 22px;
-      margin-bottom: 28px;
+    #trust .section-heading span { color: #27AE60; }
+    .trust-sub {
       font-size: 15px;
-      color: #e8e8e8;
-      line-height: 1.65;
+      color: #777;
+      max-width: 580px;
+      margin: 0 auto 36px;
+      line-height: 1.7;
     }
-    .faq-callout strong { color: #fff; }
-    .faq-callout .pwa { color: #C8102E; font-weight: 700; }
-    .faq-grid {
+    .trust-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 14px;
-      margin-bottom: 20px;
+      max-width: 900px;
+      margin: 0 auto 28px;
     }
-    .faq-card {
+    .trust-card {
       background: #111;
       border: 1px solid #1e1e1e;
       border-radius: 10px;
-      padding: 18px;
+      padding: 20px;
+      text-align: left;
     }
-    .faq-card-header {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 10px;
-      text-align: center;
-    }
-    .faq-icon {
-      width: 30px;
-      height: 30px;
-      background: rgba(200,16,46,0.12);
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      flex-shrink: 0;
-    }
-    .faq-card-title {
+    .trust-card-icon { font-size: 22px; margin-bottom: 10px; }
+    .trust-card-title {
       font-family: 'Barlow Condensed', sans-serif;
+      font-size: 13px;
       font-weight: 800;
-      font-size: 14px;
+      letter-spacing: 1px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #fff;
+      color: #27AE60;
+      margin-bottom: 6px;
     }
-    .faq-card p { font-size: 13px; color: #555; line-height: 1.55; }
-    .faq-tip {
-      background: #0a0a0a;
+    .trust-card p {
+      font-size: 13px;
+      color: #777;
+      line-height: 1.6;
+    }
+    .pwa-note {
+      max-width: 720px;
+      margin: 0 auto;
+      background: #0d0d0d;
       border: 1px solid #1a1a1a;
+      border-left: 3px solid #C8102E;
       border-radius: 8px;
-      padding: 14px 18px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      align-items: center;
-      text-align: center;
-      font-size: 12px;
-      color: #444;
-      line-height: 1.55;
+      padding: 16px 22px;
+      text-align: left;
+      font-size: 13px;
+      color: #888;
+      line-height: 1.6;
     }
-    .faq-tip-icon { font-size: 18px; flex-shrink: 0; }
+    .pwa-note strong { color: #fff; }
 
     /* ── CTA ── */
     #cta {
       text-align: center;
-      padding: 80px 40px;
+      padding: 96px 40px;
       background: #050505;
     }
     #cta .section-heading {
@@ -451,14 +268,13 @@
     }
     .cta-sub {
       font-size: 16px;
-      color: #555;
+      color: #777;
       margin-bottom: 36px;
     }
     .cta-btn {
       display: inline-block;
       background: #C8102E;
       color: #fff;
-      font-family: 'Barlow', sans-serif;
       font-size: 14px;
       font-weight: 700;
       letter-spacing: 2px;
@@ -466,13 +282,8 @@
       padding: 18px 48px;
       border-radius: 4px;
       transition: background 0.2s, transform 0.15s;
-      cursor: pointer;
-      border: none;
     }
-    .cta-btn:hover {
-      background: #a00d24;
-      transform: translateY(-1px);
-    }
+    .cta-btn:hover { background: #a00d24; transform: translateY(-1px); }
     .cta-footnote {
       font-size: 11px;
       color: #2a2a2a;
@@ -480,35 +291,19 @@
       margin-top: 32px;
     }
 
-    /* ── MOBILE (≤ 767px) ── */
+    /* ── MOBILE ── */
     @media (max-width: 767px) {
-      section, #stats, #cta { padding: 48px 20px; }
-      #hero { padding: 48px 20px 40px; min-height: 100svh; }
-
-      .rd-grid       { grid-template-columns: 1fr; }
-      .stats-grid    { grid-template-columns: repeat(2,1fr); }
-      .stat-cell     { border-right: none; border-bottom: 1px solid #1a1a1a; }
-      .stat-cell:nth-child(odd)  { border-right: 1px solid #1a1a1a; }
-      .stat-cell:last-child, .stat-cell:nth-last-child(2):nth-child(odd) { border-bottom: none; }
-      .effort-grid   { grid-template-columns: repeat(2,1fr); }
+      section, #cta { padding: 56px 20px; }
+      #hero { padding: 48px 20px 40px; }
       .features-grid { grid-template-columns: 1fr; }
-      .faq-grid      { grid-template-columns: 1fr; }
-      #faq .section-heading { font-size: clamp(40px, 11vw, 60px); }
+      .trust-grid    { grid-template-columns: 1fr; }
     }
 
-    /* ── TABLET (768–1024px) ── */
+    /* ── TABLET ── */
     @media (min-width: 768px) and (max-width: 1024px) {
-      section, #stats, #cta { padding: 56px 32px; }
-      #hero { padding: 56px 32px 48px; }
-      .features-grid { grid-template-columns: repeat(2,1fr); }
-      .faq-grid      { grid-template-columns: repeat(2,1fr); }
-    }
-
-    /* ── TINY PHONES (≤ 400px) ── */
-    @media (max-width: 400px) {
-      .stats-grid  { grid-template-columns: 1fr; }
-      .effort-grid { grid-template-columns: 1fr; }
-      .stat-cell   { border-right: none; }
+      section, #cta { padding: 64px 32px; }
+      .features-grid { grid-template-columns: repeat(2, 1fr); }
+      .trust-grid    { grid-template-columns: 1fr; max-width: 540px; }
     }
   </style>
 </head>
@@ -516,114 +311,47 @@
 
 <!-- ══ HERO ══ -->
 <section id="hero">
-  <div class="hero-badge" style="margin-left:auto;margin-right:auto;">
+  <div class="hero-badge">
     <span class="dot"></span>
-    ⚠ Demo Preview — Building &amp; Research Phase
+    Demo Preview — Feedback Welcome
   </div>
   <span class="hero-title-white">LOSAP.</span>
   <span class="hero-title-red">DIFFERENTLY.</span>
-  <p class="hero-subtitle">Clock in, track points, staff apparatus, log training, and stay connected — all in one place, built for Co. 13.</p>
-</section>
-
-<!-- ══ R&D DISCLAIMER ══ -->
-<section id="rd" style="text-align:center;">
-  <div style="display:flex;flex-direction:column;align-items:center;gap:14px;margin-bottom:20px;text-align:center">
-    <div style="width:48px;height:48px;background:rgba(245,166,35,0.12);border:2px solid rgba(245,166,35,0.3);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">🪖</div>
-    <h2 style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:clamp(18px,3vw,28px);text-transform:uppercase;letter-spacing:1px;color:#f5a623;line-height:1.1">THIS IS A DEMO — BUILDING, RESEARCH &amp; DEVELOPMENT PHASE</h2>
-  </div>
-  <p class="rd-intro">A <strong>working prototype</strong> — fully functional and already tracking live LOSAP data, actively being refined before a company-wide rollout.</p>
-  <div class="rd-grid">
-    <div class="rd-card">
-      <div class="rd-card-title">🏗 What R&amp;D Means</div>
-      <p>Testing real workflows to find what works before every member depends on it.</p>
-    </div>
-    <div class="rd-card">
-      <div class="rd-card-title">⚠ Why It Matters</div>
-      <p>Rushing software into a fire station creates risk. Every LOSAP calculation is validated against AACVFA §3 before it counts.</p>
-    </div>
-    <div class="rd-card">
-      <div class="rd-card-title">🚀 Where We're Headed</div>
-      <p>A system the whole company trusts daily — staffing, points, responses, training, and communication.</p>
-    </div>
-  </div>
-  <p class="rd-footnote">Hundreds of hours to build. Now you get to be a part of the development. Your feedback shapes the final product. If something feels off, that's exactly what we need to know.</p>
-</section>
-
-
-
-<!-- ══ LIVE STATS ══ -->
-<section id="stats" style="text-align:center;">
-  <div class="stats-label">A Demonstration Fire Company Built</div>
-  <div class="stats-grid">
-    <div class="stat-cell"><div class="stat-num">18</div><div class="stat-label">Active Accounts</div></div>
-    <div class="stat-cell"><div class="stat-num">50+</div><div class="stat-label">Points / Member</div></div>
-    <div class="stat-cell"><div class="stat-num">6</div><div class="stat-label">LOSAP Categories</div></div>
-    <div class="stat-cell"><div class="stat-num">100%</div><div class="stat-label">AACVFA Compliant</div></div>
-  </div>
-</section>
-
-<!-- ══ WHERE WE ARE TODAY ══ -->
-<section id="effort" style="text-align:center;">
-  <div class="label">Where We Are Today</div>
-  <p style="font-size:14px;color:#444;margin-bottom:4px">A snapshot of the real effort behind what you're about to use. Every number is verified.</p>
-  <div class="effort-grid">
-    <div class="effort-cell"><div class="effort-num">172</div><div class="effort-label">Hours Invested</div></div>
-    <div class="effort-cell"><div class="effort-num">319</div><div class="effort-label">Git Commits</div></div>
-    <div class="effort-cell"><div class="effort-num">50</div><div class="effort-label">Work Sessions</div></div>
-    <div class="effort-cell"><div class="effort-num">1MB</div><div class="effort-label">Of Code Written</div></div>
-    <div class="effort-cell"><div class="effort-num">9</div><div class="effort-label">Portal Modules</div></div>
-    <div class="effort-cell"><div class="effort-num">1</div><div class="effort-label">Company. Co. 13</div></div>
-  </div>
-  <p class="effort-footnote">MARCH 8 – APRIL 18, 2026 &nbsp;·&nbsp; 172 HRS ACROSS 50 SESSIONS &nbsp;·&nbsp; 319 COMMITS &nbsp;·&nbsp; BUILT FOR RBVFC CO. 13</p>
+  <p class="hero-subtitle">Clock in, track points, staff apparatus, and log training — all in one place, built for Co. 13.</p>
+  <a class="hero-cta" href="#cta">Open the Portal</a>
 </section>
 
 <!-- ══ FEATURES ══ -->
-<section id="features" style="text-align:center;">
+<section id="features">
   <div class="label">What's Inside</div>
   <h2 class="section-heading">EVERYTHING A<br>MEMBER <span>NEEDS</span></h2>
-  <p class="features-sub" style="text-align:center;">Built specifically for Anne Arundel County volunteers, every feature is designed around real station workflows.</p>
+  <p class="features-sub">Built around real station workflows — and validated against AACVFA §3.</p>
   <div class="features-grid">
     <div class="feature-card">
       <div class="feature-icon">🕐</div>
       <div class="feature-title">Smart Clock In/Out</div>
-      <p class="feature-desc">Clock in by duty type — Collateral, Standby, Drill, Meeting, or Response. Auto-warning at 30 minutes.</p>
-      <span class="feature-tag tag-red">AUTO CLOCK-OUT</span>
+      <p class="feature-desc">Clock in by duty type — Standby, Drill, Meeting, Response. Auto-warning if you forget to clock out.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🏅</div>
       <div class="feature-title">LOSAP Tracking</div>
-      <p class="feature-desc">Points auto-calculated per AACVFA §3 — capped, tiered, and updated in real time.</p>
-      <span class="feature-tag tag-gold">AACVFA §3 COMPLIANT</span>
+      <p class="feature-desc">Points auto-calculated per AACVFA §3 — capped, tiered, updated in real time.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🚒</div>
       <div class="feature-title">Apparatus Staffing</div>
-      <p class="feature-desc">Sign up for Engine 131, Truck 13, Ambo 139. Rank requirements enforced. Officers can send alert blasts.</p>
-      <span class="feature-tag tag-blue">LIVE BOARD</span>
+      <p class="feature-desc">Sign up for Engine 131, Truck 13, Ambo 139. Live board with rank requirements enforced.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">📋</div>
       <div class="feature-title">Training Records</div>
-      <p class="feature-desc">Submit external certs for officer approval. Classes with recurring sessions, enrollment, and attendance.</p>
-      <span class="feature-tag tag-green">CERT UPLOAD</span>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">📅</div>
-      <div class="feature-title">Meetings &amp; Events</div>
-      <p class="feature-desc">Recurring meetings, member sign-ups, special events with position slots and clock-in tracking.</p>
-      <span class="feature-tag tag-blue">RSVP + CLOCK-IN</span>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">📊</div>
-      <div class="feature-title">Company Overview</div>
-      <p class="feature-desc">Live leaderboard — every member's LOSAP points, duty hours, and response count.</p>
-      <span class="feature-tag tag-gold">LIVE LEADERBOARD</span>
+      <p class="feature-desc">Submit external certs for officer approval. Track classes, enrollment, and attendance.</p>
     </div>
   </div>
 </section>
 
 <!-- ══ GETTING STARTED ══ -->
-<section id="steps" style="text-align:center;">
+<section id="steps">
   <div class="label">Getting Started</div>
   <h2 class="section-heading">SIMPLE FOR<br>EVERY MEMBER</h2>
   <p class="steps-sub">No app to download. Works on any phone, any browser.</p>
@@ -632,139 +360,55 @@
       <div class="step-num">01</div>
       <div>
         <div class="step-title">Open the Portal</div>
-        <p class="step-desc">Visit the portal URL on your phone. Tap Share → Add to Home Screen — it installs like an app, no download needed.</p>
+        <p class="step-desc">Visit the URL on your phone. Tap Share → Add to Home Screen — installs like an app, no download.</p>
       </div>
     </div>
     <div class="step">
       <div class="step-num">02</div>
       <div>
         <div class="step-title">Log In With Your PIN</div>
-        <p class="step-desc">Select your name from the roster and enter your 4-digit PIN. Account is pre-created — no passwords, no email.</p>
+        <p class="step-desc">Pick your name from the roster, enter your 4-digit PIN. Account is pre-created.</p>
       </div>
     </div>
     <div class="step">
       <div class="step-num">03</div>
       <div>
         <div class="step-title">Clock In When You Arrive</div>
-        <p class="step-desc">Tap the clock on the Clock tab, select your duty type. LOSAP time starts. You'll get a reminder if you forget to clock out.</p>
+        <p class="step-desc">Tap the clock, pick your duty type. LOSAP time starts. Reminder if you forget to clock out.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ══ FAQ ══ -->
-<section id="faq" style="text-align:center;">
-  <div class="label">Common Questions</div>
-  <h2 class="section-heading">A WEBSITE.<br>NOT AN <span class="red">APP.</span></h2>
-  <p class="faq-sub">Good question — and one you'll probably hear from other members. Here's the real answer.</p>
-  <div class="faq-callout">
-    <strong>Short answer:</strong> This website <em>is</em> the app. The portal is a <span class="pwa">Progressive Web App (PWA)</span> — it installs on your home screen and works exactly like a native app, without any app store.
-  </div>
-  <div class="faq-grid">
-    <div class="faq-card">
-      <div class="faq-card-header">
-        <div class="faq-icon">📱</div>
-        <div class="faq-card-title">Installs on Your Home Screen</div>
-      </div>
-      <p>Tap Share → Add to Home Screen on iPhone, or Menu → Add on Android. Launches full-screen, feels like an app.</p>
+<!-- ══ TRUST / DATA SAFETY ══ -->
+<section id="trust">
+  <div class="label" style="color:#27AE60;">Your Data Is Safe</div>
+  <h2 class="section-heading">BACKED UP. <span>ALWAYS.</span></h2>
+  <p class="trust-sub">Points update live, back up automatically, and land in your inbox every month — whether you open the portal or not.</p>
+  <div class="trust-grid">
+    <div class="trust-card">
+      <div class="trust-card-icon">📊</div>
+      <div class="trust-card-title">Live Google Sheets Backup</div>
+      <p>Every clock-in syncs to a Sheet admins can view anytime, on any computer.</p>
     </div>
-    <div class="faq-card">
-      <div class="faq-card-header">
-        <div class="faq-icon">🚫</div>
-        <div class="faq-card-title">No Downloads or Updates</div>
-      </div>
-      <p>No App Store, no Google Play, no waiting. When we push an update it's live for everyone automatically.</p>
+    <div class="trust-card">
+      <div class="trust-card-icon">📧</div>
+      <div class="trust-card-title">Monthly Email Reports</div>
+      <p>A personal LOSAP summary lands in your inbox on the first of every month — no action required.</p>
     </div>
-    <div class="faq-card">
-      <div class="faq-card-header">
-        <div class="faq-icon">🌐</div>
-        <div class="faq-card-title">Works on Any Device</div>
-      </div>
-      <p>iPhone, Android, tablet, or the station computer — same experience everywhere.</p>
-    </div>
-    <div class="faq-card">
-      <div class="faq-card-header">
-        <div class="faq-icon">⚡</div>
-        <div class="faq-card-title">Faster to Build &amp; Fix</div>
-      </div>
-      <p>If something breaks before a drill, we can fix a web app the same night — not after a 3-day App Store review.</p>
-    </div>
-    <div class="faq-card">
-      <div class="faq-card-header">
-        <div class="faq-icon">🔒</div>
-        <div class="faq-card-title">Just as Secure</div>
-      </div>
-      <p>PIN authentication, member-only access, HTTPS encryption — same standards used by banks.</p>
-    </div>
-    <div class="faq-card">
-      <div class="faq-card-header">
-        <div class="faq-icon">🔧</div>
-        <div class="faq-card-title">Built Around Your Feedback</div>
-      </div>
-      <p>Tell us something needs to change, we can change it the same day — no App Store review cycle.</p>
+    <div class="trust-card">
+      <div class="trust-card-icon">⚡</div>
+      <div class="trust-card-title">Live Points, Not Year-End</div>
+      <p>The moment a training is approved, your points update. Always know exactly where you stand.</p>
     </div>
   </div>
-  <div class="faq-tip">
-    <span class="faq-tip-icon">💡</span>
-    <p>The technology is intentionally invisible. Most members won't notice the difference — but they'll notice it always works and never asks them to visit an app store.</p>
+  <div class="pwa-note">
+    <strong>Why a website, not an app?</strong> The portal is a Progressive Web App — it installs on your home screen and runs full-screen, but skips the App Store. No downloads, no updates, fixes go live the same day.
   </div>
-</section>
-
-<!-- ══ DATA SAFETY ══ -->
-<section id="data-safety" style="text-align:center;">
-  <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(39,174,96,0.1);border:1px solid rgba(39,174,96,0.25);border-radius:999px;padding:5px 16px;margin-bottom:20px;">
-    <span style="width:7px;height:7px;border-radius:50%;background:#27AE60;display:inline-block;flex-shrink:0;"></span>
-    <span style="font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#27AE60;">Live Data &amp; Always Backed Up</span>
-  </div>
-
-  <h2 style="font-family:'Bebas Neue',sans-serif;font-size:clamp(28px,5vw,48px);letter-spacing:2px;line-height:1.05;color:#F0F0F0;margin-bottom:10px;">Your LOSAP Data Is <span style="color:#27AE60;">Always Safe.</span></h2>
-  <p style="font-family:'Barlow',sans-serif;font-size:clamp(14px,1.8vw,16px);color:#888;max-width:580px;margin:0 auto 28px;line-height:1.7;">Points update in real time, back up automatically, and land in your inbox every month — whether you open the portal or not.</p>
-
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;max-width:960px;margin:0 auto 28px;text-align:center;">
-
-    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
-      <div style="font-size:24px;margin-bottom:8px;">📊</div>
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Real-Time Google Sheets Backup</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">Every clock-in and point syncs to a Google Sheet admins can view anytime — on any computer.</p>
-    </div>
-
-    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
-      <div style="font-size:24px;margin-bottom:8px;">📧</div>
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Automatic Monthly Email Reports</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">Every member receives a personal LOSAP summary by email on the first of each month — no action required.</p>
-    </div>
-
-    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
-      <div style="font-size:24px;margin-bottom:8px;">⚡</div>
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Live Points — Not Year-End Paperwork</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">The moment a training is approved or a drill is signed off, your points update. You always know exactly where you stand.</p>
-    </div>
-
-    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
-      <div style="font-size:24px;margin-bottom:8px;">📥</div>
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Download Your Report Any Time</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">Every member can download a personal LOSAP report on demand — print it, email it, or hand it to the coordinator.</p>
-    </div>
-
-    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
-      <div style="font-size:24px;margin-bottom:8px;">📅</div>
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Syncs to Google Calendar</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">Every shift, meeting, and event shows up in a dedicated "LOSAP Portal" calendar — separate from your personal events.</p>
-    </div>
-
-    <div style="background:#111;border:1px solid #222;border-radius:10px;padding:18px 20px;">
-      <div style="font-size:24px;margin-bottom:8px;">🔒</div>
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#27AE60;margin-bottom:6px;">Three Layers of Redundancy</div>
-      <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#777;line-height:1.6;margin:0;">Data lives on your device, in Google Sheets, and in cloud backup simultaneously. Losing data is practically impossible.</p>
-    </div>
-
-  </div>
-
-  <p style="font-family:'Barlow',sans-serif;font-size:13px;color:#555;max-width:600px;margin:0 auto;line-height:1.7;font-style:italic;">"What if I don't trust technology with my points?" — Even members who never open the portal still get a full monthly report in their inbox. The LOSAP Coordinator and all admins have independent access via Google Sheets at all times.</p>
 </section>
 
 <!-- ══ CTA ══ -->
-<section id="cta" style="text-align:center;">
+<section id="cta">
   <h2 class="section-heading">READY TO<br>RUN IT LIVE?</h2>
   <p class="cta-sub">Explore the portal. Break things. Tell us what you need.</p>
   <a class="cta-btn" href="https://chief13-21122.github.io/rbvfc-portal.html/rbvfc-portal.html" target="_blank" rel="noopener">OPEN THE PORTAL</a>
