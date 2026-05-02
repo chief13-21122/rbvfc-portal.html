@@ -835,6 +835,16 @@ function _mergeAndRender(remote) {
   try { renderUnitToggles(); } catch(e){}
   // Auto-start CAD sync on every state load — no login required
   if (state.cadScriptUrl && !_cadSyncInterval) {
+    // Surface stale-sync condition early — catches paused Apps Script triggers, auth lapses, etc.
+    if (state.lastCadSync) {
+      try {
+        var _ageH = (Date.now() - new Date(state.lastCadSync).getTime()) / 3600000;
+        if (_ageH > 2) {
+          console.warn('[RBVFC] ⚠️ Last CAD sync was ' + Math.round(_ageH) + 'h ago. '
+            + 'Run __diagCad() in the console to investigate, or __retestCad() to probe the Apps Script.');
+        }
+      } catch(e){}
+    }
     try { startCadAutoSync(); } catch(e){}
   }
   try { clearStaleClockedInFlags(); } catch(e){}
@@ -14399,10 +14409,47 @@ function _formatCadAddress(raw) {
 }
 
 function _autoLogCadCall(call) {
-  // Auto-create an emergency response record from a synced CAD call
-  // Only logs if at least one responding unit has staffing scheduled for that date
+  // Auto-create an emergency response record from a synced CAD call.
+  // Logs only if at least one responding unit has staffing scheduled for that date.
+  // Returns a decision object {logged, reason, ...} and pushes to window._cadSkipLog
+  // (rolling buffer of last 50). Run __diagCad() in DevTools to inspect.
+  var skipLog = window._cadSkipLog = window._cadSkipLog || [];
+  function _record(result) {
+    var entry = {
+      at: new Date().toISOString(),
+      incidentNum: (call && call.incidentNum) || '',
+      address: (call && (call.address || call.incident)) || '',
+      callDate: (call && call.date) || '',
+      rawUnits: (call && (call.units || call.apparatus)) || '',
+      logged: !!result.logged,
+      reason: result.reason
+    };
+    if (result.resolvedUnits)  entry.resolvedUnits  = result.resolvedUnits;
+    if (result.normalizedDate) entry.normalizedDate = result.normalizedDate;
+    if (result.members != null) entry.members = result.members;
+    if (result.incKey)         entry.incKey         = result.incKey;
+    skipLog.unshift(entry);
+    if (skipLog.length > 50) skipLog.length = 50;
+    return result;
+  }
+
+  if (!call || typeof call !== 'object') return _record({logged:false, reason:'invalid_call'});
+
   // Normalize date — strip time component if full ISO string was provided
   var today = (call.date||'').slice(0,10) || new Date().toISOString().slice(0,10);
+  // Coerce non-ISO date formats (e.g. "4/28/2026") to YYYY-MM-DD so it matches staffing.date
+  if (today && !/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+    var parsed = new Date(call.date);
+    if (!isNaN(parsed.getTime())) {
+      var _y = parsed.getFullYear();
+      var _mo = parsed.getMonth() + 1;
+      var _d = parsed.getDate();
+      today = _y + '-' + (_mo < 10 ? '0' : '') + _mo + '-' + (_d < 10 ? '0' : '') + _d;
+    } else {
+      return _record({logged:false, reason:'unparseable_date'});
+    }
+  }
+
   var callUnits = _parseCadUnits(call.units || call.apparatus || '');
 
   // Resolve unit IDs — robust matching (E-131, E131, Engine 131, e131 all work)
@@ -14419,7 +14466,8 @@ function _autoLogCadCall(call) {
   }).filter(Boolean);
 
   // Skip auto-log if no unit info at all, or no units could be resolved
-  if (!callUnits.length || !resolvedUnitIds.length) return;
+  if (!callUnits.length)        return _record({logged:false, reason:'no_units_in_call',     normalizedDate:today});
+  if (!resolvedUnitIds.length)  return _record({logged:false, reason:'units_unresolvable',   normalizedDate:today});
 
   // Check if any responding unit has staffing scheduled for this date
   // If no staffing exists for any unit, skip — likely not our call
@@ -14428,7 +14476,7 @@ function _autoLogCadCall(call) {
       return s.date === today && s.unitId === unitId && s.memberId;
     });
   });
-  if (!hasStaffing) return;
+  if (!hasStaffing) return _record({logged:false, reason:'no_staffing_for_date', resolvedUnits:resolvedUnitIds, normalizedDate:today});
 
   // Find members staffed on those units today
   var staffedMembers = [];
@@ -14449,12 +14497,15 @@ function _autoLogCadCall(call) {
     }
   });
 
-  // Avoid duplicate auto-log for same incident
+  // Avoid duplicate auto-log for same incident.
+  // BUGFIX: only match by incidentNum when call.incidentNum is non-empty — otherwise an
+  // existing manual entry without an incidentNum would falsely match every CAD call missing one.
   var incKey = call.incidentNum || call.id || (call.address + '_' + today);
   var alreadyLogged = (state.emergencyResponses || []).some(function(r) {
-    return r._cadKey === incKey || r.incidentNum === call.incidentNum;
+    return r._cadKey === incKey ||
+           (call.incidentNum && r.incidentNum === call.incidentNum);
   });
-  if (alreadyLogged) return;
+  if (alreadyLogged) return _record({logged:false, reason:'already_logged', incKey:incKey, normalizedDate:today});
 
   // Parse address: street first, then any apt/biz after comma
   var rawAddr = call.address || call.incident || '';
@@ -14483,6 +14534,7 @@ function _autoLogCadCall(call) {
     created:      new Date().toISOString()
   });
   save();
+  return _record({logged:true, reason:'logged', incKey:incKey, members:staffedMembers.length, normalizedDate:today});
 }
 
 
@@ -14549,6 +14601,151 @@ function _fetchCadCalls(url, fromAdmin) {
       throw err;
     });
 }
+
+// ─── CAD Diagnostic helpers — call from DevTools console ──────────────────
+// __diagCad()    — passive snapshot: config, last-sync age, pending calls,
+//                  responses by date, staffing presence, recent skip log
+// __retestCad()  — active probe: re-fetch from Apps Script and trace each
+//                  call's auto-log decision (does NOT save duplicates;
+//                  _autoLogCadCall already dedupes on _cadKey/incidentNum)
+window.__diagCad = function() {
+  var now = Date.now();
+  var lastSync = state.lastCadSync ? new Date(state.lastCadSync) : null;
+  var ageMin = lastSync ? Math.round((now - lastSync.getTime()) / 60000) : null;
+
+  var responses = state.emergencyResponses || [];
+  var pending   = state.cadPendingCalls   || [];
+  var shifts    = state.staffingShifts    || [];
+
+  // Build last-14-days date list (newest first)
+  var dates14 = [];
+  for (var i = 0; i < 14; i++) {
+    var dt = new Date(now - i*86400000);
+    var _m = dt.getMonth()+1, _d = dt.getDate();
+    dates14.push(dt.getFullYear()+'-'+(_m<10?'0':'')+_m+'-'+(_d<10?'0':'')+_d);
+  }
+  var staffingByDate = {};
+  var responsesByDate = {};
+  dates14.forEach(function(date) {
+    staffingByDate[date]  = shifts.filter(function(s){ return s.date === date && s.memberId; }).length;
+    responsesByDate[date] = responses.filter(function(r){ return r.date === date; }).length;
+  });
+
+  var autoLogged = responses.filter(function(r){ return r._cadKey; });
+  var lastResponse = responses.length
+    ? responses.slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); })[0].date
+    : null;
+  var lastAuto = autoLogged.length
+    ? autoLogged.slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); })[0].date
+    : null;
+
+  var report = {
+    generatedAt: new Date().toISOString(),
+    config: {
+      cadScriptUrl:      state.cadScriptUrl ? '✓ set ('+state.cadScriptUrl.length+' chars)' : '✗ MISSING',
+      autoSyncRunning:   !!_cadSyncInterval,
+      autoSyncIntervalMs: 120000
+    },
+    lastSync: {
+      iso:        state.lastCadSync || 'never',
+      ageMinutes: ageMin,
+      stale:      ageMin == null ? 'never synced' :
+                  (ageMin > 60 ? 'YES — older than 1h (Apps Script may be paused)' : 'no')
+    },
+    pending: {
+      count: pending.length,
+      first3: pending.slice(0, 3).map(function(c){
+        return {
+          date:     c.date,
+          units:    c.units || c.apparatus,
+          incident: c.incidentNum,
+          addr:     (c.address||'').slice(0,40)
+        };
+      })
+    },
+    responses: {
+      total:               responses.length,
+      lastDate:            lastResponse,
+      autoLoggedTotal:     autoLogged.length,
+      lastAutoLoggedDate:  lastAuto
+    }
+  };
+
+  console.group('🚒 CAD Diagnostic Report');
+  console.log('Config:', report.config);
+  console.log('Last sync:', report.lastSync);
+  console.log('Pending CAD calls:', report.pending);
+  console.log('Emergency responses:', report.responses);
+  console.log('Last 14 days — staffing shifts (member-assigned) by date:');
+  console.table(staffingByDate);
+  console.log('Last 14 days — responses by date:');
+  console.table(responsesByDate);
+  console.log('Recent _autoLogCadCall decisions (newest first, max 20):');
+  console.table((window._cadSkipLog || []).slice(0, 20));
+  console.groupEnd();
+
+  return report;
+};
+
+window.__retestCad = function() {
+  if (!state.cadScriptUrl) {
+    console.error('⚠️ state.cadScriptUrl is not set — configure under Admin → CAD Dispatch Sync');
+    return Promise.reject(new Error('no_url'));
+  }
+  console.log('🔄 Fetching from Apps Script (' + state.cadScriptUrl.slice(0, 60) + '…)');
+  return fetch(state.cadScriptUrl + '?action=getCadCalls')
+    .then(function(r){
+      console.log('HTTP', r.status, r.statusText);
+      if (!r.ok) console.warn('Non-2xx response — Apps Script may be misdeployed or auth-locked');
+      return r.text();
+    })
+    .then(function(text){
+      var data;
+      try { data = JSON.parse(text); }
+      catch(e) {
+        console.error('Bad JSON. Raw response (first 500 chars):', text.slice(0,500));
+        throw e;
+      }
+      if (data && data.ok === false) {
+        console.error('Apps Script reported error:', data.error);
+        return data;
+      }
+      var calls = Array.isArray(data) ? data : (data.calls || data.results || []);
+      console.log('Apps Script returned', calls.length, 'call(s).');
+      if (!calls.length) {
+        console.warn('Empty result — Apps Script reachable but no calls in its sheet.');
+        console.warn('Check: (1) Gmail filter still labels CAD-Dispatch, (2) Apps Script time-trigger is active in the Triggers panel, (3) email format unchanged.');
+        return data;
+      }
+      console.log('Tracing each call through _autoLogCadCall:');
+      var results = calls.map(function(c, i){
+        var before = (state.emergencyResponses||[]).length;
+        var decision = _autoLogCadCall(c) || {};
+        var added = (state.emergencyResponses||[]).length > before;
+        return {
+          idx:      i,
+          date:     c.date,
+          incident: c.incidentNum || '(none)',
+          units:    c.units || c.apparatus || '(none)',
+          decision: decision.reason || 'unknown',
+          newlyLogged: added
+        };
+      });
+      console.table(results);
+      var added = results.filter(function(r){ return r.newlyLogged; }).length;
+      var dup   = results.filter(function(r){ return r.decision === 'already_logged'; }).length;
+      var noStaff = results.filter(function(r){ return r.decision === 'no_staffing_for_date'; }).length;
+      var noUnit  = results.filter(function(r){ return r.decision === 'units_unresolvable' || r.decision === 'no_units_in_call'; }).length;
+      console.log('Summary: ' + added + ' newly logged · ' + dup + ' already logged · '
+                  + noStaff + ' skipped (no staffing) · ' + noUnit + ' skipped (units unresolved)');
+      return {fetched:calls.length, results:results};
+    })
+    .catch(function(err){
+      console.error('❌ __retestCad fetch failed:', err.message || err);
+      throw err;
+    });
+};
+// ──────────────────────────────────────────────────────────────────────────
 
 function syncCadFromPortal() {
   var url = state.cadScriptUrl;
