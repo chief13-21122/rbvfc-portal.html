@@ -9752,6 +9752,48 @@ function confirmStaffClockIn() {
 }
 
 
+// Direct clock-out from MY SHIFTS card. Mirrors clockOutShiftNow() but
+// takes shiftId as an argument instead of reading from a modal DOM field.
+// Closes the staffing shift record and the linked currentSession (if any).
+function clockOutMyShift(shiftId) {
+  var shift = shiftId ? (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; }) : null;
+  if (!shift) { showToast('\u26a0\ufe0f Shift not found.'); return; }
+  if (!shift.clockedIn) { showToast('\u26a0\ufe0f Not clocked in to this shift.'); return; }
+  var uid = state.currentUserId;
+  if (shift.memberId && shift.memberId !== uid) { showToast('\u26a0\ufe0f This isn\u2019t your shift.'); return; }
+  var nowTs = new Date().toISOString();
+  shift.clockedIn = false;
+  shift.clockedOutAt = nowTs;
+  shift.status = 'complete';
+  // If a current session is linked to this shift, close it cleanly
+  if (state.currentSession && state.currentSession.shiftId === shiftId && !state.currentSession.end) {
+    state.currentSession.end = nowTs;
+    state.currentSession.duration = Math.floor((new Date() - new Date(state.currentSession.start)) / 1000);
+    if (!Array.isArray(state.sessions)) state.sessions = [];
+    state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+    state.currentSession = null;
+    if (typeof _clockTimerInterval !== 'undefined' && _clockTimerInterval) {
+      clearInterval(_clockTimerInterval); _clockTimerInterval = null;
+    }
+    try { updateClockUI(false); } catch(e){}
+    try { updateClockStats(); } catch(e){}
+  } else {
+    // Orphan flag (no live currentSession) — also close any open shift session in history
+    (state.sessions||[]).forEach(function(ss){
+      if (ss.shiftId === shiftId && ss.userId === uid && !ss.end) {
+        ss.end = nowTs;
+        ss.duration = Math.floor((new Date(nowTs) - new Date(ss.start)) / 1000);
+      }
+    });
+  }
+  save();
+  try { renderStaffingBoard(); } catch(e){}
+  try { renderMyShifts(); } catch(e){}
+  try { renderRecentSessions(); } catch(e){}
+  showToast('\u23f9 Clocked out of ' + (UNIT_LABELS[shift.unitId] || shift.unitId) + '.');
+}
+
+
 function editShift(elOrId) {
   var shiftId = typeof elOrId==='string' ? elOrId : elOrId.getAttribute('data-id');
   var shift = (state.staffingShifts||[]).find(function(s){ return s.id===shiftId; });
@@ -9870,6 +9912,38 @@ function clockInMyClass(btn) {
   showToast('\u2705 Clocked in to '+cls.name+'!');
 }
 
+// Direct clock-out for a training class session from MY SHIFTS card.
+// Closes the open classAttendance row and the linked currentSession (if any).
+function clockOutMyClass(clsId, sessD) {
+  var uid = state.currentUserId;
+  if (!uid) { showToast('\u26a0\ufe0f Please log in first.'); return; }
+  var cls = (state.trainingClasses||[]).find(function(c){ return c.id===clsId; });
+  var att = (state.classAttendance||[]).find(function(a){
+    return a.classId===clsId && a.memberId===uid && a.sessionDate===sessD && a.clockedInAt && !a.clockedOutAt;
+  });
+  if (!att) { showToast('\u26a0\ufe0f Not clocked in to this class session.'); return; }
+  var nowTs = new Date().toISOString();
+  att.clockedOutAt = nowTs;
+  // If currentSession is linked to this class, close it cleanly
+  if (state.currentSession && state.currentSession.classId === clsId && !state.currentSession.end) {
+    state.currentSession.end = nowTs;
+    state.currentSession.duration = Math.floor((new Date() - new Date(state.currentSession.start)) / 1000);
+    if (!Array.isArray(state.sessions)) state.sessions = [];
+    state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+    state.currentSession = null;
+    if (typeof _clockTimerInterval !== 'undefined' && _clockTimerInterval) {
+      clearInterval(_clockTimerInterval); _clockTimerInterval = null;
+    }
+    try { updateClockUI(false); } catch(e){}
+    try { updateClockStats(); } catch(e){}
+  }
+  save();
+  try { renderMyShifts(); } catch(e){}
+  try { renderTrainingClasses(); } catch(e){}
+  try { renderRecentSessions(); } catch(e){}
+  showToast('\u23f9 Clocked out of ' + (cls ? cls.name : 'class') + '.');
+}
+
 function renderMyShifts() {
   var container = document.getElementById('myShiftsContainer');
   var clockContainer = document.getElementById('clockTabMyShiftsContainer');
@@ -9972,6 +10046,10 @@ function renderMyShifts() {
           }
         }
       }
+      // Clock Out button — show whenever the shift is currently clocked in (and it belongs to this member)
+      if (s.clockedIn && s.memberId === uid) {
+        html += '<button class="btn btn-sm" style="background:rgba(231,76,60,0.15);border:1px solid #E74C3C;color:#E74C3C;font-weight:700;" onclick="clockOutMyShift(\''+s.id+'\')">&#9209; Clock Out</button>';
+      }
       if (!s.clockedIn) html += '<button class="btn btn-danger btn-sm" onclick="cancelShift(\'' + s.id + '\')">&#10005;</button>';
       html += '</div>';
 
@@ -10019,6 +10097,13 @@ function renderMyShifts() {
         }
       }
       if (isClockedIn) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#128994; Clocked In' + (signup.clockedInAt ? ' at ' + new Date(signup.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '') + '</div>';
+      // Clock Out button when currently clocked in to this event
+      if (isClockedIn) {
+        html += '<button class="btn btn-sm" style="background:rgba(231,76,60,0.15);border:1px solid #E74C3C;color:#E74C3C;font-weight:700;" onclick="clockOutSpecialEvent(this)" data-ev="'+ev.id+'">&#9209; Clock Out</button>';
+      } else if (signup) {
+        // Cancel signup (only when not clocked in, mirrors the × button on shift cards)
+        html += '<button class="btn btn-danger btn-sm" title="Cancel signup" onclick="cancelSpecialEventSignup(this)" data-ev="'+ev.id+'">&#10005;</button>';
+      }
       html += '</div></div>';
 
     } else if (item.type === 'class') {
@@ -10053,6 +10138,11 @@ function renderMyShifts() {
         var _clsId = cls.id, _sessD = sessionDate;
         html += '<button class="btn btn-sm btn-primary" style="margin-top:4px;background:#0D1A2A;border-color:#3498DB;color:#3498DB;font-size:11px;" '
              + 'onclick="clockInMyClass(this)" data-cls-id="'+_clsId+'" data-sess-date="'+_sessD+'">&#128336; Clock In</button>';
+      }
+      // Clock Out button when class is currently in session for this user
+      if (clsIn) {
+        html += '<button class="btn btn-sm" style="margin-top:4px;background:rgba(231,76,60,0.15);border:1px solid #E74C3C;color:#E74C3C;font-weight:700;font-size:11px;" '
+             + 'onclick="clockOutMyClass(\''+cls.id+'\',\''+sessionDate+'\')">&#9209; Clock Out</button>';
       }
       html += '</div></div>';
     }
