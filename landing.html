@@ -36,12 +36,45 @@
       color: #C8102E;
       margin-bottom: 12px;
     }
+    .label.green { color: #27AE60; }
     .section-heading {
       font-family: 'Barlow Condensed', sans-serif;
       font-weight: 900;
       text-transform: uppercase;
       line-height: 0.92;
       color: #fff;
+    }
+
+    /* ── SHARED LIVE INDICATOR ── */
+    .live-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #27AE60;
+      box-shadow: 0 0 0 0 rgba(39,174,96,0.8);
+      animation: livePulse 1.6s infinite;
+      flex-shrink: 0;
+    }
+    @keyframes livePulse {
+      0%   { box-shadow: 0 0 0 0    rgba(39,174,96,0.7); }
+      70%  { box-shadow: 0 0 0 10px rgba(39,174,96,0);   }
+      100% { box-shadow: 0 0 0 0    rgba(39,174,96,0);   }
+    }
+    .live-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(39,174,96,0.10);
+      border: 1px solid rgba(39,174,96,0.35);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #27AE60;
     }
 
     /* ── HERO ── */
@@ -92,23 +125,14 @@
     .hero-subtitle {
       font-size: clamp(15px, 2vw, 18px);
       color: #888;
-      max-width: 620px;
+      max-width: 640px;
       line-height: 1.6;
-      margin: 0 auto 36px;
+      margin: 0 auto;
     }
-    .hero-cta {
-      display: inline-block;
-      background: #C8102E;
-      color: #fff;
-      font-size: 13px;
+    .hero-subtitle .live-word {
+      color: #27AE60;
       font-weight: 700;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      padding: 16px 40px;
-      border-radius: 4px;
-      transition: background 0.2s, transform 0.15s;
     }
-    .hero-cta:hover { background: #a00d24; transform: translateY(-1px); }
 
     /* ── FEATURES ── */
     #features { text-align: center; }
@@ -137,8 +161,27 @@
       padding: 22px;
       text-align: left;
       transition: border-color 0.2s;
+      position: relative;
     }
     .feature-card:hover { border-color: #333; }
+    .feature-card.is-live {
+      border-color: rgba(39,174,96,0.35);
+      background: linear-gradient(180deg, rgba(39,174,96,0.05), #111 60%);
+    }
+    .feature-card .live-corner {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      color: #27AE60;
+      text-transform: uppercase;
+    }
     .feature-icon { font-size: 28px; margin-bottom: 12px; }
     .feature-title {
       font-family: 'Barlow Condensed', sans-serif;
@@ -154,6 +197,218 @@
       color: #666;
       line-height: 1.55;
     }
+
+    /* ── LIVE LOSAP SHOWCASE ── */
+    #live-losap {
+      background: radial-gradient(ellipse at top, #0c1410 0%, #060606 70%);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    #live-losap::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(39,174,96,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(39,174,96,0.04) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: radial-gradient(ellipse at center, black 30%, transparent 70%);
+      pointer-events: none;
+    }
+    #live-losap > * { position: relative; z-index: 1; }
+    #live-losap .section-heading {
+      font-size: clamp(40px, 7vw, 72px);
+      margin: 14px auto 12px;
+    }
+    #live-losap .section-heading .green { color: #27AE60; }
+    #live-losap .live-sub {
+      font-size: 15px;
+      color: #888;
+      max-width: 560px;
+      margin: 0 auto 40px;
+      line-height: 1.65;
+    }
+    #live-losap .live-sub strong { color: #f0f0f0; font-weight: 600; }
+
+    /* ── DASHBOARD MOCK ── */
+    .live-dash {
+      max-width: 540px;
+      margin: 0 auto;
+      background: #0c0c0c;
+      border: 1px solid #1c1c1c;
+      border-radius: 16px;
+      box-shadow: 0 30px 80px -20px rgba(39,174,96,0.15), 0 1px 0 rgba(255,255,255,0.02) inset;
+      text-align: left;
+      overflow: hidden;
+    }
+    .dash-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      background: #0a0a0a;
+      border-bottom: 1px solid #181818;
+    }
+    .dash-bar-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #27AE60;
+    }
+    .dash-bar-time {
+      font-family: 'Barlow', sans-serif;
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #555;
+    }
+    .dash-body { padding: 22px 22px 18px; }
+    .dash-member {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 18px;
+      padding-bottom: 14px;
+      border-bottom: 1px dashed #1c1c1c;
+    }
+    .dash-member-name {
+      font-family: 'Barlow', sans-serif;
+      font-size: 12px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #666;
+    }
+    .dash-member-name b { color: #fff; font-weight: 600; }
+    .dash-total {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-weight: 900;
+      font-size: 38px;
+      color: #fff;
+      line-height: 1;
+      position: relative;
+    }
+    .dash-total .pts {
+      font-size: 12px;
+      color: #555;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+    .dash-total .tick {
+      position: absolute;
+      top: -4px;
+      right: -38px;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 13px;
+      font-weight: 800;
+      color: #27AE60;
+      background: rgba(39,174,96,0.12);
+      border: 1px solid rgba(39,174,96,0.3);
+      padding: 2px 6px;
+      border-radius: 4px;
+      animation: tickIn 4s infinite;
+      opacity: 0;
+    }
+    @keyframes tickIn {
+      0%, 60%   { opacity: 0; transform: translateY(6px); }
+      65%, 90%  { opacity: 1; transform: translateY(0); }
+      100%      { opacity: 0; transform: translateY(-6px); }
+    }
+
+    .dash-rows { display: flex; flex-direction: column; gap: 14px; }
+    .dash-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-rows: auto auto;
+      column-gap: 12px;
+      row-gap: 6px;
+      align-items: center;
+    }
+    .dash-cat {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #ccc;
+    }
+    .dash-pts {
+      font-family: 'Barlow', sans-serif;
+      font-size: 12px;
+      color: #888;
+      letter-spacing: 1px;
+      text-align: right;
+    }
+    .dash-pts b { color: #fff; font-weight: 600; }
+    .dash-bar-track {
+      grid-column: 1 / -1;
+      height: 6px;
+      background: #161616;
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+    }
+    .dash-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #27AE60, #5fd089);
+      border-radius: 3px;
+      width: 0;
+      animation: fillBar 1.4s 0.2s cubic-bezier(0.22,0.61,0.36,1) forwards;
+    }
+    .dash-row:nth-child(2) .dash-bar-fill { animation-delay: 0.35s; }
+    .dash-row:nth-child(3) .dash-bar-fill { animation-delay: 0.5s; }
+    .dash-row:nth-child(4) .dash-bar-fill { animation-delay: 0.65s; }
+    @keyframes fillBar { to { width: var(--w, 50%); } }
+
+    .dash-footer {
+      padding: 14px 22px;
+      border-top: 1px solid #181818;
+      background: #0a0a0a;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'Barlow', sans-serif;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #555;
+    }
+    .dash-footer .live-dot { width: 6px; height: 6px; }
+
+    .live-bullets {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      max-width: 900px;
+      margin: 36px auto 0;
+    }
+    .live-bullet {
+      background: #0e0e0e;
+      border: 1px solid #1a1a1a;
+      border-radius: 10px;
+      padding: 16px 18px;
+      text-align: left;
+    }
+    .live-bullet-title {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #27AE60;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .live-bullet p { font-size: 13px; color: #777; line-height: 1.55; }
 
     /* ── STEPS ── */
     #steps { text-align: center; }
@@ -297,6 +552,8 @@
       #hero { padding: 48px 20px 40px; }
       .features-grid { grid-template-columns: 1fr; }
       .trust-grid    { grid-template-columns: 1fr; }
+      .live-bullets  { grid-template-columns: 1fr; }
+      .dash-total .tick { right: 0; top: -22px; }
     }
 
     /* ── TABLET ── */
@@ -304,6 +561,7 @@
       section, #cta { padding: 64px 32px; }
       .features-grid { grid-template-columns: repeat(2, 1fr); }
       .trust-grid    { grid-template-columns: 1fr; max-width: 540px; }
+      .live-bullets  { grid-template-columns: 1fr; max-width: 540px; }
     }
   </style>
 </head>
@@ -317,8 +575,7 @@
   </div>
   <span class="hero-title-white">LOSAP.</span>
   <span class="hero-title-red">DIFFERENTLY.</span>
-  <p class="hero-subtitle">Clock in, track points, staff apparatus, and log training — all in one place, built for Co. 13.</p>
-  <a class="hero-cta" href="#cta">Open the Portal</a>
+  <p class="hero-subtitle">Clock in, track points, staff apparatus, and log training — with <span class="live-word">live</span> LOSAP totals you can watch update the moment they're earned. Built for Co. 13.</p>
 </section>
 
 <!-- ══ FEATURES ══ -->
@@ -332,10 +589,11 @@
       <div class="feature-title">Smart Clock In/Out</div>
       <p class="feature-desc">Clock in by duty type — Standby, Drill, Meeting, Response. Auto-warning if you forget to clock out.</p>
     </div>
-    <div class="feature-card">
+    <div class="feature-card is-live">
+      <span class="live-corner"><span class="live-dot"></span> Live</span>
       <div class="feature-icon">🏅</div>
       <div class="feature-title">LOSAP Tracking</div>
-      <p class="feature-desc">Points auto-calculated per AACVFA §3 — capped, tiered, updated in real time.</p>
+      <p class="feature-desc">Points auto-calculated per AACVFA §3 — capped, tiered, and updated <strong style="color:#27AE60;">in real time</strong>. Watch your total climb the moment a drill ends.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🚒</div>
@@ -346,6 +604,70 @@
       <div class="feature-icon">📋</div>
       <div class="feature-title">Training Records</div>
       <p class="feature-desc">Submit external certs for officer approval. Track classes, enrollment, and attendance.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══ LIVE LOSAP SHOWCASE ══ -->
+<section id="live-losap">
+  <span class="live-pill"><span class="live-dot"></span> Live LOSAP Tracking</span>
+  <h2 class="section-heading">SEE YOUR POINTS<br>UPDATE <span class="green">LIVE.</span></h2>
+  <p class="live-sub">No year-end paperwork. No spreadsheet hand-offs. The moment a drill ends, a training is approved, or a response is logged — <strong>your total moves on the spot</strong>, and you can pull it up on your phone.</p>
+
+  <!-- Mock live dashboard -->
+  <div class="live-dash" aria-hidden="true">
+    <div class="dash-bar">
+      <span class="dash-bar-left"><span class="live-dot"></span> Live</span>
+      <span class="dash-bar-time">Updated just now</span>
+    </div>
+    <div class="dash-body">
+      <div class="dash-member">
+        <span class="dash-member-name">Member · <b>You</b> · 2026 YTD</span>
+        <span class="dash-total">43<span class="pts">pts</span><span class="tick">+1</span></span>
+      </div>
+
+      <div class="dash-rows">
+        <div class="dash-row">
+          <span class="dash-cat">Drills &amp; Training</span>
+          <span class="dash-pts"><b>14</b> / 25 pts</span>
+          <div class="dash-bar-track"><div class="dash-bar-fill" style="--w:56%"></div></div>
+        </div>
+        <div class="dash-row">
+          <span class="dash-cat">Standby &amp; Duty</span>
+          <span class="dash-pts"><b>12</b> / 20 pts</span>
+          <div class="dash-bar-track"><div class="dash-bar-fill" style="--w:60%"></div></div>
+        </div>
+        <div class="dash-row">
+          <span class="dash-cat">Emergency Response</span>
+          <span class="dash-pts"><b>11</b> / 25 pts</span>
+          <div class="dash-bar-track"><div class="dash-bar-fill" style="--w:44%"></div></div>
+        </div>
+        <div class="dash-row">
+          <span class="dash-cat">Meetings &amp; Service</span>
+          <span class="dash-pts"><b>6</b> / 10 pts</span>
+          <div class="dash-bar-track"><div class="dash-bar-fill" style="--w:60%"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="dash-footer">
+      <span class="live-dot"></span>
+      <span>Synced · Backed up · AACVFA §3</span>
+    </div>
+  </div>
+
+  <!-- Three supporting bullets -->
+  <div class="live-bullets">
+    <div class="live-bullet">
+      <div class="live-bullet-title"><span class="live-dot"></span> Logged → Counted</div>
+      <p>An officer signs off a drill at 19:42. By 19:42 your total reflects it. No batch run, no waiting.</p>
+    </div>
+    <div class="live-bullet">
+      <div class="live-bullet-title"><span class="live-dot"></span> Pull It Up Anywhere</div>
+      <p>Open the portal in the bay, in the kitchen, or in your truck — your live total is one tap away.</p>
+    </div>
+    <div class="live-bullet">
+      <div class="live-bullet-title"><span class="live-dot"></span> Know Where You Stand</div>
+      <p>Category caps, tier progress, and remaining points — visible every day, not once a year.</p>
     </div>
   </div>
 </section>
@@ -382,13 +704,13 @@
 
 <!-- ══ TRUST / DATA SAFETY ══ -->
 <section id="trust">
-  <div class="label" style="color:#27AE60;">Your Data Is Safe</div>
+  <div class="label green">Your Data Is Safe</div>
   <h2 class="section-heading">BACKED UP. <span>ALWAYS.</span></h2>
-  <p class="trust-sub">Points update live, back up automatically, and land in your inbox every month — whether you open the portal or not.</p>
+  <p class="trust-sub">Live points, automatic backups, and a personal report in your inbox every month — whether you open the portal or not.</p>
   <div class="trust-grid">
     <div class="trust-card">
       <div class="trust-card-icon">📊</div>
-      <div class="trust-card-title">Live Google Sheets Backup</div>
+      <div class="trust-card-title"><span class="live-dot" style="vertical-align:middle;margin-right:6px;"></span>Live Google Sheets Backup</div>
       <p>Every clock-in syncs to a Sheet admins can view anytime, on any computer.</p>
     </div>
     <div class="trust-card">
@@ -398,7 +720,7 @@
     </div>
     <div class="trust-card">
       <div class="trust-card-icon">⚡</div>
-      <div class="trust-card-title">Live Points, Not Year-End</div>
+      <div class="trust-card-title"><span class="live-dot" style="vertical-align:middle;margin-right:6px;"></span>Live Points, Not Year-End</div>
       <p>The moment a training is approved, your points update. Always know exactly where you stand.</p>
     </div>
   </div>
