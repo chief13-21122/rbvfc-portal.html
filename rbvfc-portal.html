@@ -15757,7 +15757,7 @@ function renderPublicStats() {
   var topResp = Object.keys(responderCounts).map(function(uid){
     var m = roster.find(function(x){ return x.id === uid; });
     return { id: uid, name: m ? (m.first + ' ' + m.last) : 'Member', count: responderCounts[uid] };
-  }).sort(function(a, b){ return b.count - a.count; }).slice(0, 5);
+  }).sort(function(a, b){ return b.count - a.count; }).slice(0, 3);
 
   // Volunteer Staffing Coverage — every emergencyResponse with members.length === 0
   // represents a Co. 13 dispatch that did NOT have a volunteer respond.
@@ -15863,7 +15863,7 @@ function renderPublicStats() {
   h += '<div style="display:flex;gap:10px;padding:10px 18px;flex-wrap:nowrap;">';
   h += kpi('Active Members',           activeMembers.length,    qualCount + ' LOSAP qualified',     '#F5A623');
   h += kpi('Volunteer Responses',      totalCalls,              volRespSub,                          '#C8102E');
-  h += kpi('Company Hours Clocked YTD', companyHoursDisplay,    'Total volunteer time on duty',     '#27AE60');
+  h += kpi('Duty Hours Logged',         companyHoursDisplay,    'Member duty time tracked',         '#27AE60');
   h += kpi('Training Hours',           Math.round(trainingHrsYTD), 'Approved this year',            '#9B59B6');
   h += kpi('Calls / Member',           perMember,               'Average response load',             '#E67E22');
   h += '</div>';
@@ -15882,40 +15882,21 @@ function renderPublicStats() {
 
   // Two-column inner grid: KPI tiles | Bar chart
   h += '<div style="display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:stretch;">';
-  h += '<div style="display:flex;flex-direction:column;gap:8px;min-width:170px;">';
-  h += _statsCoverageTile('Calls Staffed', staffedCount,      staffedCount + ' of ' + totalCalls + ' dispatches', '#27AE60');
-  h += _statsCoverageTile('Coverage Rate', coveragePct + '%', 'Volunteer response rate',                          '#F5A623');
+  h += '<div style="display:flex;flex-direction:column;gap:8px;min-width:180px;justify-content:space-between;">';
+  h += _statsCoverageTile('Calls Staffed',    staffedCount,            staffedCount + ' of ' + totalCalls + ' dispatches', '#27AE60');
+  h += _statsCoverageTile('Coverage Rate',    coveragePct + '%',       'Volunteer response rate',                           '#F5A623');
+  h += _statsCoverageTile('Member Responses', totalMemberResp,         'Total volunteer turnouts',                          '#C8102E');
   h += '</div>';
-  h += '<div style="height:160px;min-width:0;overflow:hidden;">' + _statsStaffingCoverageChart(monthlyStaffing) + '</div>';
+  h += '<div style="height:240px;min-width:0;overflow:hidden;">' + _statsStaffingCoverageChart(monthlyStaffing) + '</div>';
   h += '</div>';
 
   h += '</div></div>';
 
-  // ── Charts area — 2 rows × variable columns, fills remaining viewport
+  // ── Charts area — single row, fills remaining viewport
   h += '<div style="flex:1 1 0;min-height:0;display:flex;flex-direction:column;gap:8px;padding:0 18px 8px;">';
 
-  // Row 1 — Monthly chart (2fr) + LOSAP Donut (1fr)
-  h += '<div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;flex:1 1 0;min-height:0;">';
-  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">';
-  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;flex-wrap:wrap;gap:6px;flex-shrink:0;">';
-  h += '<div><div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;">MONTHLY CALL VOLUME</div>'
-     + '<div style="font-size:10px;color:#666;letter-spacing:1px;margin-top:2px;">Fire vs EMS &middot; ' + thisYear + '</div></div>';
-  h += '<div style="display:flex;gap:10px;font-size:10px;align-items:center;">'
-     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:11px;height:11px;background:#3498DB;border-radius:2px;"></span>Fire</span>'
-     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:11px;height:11px;background:#27AE60;border-radius:2px;"></span>EMS</span>'
-     + '</div></div>';
-  h += '<div style="flex:1 1 0;min-height:0;overflow:hidden;">' + _statsMonthlyBarChart(monthly) + '</div>';
-  h += '</div>';
-
-  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">';
-  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;flex-shrink:0;">LOSAP POINTS</div>'
-     + '<div style="font-size:10px;color:#666;letter-spacing:1px;margin:2px 0 6px;flex-shrink:0;">Aggregate by category &middot; ' + thisYear + '</div>';
-  h += '<div style="flex:1 1 0;min-height:0;overflow:hidden;">' + _statsDonutChart(catTotals) + '</div>';
-  h += '</div>';
-  h += '</div>';
-
-  // Row 2 — Apparatus + Top responders + YoY trend
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:10px;flex:1 1 0;min-height:0;">';
+  // Single chart row — Apparatus + Top responders + YoY trend
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1.6fr;gap:10px;flex:1 1 0;min-height:0;">';
   h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">';
   h += '<div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;flex-shrink:0;">CALLS BY APPARATUS</div>'
      + '<div style="font-size:10px;color:#666;letter-spacing:1px;margin:2px 0 6px;flex-shrink:0;">Top responding units &middot; ' + thisYear + '</div>';
@@ -15923,7 +15904,7 @@ function renderPublicStats() {
   h += '</div>';
 
   h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">';
-  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;flex-shrink:0;">TOP 5 RESPONDERS</div>'
+  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;flex-shrink:0;">TOP 3 RESPONDERS</div>'
      + '<div style="font-size:10px;color:#666;letter-spacing:1px;margin:2px 0 6px;flex-shrink:0;">Members ranked by call count &middot; ' + thisYear + '</div>';
   h += '<div style="flex:1 1 0;min-height:0;overflow:hidden;">' + _statsTopResponders(topResp) + '</div>';
   h += '</div>';
