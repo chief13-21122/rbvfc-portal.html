@@ -15757,7 +15757,7 @@ function renderPublicStats() {
   var topResp = Object.keys(responderCounts).map(function(uid){
     var m = roster.find(function(x){ return x.id === uid; });
     return { id: uid, name: m ? (m.first + ' ' + m.last) : 'Member', count: responderCounts[uid] };
-  }).sort(function(a, b){ return b.count - a.count; }).slice(0, 10);
+  }).sort(function(a, b){ return b.count - a.count; }).slice(0, 5);
 
   // Volunteer Staffing Coverage — every emergencyResponse with members.length === 0
   // represents a Co. 13 dispatch that did NOT have a volunteer respond.
@@ -15840,13 +15840,9 @@ function renderPublicStats() {
      + '<div style="font-family:Bebas Neue,sans-serif;font-size:20px;letter-spacing:4px;color:#F0F0F0;line-height:1;">' + compName + '</div>'
      + '<div style="font-size:10px;color:#C8102E;letter-spacing:3px;text-transform:uppercase;margin-top:2px;">Annual Statistics &amp; Performance &middot; ' + thisYear + '</div>'
      + '</div>';
-  h += '<div style="display:flex;gap:8px;align-items:center;">'
+  h += '<div style="display:flex;align-items:center;gap:8px;">'
      + '<div id="tvStatsClock" style="font-family:Bebas Neue,sans-serif;font-size:24px;color:#C8102E;line-height:1;letter-spacing:2px;"></div>'
-     + '<div style="display:flex;flex-direction:column;gap:3px;">'
-     + '<a href="' + pubBase + '?view=public" style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:2px 6px;text-align:center;">TV Board</a>'
-     + '<a href="' + pubBase + '?view=staffing7" style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:2px 6px;text-align:center;">7-Day</a>'
-     + '<a href="' + pubBase + '?view=events" style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:2px 6px;text-align:center;">Events</a>'
-     + '</div></div>';
+     + '</div>';
   h += '</div>';
 
   // KPI Cards
@@ -15885,12 +15881,12 @@ function renderPublicStats() {
      + '</div></div>';
 
   // Two-column inner grid: KPI tiles | Bar chart
-  h += '<div style="display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start;">';
+  h += '<div style="display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:stretch;">';
   h += '<div style="display:flex;flex-direction:column;gap:8px;min-width:170px;">';
   h += _statsCoverageTile('Calls Staffed', staffedCount,      staffedCount + ' of ' + totalCalls + ' dispatches', '#27AE60');
   h += _statsCoverageTile('Coverage Rate', coveragePct + '%', 'Volunteer response rate',                          '#F5A623');
   h += '</div>';
-  h += _statsStaffingCoverageChart(monthlyStaffing);
+  h += '<div style="height:160px;min-width:0;overflow:hidden;">' + _statsStaffingCoverageChart(monthlyStaffing) + '</div>';
   h += '</div>';
 
   h += '</div></div>';
@@ -15908,13 +15904,13 @@ function renderPublicStats() {
      + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:11px;height:11px;background:#3498DB;border-radius:2px;"></span>Fire</span>'
      + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:11px;height:11px;background:#27AE60;border-radius:2px;"></span>EMS</span>'
      + '</div></div>';
-  h += '<div style="flex:1 1 0;min-height:0;display:flex;align-items:center;">' + _statsMonthlyBarChart(monthly) + '</div>';
+  h += '<div style="flex:1 1 0;min-height:0;overflow:hidden;">' + _statsMonthlyBarChart(monthly) + '</div>';
   h += '</div>';
 
   h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">';
   h += '<div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;flex-shrink:0;">LOSAP POINTS</div>'
      + '<div style="font-size:10px;color:#666;letter-spacing:1px;margin:2px 0 6px;flex-shrink:0;">Aggregate by category &middot; ' + thisYear + '</div>';
-  h += '<div style="flex:1 1 0;min-height:0;overflow:auto;">' + _statsDonutChart(catTotals) + '</div>';
+  h += '<div style="flex:1 1 0;min-height:0;overflow:hidden;">' + _statsDonutChart(catTotals) + '</div>';
   h += '</div>';
   h += '</div>';
 
@@ -15923,13 +15919,13 @@ function renderPublicStats() {
   h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">';
   h += '<div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;flex-shrink:0;">CALLS BY APPARATUS</div>'
      + '<div style="font-size:10px;color:#666;letter-spacing:1px;margin:2px 0 6px;flex-shrink:0;">Top responding units &middot; ' + thisYear + '</div>';
-  h += '<div style="flex:1 1 0;min-height:0;overflow:auto;">' + _statsUnitBarChart(unitArr) + '</div>';
+  h += '<div style="flex:1 1 0;min-height:0;overflow:hidden;">' + _statsUnitBarChart(unitArr) + '</div>';
   h += '</div>';
 
   h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">';
-  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;flex-shrink:0;">TOP 10 RESPONDERS</div>'
+  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;flex-shrink:0;">TOP 5 RESPONDERS</div>'
      + '<div style="font-size:10px;color:#666;letter-spacing:1px;margin:2px 0 6px;flex-shrink:0;">Members ranked by call count &middot; ' + thisYear + '</div>';
-  h += '<div style="flex:1 1 0;min-height:0;overflow:auto;">' + _statsTopResponders(topResp) + '</div>';
+  h += '<div style="flex:1 1 0;min-height:0;overflow:hidden;">' + _statsTopResponders(topResp) + '</div>';
   h += '</div>';
 
   h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">';
@@ -15940,7 +15936,7 @@ function renderPublicStats() {
      + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:16px;height:3px;background:#C8102E;border-radius:2px;"></span>' + thisYear + '</span>'
      + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:16px;height:3px;background:#666;border-radius:2px;"></span>' + lastYear + '</span>'
      + '</div></div>';
-  h += '<div style="flex:1 1 0;min-height:0;display:flex;align-items:center;">' + _statsYoYLineChart(cumThis, cumLast, dayInYear) + '</div>';
+  h += '<div style="flex:1 1 0;min-height:0;overflow:hidden;">' + _statsYoYLineChart(cumThis, cumLast, dayInYear) + '</div>';
   h += '</div>';
   h += '</div>';
 
@@ -15992,7 +15988,7 @@ function _statsStaffingCoverageChart(monthly) {
   max = Math.ceil(max / 5) * 5;
   var cw = (W - P.l - P.r) / 12;
   var bw = cw * 0.62;
-  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;font-family:Inter,sans-serif;">';
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;font-family:Inter,sans-serif;">';
   // Y grid + dual labels (count on left, % on right for the coverage line)
   for (var g = 0; g <= 5; g++) {
     var y = P.t + (H - P.t - P.b) * (1 - g / 5);
@@ -16051,7 +16047,7 @@ function _statsMonthlyBarChart(monthly) {
   max = Math.ceil(max / 5) * 5;
   var cw = (W - P.l - P.r) / 12;
   var bw = cw * 0.62;
-  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;font-family:Inter,sans-serif;">';
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;font-family:Inter,sans-serif;">';
   // Y grid + labels
   for (var g = 0; g <= 5; g++) {
     var y = P.t + (H - P.t - P.b) * (1 - g / 5);
@@ -16104,7 +16100,7 @@ function _statsDonutChart(catTotals) {
   }
   var cx = 105, cy = 105, r = 85, ir = 55;
   var s = '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">';
-  s += '<svg viewBox="0 0 210 210" width="190" style="flex-shrink:0;font-family:Bebas Neue,sans-serif;">';
+  s += '<svg viewBox="0 0 210 210" width="140" style="flex-shrink:0;font-family:Bebas Neue,sans-serif;">';
   // If only one entry, draw full ring
   if (entries.length === 1) {
     s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + ((r + ir) / 2) + '" fill="none" stroke="' + entries[0].color + '" stroke-width="' + (r - ir) + '"/>';
@@ -16134,11 +16130,11 @@ function _statsDonutChart(catTotals) {
   s += '<div style="flex:1;min-width:160px;font-size:12px;">';
   entries.forEach(function(e){
     var pct = Math.round(e.value / total * 100);
-    s += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #181818;">'
-       + '<span style="width:10px;height:10px;border-radius:2px;background:' + e.color + ';flex-shrink:0;"></span>'
-       + '<span style="flex:1;color:#CCC;font-size:11px;">' + e.label + '</span>'
-       + '<span style="font-family:Bebas Neue,sans-serif;color:#F0F0F0;font-size:14px;letter-spacing:1px;">' + Math.round(e.value) + '</span>'
-       + '<span style="color:#666;font-size:10px;width:32px;text-align:right;">' + pct + '%</span>'
+    s += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;border-bottom:1px solid #181818;">'
+       + '<span style="width:9px;height:9px;border-radius:2px;background:' + e.color + ';flex-shrink:0;"></span>'
+       + '<span style="flex:1;color:#CCC;font-size:10px;line-height:1.2;">' + e.label + '</span>'
+       + '<span style="font-family:Bebas Neue,sans-serif;color:#F0F0F0;font-size:13px;letter-spacing:1px;">' + Math.round(e.value) + '</span>'
+       + '<span style="color:#666;font-size:9px;width:30px;text-align:right;">' + pct + '%</span>'
        + '</div>';
   });
   s += '</div></div>';
@@ -16151,7 +16147,7 @@ function _statsUnitBarChart(unitArr) {
   }
   var max = unitArr[0].count;
   var s = '';
-  unitArr.slice(0, 8).forEach(function(u){
+  unitArr.slice(0, 5).forEach(function(u){
     var pct = (u.count / max) * 100;
     var color = u.isEMS ? '#27AE60' : '#3498DB';
     s += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;">'
@@ -16203,7 +16199,7 @@ function _statsYoYLineChart(cumThis, cumLast, dayInYear) {
   var xScale = function(d){ return P.l + (W - P.l - P.r) * (d / 365); };
   var yScale = function(v){ return P.t + (H - P.t - P.b) * (1 - v / max); };
 
-  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;font-family:Inter,sans-serif;">';
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;font-family:Inter,sans-serif;">';
   s += '<defs><linearGradient id="thisYearGrad" x1="0" x2="0" y1="0" y2="1">'
      + '<stop offset="0%" stop-color="#C8102E" stop-opacity="0.45"/>'
      + '<stop offset="100%" stop-color="#C8102E" stop-opacity="0"/>'
