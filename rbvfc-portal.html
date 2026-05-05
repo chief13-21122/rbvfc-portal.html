@@ -1323,6 +1323,11 @@ function showTab(id) {
   if (tab) tab.classList.add('active');
   var btn = document.getElementById('bnav-'+id);
   if (btn) btn.classList.add('active');
+  // Tabs that live under the More menu — light up the More button instead
+  else if (['emergency','training','history','past-alerts','approvals','log-entry','manual-entry','admin'].indexOf(id) !== -1) {
+    var moreBtn = document.getElementById('bnav-more');
+    if (moreBtn) moreBtn.classList.add('active');
+  }
   // Scroll to top
   var sa = document.getElementById('scrollArea');
   if (sa) sa.scrollTop = 0;
@@ -5258,6 +5263,7 @@ function applyUserSession(m) {
   var mab=document.getElementById('moreAdminBtn'); if(mab) mab.style.display=isOfficer?'block':'none';
   var mmeb=document.getElementById('moreManualEntryBtn'); if(mmeb) mmeb.style.display=isOfficer?'block':'none';
   var mapb=document.getElementById('moreApprovalsBtn'); if(mapb) mapb.style.display=isOfficer?'block':'none';
+  var moh=document.getElementById('moreOfficerHeader'); if(moh) moh.style.display=isOfficer?'block':'none';
   var ahb=document.getElementById('adminHeaderBtn'); if(ahb) ahb.style.display='inline-flex'; // gear shows for all members
   var sub=document.getElementById('switchUserBtn');
   if(sub) {
@@ -13633,6 +13639,8 @@ function launchApp(member) {
   if (moreManualEntryBtn) moreManualEntryBtn.style.display = isOfficer ? '' : 'none';
   var moreApprBtn = document.getElementById('moreApprovalsBtn');
   if (moreApprBtn) moreApprBtn.style.display = isOfficer ? '' : 'none';
+  var moreOfficerHeader = document.getElementById('moreOfficerHeader');
+  if (moreOfficerHeader) moreOfficerHeader.style.display = isOfficer ? '' : 'none';
 
   // Show clock as default tab
   showTab('clock');
@@ -15757,7 +15765,7 @@ function renderPublicStats() {
   var topResp = Object.keys(responderCounts).map(function(uid){
     var m = roster.find(function(x){ return x.id === uid; });
     return { id: uid, name: m ? (m.first + ' ' + m.last) : 'Member', count: responderCounts[uid] };
-  }).sort(function(a, b){ return b.count - a.count; }).slice(0, 3);
+  }).sort(function(a, b){ return b.count - a.count; }).slice(0, 10);
 
   // Volunteer Staffing Coverage — every emergencyResponse with members.length === 0
   // represents a Co. 13 dispatch that did NOT have a volunteer respond.
@@ -15796,11 +15804,6 @@ function renderPublicStats() {
     trainingHrsYTD += (parseFloat(t.hours) || 0) * members;
   });
 
-  // Company hours clocked YTD — sum of all completed duty/shift/event/meeting sessions
-  var companyHoursYTD = (state.sessions || []).filter(function(s){
-    return s.date && String(s.date).startsWith(String(thisYear));
-  }).reduce(function(a, s){ return a + (parseFloat(s.hours) || 0); }, 0);
-
   // YoY cumulative
   var yearStart = new Date(thisYear, 0, 1);
   var lastYearStart = new Date(lastYear, 0, 1);
@@ -15830,111 +15833,134 @@ function renderPublicStats() {
   var trendColor = lyComp >= 0 ? '#27AE60' : '#E74C3C';
 
   // ── Build HTML ────────────────────────────────────────────────
-  var h = '<div id="tvBoardStats" style="display:flex;flex-direction:column;height:100vh;width:100%;background:#080808;font-family:Barlow Condensed,sans-serif;box-sizing:border-box;color:#F0F0F0;overflow:hidden;">';
+  var h = '<div id="tvBoardStats" style="display:flex;flex-direction:column;min-height:100vh;background:#080808;font-family:Barlow Condensed,sans-serif;box-sizing:border-box;color:#F0F0F0;">';
 
   // Header
-  h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px;background:#0C0C0C;border-bottom:3px solid #C8102E;flex-shrink:0;">';
-  h += (logoSrc ? '<img src="' + logoSrc + '" style="height:38px;width:auto;object-fit:contain;">'
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:#0C0C0C;border-bottom:3px solid #C8102E;flex-shrink:0;">';
+  h += (logoSrc ? '<img src="' + logoSrc + '" style="height:42px;width:auto;object-fit:contain;">'
                 : '<div style="width:50px;"></div>');
   h += '<div style="text-align:center;">'
-     + '<div style="font-family:Bebas Neue,sans-serif;font-size:20px;letter-spacing:4px;color:#F0F0F0;line-height:1;">' + compName + '</div>'
-     + '<div style="font-size:10px;color:#C8102E;letter-spacing:3px;text-transform:uppercase;margin-top:2px;">Annual Statistics &amp; Performance &middot; ' + thisYear + '</div>'
+     + '<div style="font-family:Bebas Neue,sans-serif;font-size:22px;letter-spacing:4px;color:#F0F0F0;line-height:1;">' + compName + '</div>'
+     + '<div style="font-size:11px;color:#C8102E;letter-spacing:3px;text-transform:uppercase;margin-top:2px;">Annual Statistics &amp; Performance &middot; ' + thisYear + '</div>'
      + '</div>';
-  h += '<div style="display:flex;align-items:center;gap:8px;">'
-     + '<div id="tvStatsClock" style="font-family:Bebas Neue,sans-serif;font-size:24px;color:#C8102E;line-height:1;letter-spacing:2px;"></div>'
-     + '</div>';
+  h += '<div style="display:flex;gap:8px;align-items:center;">'
+     + '<div id="tvStatsClock" style="font-family:Bebas Neue,sans-serif;font-size:28px;color:#C8102E;line-height:1;letter-spacing:2px;"></div>'
+     + '<div style="display:flex;flex-direction:column;gap:4px;">'
+     + '<a href="' + pubBase + '?view=public" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:3px 7px;text-align:center;">TV Board</a>'
+     + '<a href="' + pubBase + '?view=staffing7" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:3px 7px;text-align:center;">7-Day</a>'
+     + '<a href="' + pubBase + '?view=events" style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#555;text-decoration:none;border:1px solid #2A2A2A;border-radius:4px;padding:3px 7px;text-align:center;">Events</a>'
+     + '</div></div>';
   h += '</div>';
 
   // KPI Cards
   function kpi(label, value, sub, accent) {
-    return '<div style="background:linear-gradient(135deg,#111,#0A0A0A);border:1px solid #1E1E1E;border-top:3px solid ' + accent + ';border-radius:8px;padding:10px 12px;flex:1;min-width:0;">'
-      + '<div style="font-size:9px;color:#666;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>'
-      + '<div style="font-family:Bebas Neue,sans-serif;font-size:30px;color:' + accent + ';line-height:1;letter-spacing:1px;">' + value + '</div>'
-      + (sub ? '<div style="font-size:10px;color:#777;margin-top:3px;line-height:1.2;">' + sub + '</div>' : '')
+    return '<div style="background:linear-gradient(135deg,#111,#0A0A0A);border:1px solid #1E1E1E;border-top:3px solid ' + accent + ';border-radius:8px;padding:14px 16px;flex:1;min-width:140px;">'
+      + '<div style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">' + label + '</div>'
+      + '<div style="font-family:Bebas Neue,sans-serif;font-size:36px;color:' + accent + ';line-height:1;letter-spacing:1px;">' + value + '</div>'
+      + (sub ? '<div style="font-size:11px;color:#777;margin-top:4px;">' + sub + '</div>' : '')
       + '</div>';
   }
   var pctFire = totalCalls ? Math.round(fireCount / totalCalls * 100) : 0;
   var pctEms  = totalCalls ? Math.round(emsCount  / totalCalls * 100) : 0;
   var perMember = activeMembers.length ? (totalCalls / activeMembers.length).toFixed(1) : '0';
-  // Format company hours with thousands separator, no decimals for big numbers
-  var companyHoursDisplay = Math.round(companyHoursYTD).toLocaleString('en-US');
-  var volRespSub = (fireCount + ' fire / ' + emsCount + ' EMS')
-                 + (lyToDate > 0 ? ' &middot; <span style="color:' + trendColor + ';">' + lyTrend + '</span>' : '');
-  h += '<div style="display:flex;gap:10px;padding:10px 18px;flex-wrap:nowrap;">';
-  h += kpi('Active Members',           activeMembers.length,    qualCount + ' LOSAP qualified',     '#F5A623');
-  h += kpi('Volunteer Responses',      totalCalls,              volRespSub,                          '#C8102E');
-  h += kpi('Duty Hours Logged',         companyHoursDisplay,    'Member duty time tracked',         '#27AE60');
-  h += kpi('Training Hours',           Math.round(trainingHrsYTD), 'Approved this year',            '#9B59B6');
-  h += kpi('Calls / Member',           perMember,               'Average response load',             '#E67E22');
+  h += '<div style="display:flex;gap:12px;padding:16px 24px;flex-wrap:wrap;">';
+  h += kpi('Total Calls YTD', totalCalls, lyToDate > 0 ? '<span style="color:' + trendColor + ';">' + lyTrend + '</span>' : 'First year of tracking', '#C8102E');
+  h += kpi('Fire Responses', fireCount, pctFire + '% of all calls', '#3498DB');
+  h += kpi('EMS Responses', emsCount, pctEms + '% of all calls', '#27AE60');
+  h += kpi('Active Members', activeMembers.length, qualCount + ' LOSAP qualified', '#F5A623');
+  h += kpi('Training Hours', Math.round(trainingHrsYTD), 'Approved this year', '#9B59B6');
+  h += kpi('Calls / Member', perMember, 'Average per member', '#E67E22');
   h += '</div>';
 
   // ── Volunteer Staffing Coverage ──────────────────────────────────────────
-  h += '<div style="padding:0 18px 8px;flex-shrink:0;">';
-  h += '<div style="background:linear-gradient(135deg,#0C0C0C,#0A0A0A);border:1px solid #1A1A1A;border-top:3px solid #27AE60;border-radius:10px;padding:10px 14px;">';
-  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap;gap:8px;">';
-  h += '<div><div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;">VOLUNTEER STAFFING COVERAGE</div>'
-     + '<div style="font-size:10px;color:#666;letter-spacing:1px;margin-top:3px;">Co. 13 dispatched calls covered by volunteer crews &middot; ' + thisYear + '</div></div>';
-  h += '<div style="display:flex;gap:12px;font-size:10px;align-items:center;flex-wrap:wrap;">'
-     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:11px;height:11px;background:#27AE60;border-radius:2px;"></span>Staffed by volunteers</span>'
-     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:11px;height:11px;background:#3A3A3A;border-radius:2px;"></span>Total dispatched</span>'
-     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:16px;height:2px;background:#F5A623;border-radius:2px;"></span>Coverage %</span>'
+  h += '<div style="padding:0 24px 16px;">';
+  h += '<div style="background:linear-gradient(135deg,#0C0C0C,#0A0A0A);border:1px solid #1A1A1A;border-top:3px solid #27AE60;border-radius:10px;padding:18px;">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:8px;">';
+  h += '<div><div style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:3px;color:#F0F0F0;">VOLUNTEER STAFFING COVERAGE</div>'
+     + '<div style="font-size:11px;color:#666;letter-spacing:1px;">Co. 13 dispatched calls covered by volunteer crews &middot; ' + thisYear + '</div></div>';
+  h += '<div style="display:flex;gap:14px;font-size:11px;align-items:center;flex-wrap:wrap;">'
+     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:12px;height:12px;background:#27AE60;border-radius:2px;"></span>Staffed by volunteers</span>'
+     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:12px;height:12px;background:#3A3A3A;border-radius:2px;"></span>Total dispatched</span>'
+     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:18px;height:2px;background:#F5A623;border-radius:2px;"></span>Coverage %</span>'
      + '</div></div>';
 
   // Two-column inner grid: KPI tiles | Bar chart
-  h += '<div style="display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:stretch;">';
-  h += '<div style="display:flex;flex-direction:column;gap:8px;min-width:180px;justify-content:space-between;">';
-  h += _statsCoverageTile('Calls Staffed',    staffedCount,            staffedCount + ' of ' + totalCalls + ' dispatches', '#27AE60');
-  h += _statsCoverageTile('Coverage Rate',    coveragePct + '%',       'Volunteer response rate',                           '#F5A623');
-  h += _statsCoverageTile('Member Responses', totalMemberResp,         'Total volunteer turnouts',                          '#C8102E');
+  h += '<div style="display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:start;">';
+  h += '<div style="display:flex;flex-direction:column;gap:10px;min-width:200px;">';
+  h += _statsCoverageTile('Calls Staffed', staffedCount,      staffedCount + ' of ' + totalCalls + ' dispatches', '#27AE60');
+  h += _statsCoverageTile('Coverage Rate', coveragePct + '%', 'Volunteer response rate',                          '#F5A623');
   h += '</div>';
-  h += '<div style="height:240px;min-width:0;overflow:hidden;">' + _statsStaffingCoverageChart(monthlyStaffing) + '</div>';
+  h += _statsStaffingCoverageChart(monthlyStaffing);
   h += '</div>';
+
+  // Footnote — explains data source, frames positively
+  h += '<div style="margin-top:14px;padding-top:12px;border-top:1px solid #181818;font-size:10px;color:#444;letter-spacing:1px;text-transform:uppercase;">'
+     + '&#9432; Captured automatically from CAD dispatch sync. Bar height shows total dispatched calls; green portion shows calls staffed by volunteer crews.'
+     + '</div>';
 
   h += '</div></div>';
 
-  // ── Charts area — single row, fills remaining viewport
-  h += '<div style="flex:1 1 0;min-height:0;display:flex;flex-direction:column;gap:8px;padding:0 18px 8px;">';
-
-  // Single chart row — Apparatus + Top responders + YoY trend
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1.6fr;gap:10px;flex:1 1 0;min-height:0;">';
-  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">';
-  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;flex-shrink:0;">CALLS BY APPARATUS</div>'
-     + '<div style="font-size:10px;color:#666;letter-spacing:1px;margin:2px 0 6px;flex-shrink:0;">Top responding units &middot; ' + thisYear + '</div>';
-  h += '<div style="flex:1 1 0;min-height:0;overflow:hidden;">' + _statsUnitBarChart(unitArr) + '</div>';
-  h += '</div>';
-
-  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">';
-  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;flex-shrink:0;">TOP 3 RESPONDERS</div>'
-     + '<div style="font-size:10px;color:#666;letter-spacing:1px;margin:2px 0 6px;flex-shrink:0;">Members ranked by call count &middot; ' + thisYear + '</div>';
-  h += '<div style="flex:1 1 0;min-height:0;overflow:hidden;">' + _statsTopResponders(topResp) + '</div>';
-  h += '</div>';
-
-  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">';
-  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;flex-wrap:wrap;gap:6px;flex-shrink:0;">';
-  h += '<div><div style="font-family:Bebas Neue,sans-serif;font-size:15px;letter-spacing:3px;color:#F0F0F0;line-height:1;">CUMULATIVE CALL TREND</div>'
-     + '<div style="font-size:10px;color:#666;letter-spacing:1px;margin-top:2px;">' + thisYear + ' vs ' + lastYear + ' &middot; YTD running total</div></div>';
-  h += '<div style="display:flex;gap:10px;font-size:10px;align-items:center;">'
-     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:16px;height:3px;background:#C8102E;border-radius:2px;"></span>' + thisYear + '</span>'
-     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:16px;height:3px;background:#666;border-radius:2px;"></span>' + lastYear + '</span>'
+  // Row 1 — Monthly chart + Donut
+  h += '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;padding:0 24px 16px;">';
+  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:18px;">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">';
+  h += '<div><div style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:3px;color:#F0F0F0;">MONTHLY CALL VOLUME</div>'
+     + '<div style="font-size:11px;color:#666;letter-spacing:1px;">Fire vs EMS &middot; ' + thisYear + '</div></div>';
+  h += '<div style="display:flex;gap:14px;font-size:11px;align-items:center;">'
+     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:12px;height:12px;background:#3498DB;border-radius:2px;"></span>Fire</span>'
+     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:12px;height:12px;background:#27AE60;border-radius:2px;"></span>EMS</span>'
      + '</div></div>';
-  h += '<div style="flex:1 1 0;min-height:0;overflow:hidden;">' + _statsYoYLineChart(cumThis, cumLast, dayInYear) + '</div>';
+  h += _statsMonthlyBarChart(monthly);
+  h += '</div>';
+
+  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:18px;">';
+  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:3px;color:#F0F0F0;">LOSAP POINTS</div>'
+     + '<div style="font-size:11px;color:#666;letter-spacing:1px;margin-bottom:14px;">Aggregate by category &middot; ' + thisYear + '</div>';
+  h += _statsDonutChart(catTotals);
   h += '</div>';
   h += '</div>';
 
+  // Row 2 — Apparatus + Top responders
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 24px 16px;">';
+  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:18px;">';
+  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:3px;color:#F0F0F0;">CALLS BY APPARATUS</div>'
+     + '<div style="font-size:11px;color:#666;letter-spacing:1px;margin-bottom:14px;">Top responding units &middot; ' + thisYear + '</div>';
+  h += _statsUnitBarChart(unitArr);
+  h += '</div>';
+
+  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:18px;">';
+  h += '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:3px;color:#F0F0F0;">TOP 10 RESPONDERS</div>'
+     + '<div style="font-size:11px;color:#666;letter-spacing:1px;margin-bottom:14px;">Members ranked by call count &middot; ' + thisYear + '</div>';
+  h += _statsTopResponders(topResp);
+  h += '</div>';
+  h += '</div>';
+
+  // Row 3 — YoY trend
+  h += '<div style="padding:0 24px 24px;">';
+  h += '<div style="background:#0C0C0C;border:1px solid #1A1A1A;border-radius:10px;padding:18px;">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">';
+  h += '<div><div style="font-family:Bebas Neue,sans-serif;font-size:18px;letter-spacing:3px;color:#F0F0F0;">CUMULATIVE CALL TREND</div>'
+     + '<div style="font-size:11px;color:#666;letter-spacing:1px;">' + thisYear + ' vs ' + lastYear + ' &middot; year-to-date running total</div></div>';
+  h += '<div style="display:flex;gap:14px;font-size:11px;align-items:center;">'
+     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:18px;height:3px;background:#C8102E;border-radius:2px;"></span>' + thisYear + '</span>'
+     + '<span style="display:flex;align-items:center;gap:5px;color:#AAA;"><span style="width:18px;height:3px;background:#666;border-radius:2px;"></span>' + lastYear + '</span>'
+     + '</div></div>';
+  h += _statsYoYLineChart(cumThis, cumLast, dayInYear);
+  h += '</div>';
   h += '</div>';
 
   // Footer
-  h += '<div style="padding:6px 18px;border-top:1px solid #181818;display:flex;justify-content:space-between;font-size:9px;color:#444;letter-spacing:1px;text-transform:uppercase;flex-wrap:wrap;gap:8px;flex-shrink:0;">'
+  h += '<div style="padding:14px 24px;border-top:1px solid #181818;display:flex;justify-content:space-between;font-size:10px;color:#444;letter-spacing:1px;text-transform:uppercase;flex-wrap:wrap;gap:8px;">'
      + '<span>Data as of ' + now.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' }) + '</span>'
      + '<span>Auto-refreshes every 5 min</span>'
      + '</div>';
 
   h += '</div>';
   sa.innerHTML = h;
-  // Lock to viewport — no scroll, fits one TV screen
-  document.body.style.overflow = 'hidden';
-  sa.style.overflow = 'hidden';
-  sa.style.height = '100vh';
+  // Allow page scroll for stats dashboard
+  document.body.style.overflow = 'auto';
+  sa.style.overflow = 'auto';
+  sa.style.height = 'auto';
 
   function tickStats() {
     var el = document.getElementById('tvStatsClock');
@@ -15969,7 +15995,7 @@ function _statsStaffingCoverageChart(monthly) {
   max = Math.ceil(max / 5) * 5;
   var cw = (W - P.l - P.r) / 12;
   var bw = cw * 0.62;
-  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;font-family:Inter,sans-serif;">';
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;font-family:Inter,sans-serif;">';
   // Y grid + dual labels (count on left, % on right for the coverage line)
   for (var g = 0; g <= 5; g++) {
     var y = P.t + (H - P.t - P.b) * (1 - g / 5);
@@ -16028,7 +16054,7 @@ function _statsMonthlyBarChart(monthly) {
   max = Math.ceil(max / 5) * 5;
   var cw = (W - P.l - P.r) / 12;
   var bw = cw * 0.62;
-  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;font-family:Inter,sans-serif;">';
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;font-family:Inter,sans-serif;">';
   // Y grid + labels
   for (var g = 0; g <= 5; g++) {
     var y = P.t + (H - P.t - P.b) * (1 - g / 5);
@@ -16081,7 +16107,7 @@ function _statsDonutChart(catTotals) {
   }
   var cx = 105, cy = 105, r = 85, ir = 55;
   var s = '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">';
-  s += '<svg viewBox="0 0 210 210" width="140" style="flex-shrink:0;font-family:Bebas Neue,sans-serif;">';
+  s += '<svg viewBox="0 0 210 210" width="190" style="flex-shrink:0;font-family:Bebas Neue,sans-serif;">';
   // If only one entry, draw full ring
   if (entries.length === 1) {
     s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + ((r + ir) / 2) + '" fill="none" stroke="' + entries[0].color + '" stroke-width="' + (r - ir) + '"/>';
@@ -16111,11 +16137,11 @@ function _statsDonutChart(catTotals) {
   s += '<div style="flex:1;min-width:160px;font-size:12px;">';
   entries.forEach(function(e){
     var pct = Math.round(e.value / total * 100);
-    s += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;border-bottom:1px solid #181818;">'
-       + '<span style="width:9px;height:9px;border-radius:2px;background:' + e.color + ';flex-shrink:0;"></span>'
-       + '<span style="flex:1;color:#CCC;font-size:10px;line-height:1.2;">' + e.label + '</span>'
-       + '<span style="font-family:Bebas Neue,sans-serif;color:#F0F0F0;font-size:13px;letter-spacing:1px;">' + Math.round(e.value) + '</span>'
-       + '<span style="color:#666;font-size:9px;width:30px;text-align:right;">' + pct + '%</span>'
+    s += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #181818;">'
+       + '<span style="width:10px;height:10px;border-radius:2px;background:' + e.color + ';flex-shrink:0;"></span>'
+       + '<span style="flex:1;color:#CCC;font-size:11px;">' + e.label + '</span>'
+       + '<span style="font-family:Bebas Neue,sans-serif;color:#F0F0F0;font-size:14px;letter-spacing:1px;">' + Math.round(e.value) + '</span>'
+       + '<span style="color:#666;font-size:10px;width:32px;text-align:right;">' + pct + '%</span>'
        + '</div>';
   });
   s += '</div></div>';
@@ -16128,7 +16154,7 @@ function _statsUnitBarChart(unitArr) {
   }
   var max = unitArr[0].count;
   var s = '';
-  unitArr.slice(0, 5).forEach(function(u){
+  unitArr.slice(0, 8).forEach(function(u){
     var pct = (u.count / max) * 100;
     var color = u.isEMS ? '#27AE60' : '#3498DB';
     s += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;">'
@@ -16180,7 +16206,7 @@ function _statsYoYLineChart(cumThis, cumLast, dayInYear) {
   var xScale = function(d){ return P.l + (W - P.l - P.r) * (d / 365); };
   var yScale = function(v){ return P.t + (H - P.t - P.b) * (1 - v / max); };
 
-  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;font-family:Inter,sans-serif;">';
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;font-family:Inter,sans-serif;">';
   s += '<defs><linearGradient id="thisYearGrad" x1="0" x2="0" y1="0" y2="1">'
      + '<stop offset="0%" stop-color="#C8102E" stop-opacity="0.45"/>'
      + '<stop offset="100%" stop-color="#C8102E" stop-opacity="0"/>'
@@ -20180,14 +20206,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
     <button class="bnav-btn" id="bnav-losap" onclick="showTab('losap')" style="position:relative;">
       <span class="bnav-icon">🏅</span><span class="bnav-label">LOSAP</span><span id="losapNotifBadge" style="display:none;position:absolute;top:4px;right:8px;background:#F5A623;color:#000;border-radius:8px;font-size:9px;font-weight:700;padding:1px 5px;line-height:14px;min-width:14px;text-align:center;"></span>
     </button>
-    <button class="bnav-btn" id="bnav-emergency" onclick="showTab('emergency')">
-      <span class="bnav-icon">🚒</span><span class="bnav-label">Response</span>
-    </button>
     <button class="bnav-btn" id="bnav-company" onclick="showTab('company')">
       <span class="bnav-icon">🏅</span><span class="bnav-label">Company</span>
-    </button>
-    <button class="bnav-btn" id="bnav-training" onclick="showTab('training')">
-      <span class="bnav-icon">📚</span><span class="bnav-label">Training</span>
     </button>
     <button class="bnav-btn" id="bnav-staffing" onclick="showTab('staffing')">
       <span class="bnav-icon">📅</span><span class="bnav-label">Staffing</span>
@@ -20201,21 +20221,34 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
   <!-- More Sheet -->
   <div id="moreSheet" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;align-items:flex-end;" onclick="if(event.target===this)closeMoreMenu()">
-    <div id="moreSheetPanel" style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:20px;width:100%;box-sizing:border-box;transform:translateY(100%);transition:transform .3s ease;">
-      <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 20px;"></div>
-      <button class="btn btn-secondary btn-full" style="position:relative;" id="moreApprovalsBtn" onclick="showTab('approvals');closeMoreMenu()">
-        ✅ Approvals
-        <span id="approvalsBadge" style="display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);background:#C8102E;color:#FFF;font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;"></span>
-      </button>
+    <div id="moreSheetPanel" style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:20px 20px 24px;width:100%;box-sizing:border-box;max-height:85vh;overflow-y:auto;-webkit-overflow-scrolling:touch;transform:translateY(100%);transition:transform .3s ease;">
+      <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 18px;position:sticky;top:0;"></div>
+
+      <!-- ── Section: Pages ────────────────────────────── -->
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:4px 0 10px 4px;">Pages</div>
+      <button class="btn btn-secondary btn-full" onclick="showTab('emergency');closeMoreMenu()">🚒 Emergency Response</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('training');closeMoreMenu()">📚 Training</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsSheet();closeMoreMenu()">🎪 Events &amp; Meetings</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('past-alerts');closeMoreMenu()">📜 Past Alerts</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
+
+      <!-- ── Section: Activity ─────────────────────────── -->
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:18px 0 10px 4px;">Activity</div>
+      <button class="btn btn-secondary btn-full" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreManualEntryBtn" onclick="showTab('manual-entry');closeMoreMenu()">✏️ Manual Activity Entry</button>
+
+      <!-- ── Section: LOSAP ────────────────────────────── -->
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:18px 0 10px 4px;">LOSAP</div>
+      <button class="btn btn-secondary btn-full" onclick="downloadLosapReport();closeMoreMenu()">📄 Download My LOSAP Report</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showLosapInfoModal();closeMoreMenu()">❓ What is LOSAP?</button>
 
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreManualEntryBtn" onclick="showTab('manual-entry');closeMoreMenu()">✏️ Manual Activity Entry</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
+      <!-- ── Section: Officer Tools (officers only) ───── -->
+      <div id="moreOfficerHeader" style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#C8102E;margin:18px 0 10px 4px;display:none;">Officer Tools</div>
+      <button class="btn btn-secondary btn-full" style="position:relative;display:none;" id="moreApprovalsBtn" onclick="showTab('approvals');closeMoreMenu()">
+        ✅ Approvals
+        <span id="approvalsBadge" style="display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);background:#C8102E;color:#FFF;font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;"></span>
+      </button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
 
     </div>
   </div>
