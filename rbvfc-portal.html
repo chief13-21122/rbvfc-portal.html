@@ -910,7 +910,8 @@ function stopFbSync() {
 // ── Push to Firestore (for messaging if configured) ──
 function initFirebaseMessaging() {
   if (!_fbInitialized || !fbApp) return;
-  if (!('serviceWorker' in navigator)) return;
+  if (!('serviceWorker' in navigator)) { window._swStatus = 'unsupported'; return; }
+  window._swStatus = 'pending';
   // Register our SW FIRST, then init messaging with it.
   // Must happen before firebase.messaging() — otherwise Firebase
   // defaults to /firebase-messaging-sw.js at the domain root (404 on GitHub Pages).
@@ -918,6 +919,7 @@ function initFirebaseMessaging() {
   navigator.serviceWorker.register(swPath, { scope: '/rbvfc-portal.html/' })
     .then(function(reg) {
       window._swRegistration = reg;
+      window._swStatus = 'ok';
       console.log('[RBVFC] SW pre-registered at:', reg.scope);
       try {
         fbMessaging = firebase.messaging(fbApp);
@@ -925,14 +927,17 @@ function initFirebaseMessaging() {
           showPushNotificationBanner(payload);
         });
       } catch(e) { console.warn('[RBVFC] Messaging init error:', e); }
+      try { renderPushStatus(); } catch(e){}
     })
     .catch(function(err) {
+      window._swStatus = 'failed';
       console.warn('[RBVFC] SW pre-registration failed:', err.message,
         '— Check that firebase-messaging-sw.js is committed to GitHub at /rbvfc-portal.html/');
       // Still try messaging without custom SW (will fall back to default)
       try {
         fbMessaging = firebase.messaging(fbApp);
       } catch(e) {}
+      try { renderPushStatus(); } catch(e){}
     });
 }
 
@@ -948,6 +953,17 @@ function requestPushPermission() {
   if (!fbMessaging) { showToast('⚠️ Firebase not configured.'); return; }
   if (!('serviceWorker' in navigator)) { showToast('⚠️ Service workers not supported in this browser.'); return; }
   if (!('Notification' in window)) { showToast('⚠️ Notifications not supported in this browser.'); return; }
+
+  // ── iOS Safari (non-PWA) pre-check ──
+  // Web push on iOS only works when the app has been installed to the Home
+  // Screen and launched standalone. Safari users will silently fail at
+  // getToken() with a confusing error — show the install instructions first.
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  if (isIOS && !isStandalone) {
+    _showPushBlockedModal();   // already shows the "Add to Home Screen" guidance for this case
+    return;
+  }
 
   // If already denied, browser won't show the prompt — guide user to fix it manually
   if (Notification.permission === 'denied') {
@@ -1102,8 +1118,24 @@ function renderPushStatus() {
   var localToken = '';
   try { localToken = localStorage.getItem('rbvfc_fcm_token') || ''; } catch(e) {}
   if (!('Notification' in window)) { el.textContent = 'Not supported in this browser.'; el.style.color = '#888'; return; }
+  // iOS Safari (non-PWA) gets a special note — web push won't work at all there
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  if (isIOS && !isStandalone) {
+    el.innerHTML = '\u26a0\ufe0f iPhone/iPad — install via Share \u2192 Add to Home Screen first';
+    el.style.color = '#F5A623';
+    return;
+  }
   var perm = Notification.permission;
-  if (perm === 'granted' && localToken) { el.textContent = '\u2705 Enabled on this device'; el.style.color = '#27AE60'; }
+  if (perm === 'granted' && localToken) {
+    if (window._swStatus === 'failed') {
+      el.innerHTML = '\u26a0\ufe0f Foreground only \u2014 background notifications offline (service worker missing).';
+      el.style.color = '#F5A623';
+    } else {
+      el.textContent = '\u2705 Enabled on this device';
+      el.style.color = '#27AE60';
+    }
+  }
   else if (perm === 'denied') { el.textContent = '\u274c Blocked \u2014 enable in browser/phone settings'; el.style.color = '#C8102E'; }
   else { el.textContent = '\u26a0\ufe0f Not enabled \u2014 tap below to turn on'; el.style.color = '#F5A623'; }
 }
@@ -1133,11 +1165,15 @@ function sendPushToMembers(targetMemberIds, title, body, alertId) {
   // Relay through Google Apps Script which uses FCM HTTP v1 API with its own OAuth token
   var url = state.cadScriptUrl;  // same Apps Script handles CAD + push
   if (!url) return;
+  // Build deduped token array, preserving order so we can map results back
   var tokens = [];
+  var seen = {};
   targetMemberIds.forEach(function(uid) {
     var m = (state.roster||[]).find(function(x){ return x.id===uid; });
     if (m && m.fcmTokens && m.fcmTokens.length) {
-      m.fcmTokens.forEach(function(t){ if (tokens.indexOf(t)===-1) tokens.push(t); });
+      m.fcmTokens.forEach(function(t){
+        if (!seen[t]) { tokens.push(t); seen[t] = 1; }
+      });
     }
   });
   if (!tokens.length) return;
@@ -1157,8 +1193,154 @@ function sendPushToMembers(targetMemberIds, title, body, alertId) {
       }
     })
   }).then(function(r){ return r.json(); })
-    .then(function(d){ console.log('[RBVFC] Push sent:', JSON.stringify(d)); })
+    .then(function(d){
+      console.log('[RBVFC] Push sent:', JSON.stringify(d));
+      try {
+        var dead = _pruneStaleTokensFromResponse(tokens, d);
+        var removed = _removeTokensFromRoster(dead);
+        if (removed) console.log('[RBVFC] Pruned ' + removed + ' stale FCM token(s) from roster.');
+      } catch(e) { console.warn('[RBVFC] Token prune error:', e); }
+    })
     .catch(function(e){ console.warn('[RBVFC] Push relay failed:', e); });
+}
+
+// ── Stale FCM token detection & cleanup ───────────────────────────────────
+// FCM rotates tokens (browser data clear, app reinstall, OS update, ~270d
+// natural rotation). Without pruning, dead tokens accumulate in fcmTokens[]
+// forever and every push silently fails. These helpers match permanent
+// failure codes from the FCM HTTP v1 / Admin SDK response and remove the
+// offending token(s) from the roster.
+function _isPermanentTokenError(errStr) {
+  if (!errStr) return false;
+  var s = String(errStr).toLowerCase();
+  return s.indexOf('registration-token-not-registered') !== -1
+      || s.indexOf('invalid-registration-token') !== -1
+      || s.indexOf('invalid-argument') !== -1
+      || s.indexOf('not_found') !== -1
+      || s.indexOf('not-found') !== -1
+      || s.indexOf('mismatched-credential') !== -1
+      || s.indexOf('sender-id-mismatch') !== -1
+      || s === 'unregistered';
+}
+
+function _pruneStaleTokensFromResponse(orderedTokens, response) {
+  // Returns array of tokens that should be removed.
+  // Requires the relay to include a per-token `results` array. Without it,
+  // returns []. Recommended relay return shape:
+  //   { successCount, failureCount, results: [{messageId}|{error: '<code>'}] }
+  if (!response || !Array.isArray(response.results)) return [];
+  var dead = [];
+  for (var i = 0; i < response.results.length && i < orderedTokens.length; i++) {
+    var r = response.results[i] || {};
+    var errStr = '';
+    if (r.error) {
+      if (typeof r.error === 'string') errStr = r.error;
+      else if (typeof r.error === 'object') errStr = r.error.code || r.error.message || JSON.stringify(r.error);
+    } else if (r.errorCode) {
+      errStr = r.errorCode;
+    }
+    if (_isPermanentTokenError(errStr)) dead.push(orderedTokens[i]);
+  }
+  return dead;
+}
+
+function _removeTokensFromRoster(deadTokens) {
+  if (!deadTokens || !deadTokens.length) return 0;
+  var deadSet = {};
+  deadTokens.forEach(function(t){ deadSet[t] = 1; });
+  var removed = 0;
+  (state.roster || []).forEach(function(m) {
+    if (m.fcmTokens && m.fcmTokens.length) {
+      var before = m.fcmTokens.length;
+      m.fcmTokens = m.fcmTokens.filter(function(t){ return !deadSet[t]; });
+      removed += (before - m.fcmTokens.length);
+    }
+  });
+  // If a dead token matches *this* device's stored token, clear it so the
+  // boot-time refresh path will re-register a fresh one.
+  try {
+    var localT = localStorage.getItem('rbvfc_fcm_token') || '';
+    if (localT && deadSet[localT]) localStorage.removeItem('rbvfc_fcm_token');
+  } catch(e) {}
+  if (removed) {
+    save();
+    try { sheetSyncDebounce(); } catch(e) {}
+  }
+  return removed;
+}
+
+// ── Boot-time FCM token refresh ────────────────────────────────────────────
+// Runs after login. If the locally-stored token differs from what FCM gives
+// us now, that means the token rotated since the last visit — replace the
+// dead one in the roster, save, and notify the relay.
+function _refreshFcmTokenIfNeeded() {
+  if (!_fbInitialized || !fbMessaging) return;
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+  if (Notification.permission !== 'granted') return;
+  if (!state.currentUserId) return;
+
+  var stored = '';
+  try { stored = localStorage.getItem('rbvfc_fcm_token') || ''; } catch(e){}
+
+  var swPath = '/rbvfc-portal.html/firebase-messaging-sw.js';
+  var ensureReg = window._swRegistration
+    ? Promise.resolve(window._swRegistration)
+    : navigator.serviceWorker.register(swPath, { scope: '/rbvfc-portal.html/' });
+
+  ensureReg
+    .then(function(reg) {
+      window._swRegistration = reg;
+      window._swStatus = 'ok';
+      return fbMessaging.getToken({ vapidKey: FIREBASE_VAPID_KEY, serviceWorkerRegistration: reg });
+    })
+    .then(function(token) {
+      if (!token) return;
+      if (token === stored) {
+        // Token unchanged — but make sure roster has it (in case roster was wiped/restored)
+        var uid0 = state.currentUserId;
+        var m0 = (state.roster||[]).find(function(x){ return x.id===uid0; });
+        if (m0 && (!m0.fcmTokens || m0.fcmTokens.indexOf(token) === -1)) {
+          if (!m0.fcmTokens) m0.fcmTokens = [];
+          m0.fcmTokens.push(token);
+          m0.fcmTokens = m0.fcmTokens.slice(-3);
+          save(); try { sheetSyncDebounce(); } catch(e){}
+        }
+        return;
+      }
+      console.log('[RBVFC] FCM token rotated since last visit — updating roster.');
+      var uid = state.currentUserId;
+      var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+      if (m) {
+        if (!m.fcmTokens) m.fcmTokens = [];
+        // Drop the old (stored) token — it's now dead at FCM
+        if (stored) m.fcmTokens = m.fcmTokens.filter(function(t){ return t !== stored; });
+        if (m.fcmTokens.indexOf(token) === -1) m.fcmTokens.push(token);
+        m.fcmTokens = m.fcmTokens.slice(-3);
+        save();
+        try { sheetSyncDebounce(); } catch(e) {}
+      }
+      try { localStorage.setItem('rbvfc_fcm_token', token); } catch(e){}
+      // Inform the relay (idempotent on its end, but lets it pre-warm caches)
+      var sUrl = state.cadScriptUrl;
+      if (sUrl) {
+        fetch(sUrl, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'registerToken', token: token })
+        }).catch(function(){});
+      }
+      try { renderPushStatus(); } catch(e){}
+    })
+    .catch(function(err) {
+      var msg = (err && err.message) || String(err);
+      console.warn('[RBVFC] FCM token refresh failed:', msg);
+      // Common: SW registration broken on this device — surface it
+      if (/messaging\/failed-service-worker-registration/i.test(msg)
+          || /failed to register/i.test(msg)
+          || /the operation is insecure/i.test(msg)) {
+        window._swStatus = 'failed';
+        try { renderPushStatus(); } catch(e){}
+      }
+    });
 }
 
 
@@ -1313,6 +1495,7 @@ function updateClock() {
 // ═══════════════════════════════════════════════════
 function showTab(id) {
   if (id === 'drill') id = 'training'; // drill merged into training
+  if (id === 'history') id = 'training'; // history merged into training (Training & Drill Report)
   setTimeout(_adjustAppTopPad, 50);
   document.querySelectorAll('.section').forEach(function(s){ s.classList.remove('active'); });
   document.querySelectorAll('.nav-tab').forEach(function(t){ t.classList.remove('active'); });
@@ -1361,7 +1544,6 @@ function showTab(id) {
     if (_meIsOfficer) { try { initManualActivityCard(); } catch(e){} }
   }
   if (id === 'approvals') initApprovalsTab();
-  if (id === 'history') initHistoryTab();
   if (id === 'past-alerts') initPastAlertsTab();
   // Sync collapse icons to current state
   setTimeout(fixCollapseIcons, 10);
@@ -1427,6 +1609,11 @@ function sendTestPushToSelf() {
   .then(function(r){ return r.json(); })
   .then(function(d){
     var ok = d.successCount > 0 || d.success_count > 0;
+    // Prune any dead tokens this call exposed
+    try {
+      var dead = _pruneStaleTokensFromResponse(m.fcmTokens, d);
+      _removeTokensFromRoster(dead);
+    } catch(e) {}
     showToast(ok ? '✅ Test notification sent! Check your phone.' : '⚠️ Delivery failed — try re-enabling notifications.');
   })
   .catch(function(){ showToast('⚠️ Could not reach server. Check your connection.'); });
@@ -3502,7 +3689,14 @@ function initTrainingTab() {
   var tcBtn = document.getElementById('trainingClassesOfficerBtn');
   if (tcBtn) tcBtn.style.display = isOfficer ? 'block' : 'none';
   renderTrainingClasses();
-  // Drill history summary (inline on this tab for officers)
+  // ── Training & Drill History (merged from old History tab) ──
+  // Training History — visible to all (members see own; officers see all)
+  var thCard = document.getElementById('trainingHistoryCard');
+  if (thCard) thCard.style.display = 'block';
+  try { renderTrainingReview(); } catch(e){}
+  // Drill Report History — officers and admins only
+  var dhCard = document.getElementById('drillHistoryCard');
+  if (dhCard) dhCard.style.display = isOfficer ? 'block' : 'none';
   if (isOfficer) { try { renderDrillHistory(); } catch(e){} }
 }
 
@@ -13601,6 +13795,11 @@ function launchApp(member) {
 
   save(); // persist to localStorage so Firestore listeners don't wipe it
 
+  // ── Silent FCM token health check ────────────────────────────────────
+  // Detects if the token rotated since the last visit (which would silently
+  // break notifications). Runs deferred so it doesn't block login UI.
+  setTimeout(function(){ try { _refreshFcmTokenIfNeeded(); } catch(e){} }, 1500);
+
   // Update header
   var subtitle = document.getElementById('appSubtitle');
   if (subtitle) subtitle.textContent = member.last + ', ' + member.first +
@@ -14970,13 +15169,22 @@ function sendTestPushToMember() {
     console.log('[RBVFC] Test push result:', JSON.stringify(d));
     var success = d.successCount > 0 || d.success_count > 0 || (d.results && d.results.some(function(r){ return !r.error; }));
     var failCount = d.failureCount || d.failure_count || 0;
+    // Surgically prune any stale tokens this test exposed
+    var pruned = 0;
+    try {
+      var dead = _pruneStaleTokensFromResponse(tokens, d);
+      pruned = _removeTokensFromRoster(dead);
+    } catch(e) {}
+    var prunedNote = pruned ? ' · 🧹 Auto-removed ' + pruned + ' stale token(s)' : '';
     if (success) {
-      if (resultEl) { resultEl.textContent = '✅ Delivered to ' + (d.successCount||d.success_count||'?') + ' device(s)' + (failCount?' · ❌ '+failCount+' failed':'') + '.'; resultEl.style.color = '#27AE60'; }
-      showToast('✅ Test push sent to ' + m.first + ' ' + m.last + '!');
+      if (resultEl) { resultEl.textContent = '✅ Delivered to ' + (d.successCount||d.success_count||'?') + ' device(s)' + (failCount?' · ❌ '+failCount+' failed':'') + prunedNote + '.'; resultEl.style.color = '#27AE60'; }
+      showToast('✅ Test push sent to ' + m.first + ' ' + m.last + '!' + (pruned ? ' (' + pruned + ' stale token(s) cleaned up)' : ''));
     } else {
-      if (resultEl) { resultEl.textContent = '❌ Failed — ' + (d.failureCount||d.failure_count||'all') + ' device(s) rejected. Token may be stale.'; resultEl.style.color = '#C8102E'; }
+      if (resultEl) { resultEl.textContent = '❌ Failed — ' + (d.failureCount||d.failure_count||'all') + ' device(s) rejected. Token may be stale.' + prunedNote; resultEl.style.color = '#C8102E'; }
       showToast('⚠️ Push failed for ' + m.first + '. Token may be expired — ask them to re-enable notifications.');
     }
+    // Refresh the roster dropdown so token counts reflect any removals
+    try { refreshPushTestRoster(); } catch(e){}
   })
   .catch(function(e){
     if (resultEl) { resultEl.textContent = '❌ Network error: ' + e.message; resultEl.style.color = '#C8102E'; }
@@ -15011,9 +15219,17 @@ function sendTestPushAll() {
   .then(function(d){
     var s = d.successCount || d.success_count || 0;
     var f = d.failureCount || d.failure_count || 0;
-    showToast('✅ Test push: ' + s + ' delivered, ' + f + ' failed.');
+    // Bulk prune any stale tokens this broadcast exposed
+    var pruned = 0;
+    try {
+      var dead = _pruneStaleTokensFromResponse(tokens, d);
+      pruned = _removeTokensFromRoster(dead);
+    } catch(e) {}
+    var prunedNote = pruned ? ' · 🧹 Cleaned up ' + pruned + ' stale token(s)' : '';
+    showToast('✅ Test push: ' + s + ' delivered, ' + f + ' failed' + (pruned ? ' · ' + pruned + ' stale token(s) cleaned up.' : '.'));
     var el = document.getElementById('notifStatus');
-    if (el) { el.textContent = 'Last broadcast: ' + new Date().toLocaleTimeString() + ' — ' + s + ' delivered, ' + f + ' failed.'; el.style.color = s > 0 ? '#27AE60' : '#C8102E'; }
+    if (el) { el.textContent = 'Last broadcast: ' + new Date().toLocaleTimeString() + ' — ' + s + ' delivered, ' + f + ' failed' + prunedNote + '.'; el.style.color = s > 0 ? '#27AE60' : '#C8102E'; }
+    try { refreshPushTestRoster(); } catch(e){}
   })
   .catch(function(e){ showToast('⚠️ Push relay error: ' + e.message); });
 }
@@ -19443,10 +19659,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       </div>
 
 
-    </div><!-- end section-training -->
-
-    <div id="section-history" class="section">
-
+      <!-- ── Training & Drill History (merged from old History tab) ── -->
       <!-- Training History -->
       <div class="card">
         <div class="card-header" onclick="toggleAdminCardById('trainingHistoryCard')" style="cursor:pointer;user-select:none;"><div class="icon">📚</div><h2>Training History</h2><span id="trainingHistoryChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;transform:rotate(-90deg);">&#9660;</span></div>
@@ -19463,7 +19676,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         </div>
       </div>
 
-    </div><!-- end section-history -->
+    </div><!-- end section-training -->
 
     <!-- ══════════════ PAST ALERTS TAB (More menu) ══════════════ -->
     <div id="section-past-alerts" class="section">
@@ -20227,9 +20440,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <!-- ── Section: Pages ────────────────────────────── -->
       <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:4px 0 10px 4px;">Pages</div>
       <button class="btn btn-secondary btn-full" onclick="showTab('emergency');closeMoreMenu()">🚒 Emergency Response</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('training');closeMoreMenu()">📚 Training</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('training');closeMoreMenu()">📚 Training &amp; Drill Report</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsSheet();closeMoreMenu()">🎪 Events &amp; Meetings</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('past-alerts');closeMoreMenu()">📜 Past Alerts</button>
 
       <!-- ── Section: Activity ─────────────────────────── -->
