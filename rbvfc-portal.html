@@ -1495,7 +1495,6 @@ function updateClock() {
 // ═══════════════════════════════════════════════════
 function showTab(id) {
   if (id === 'drill') id = 'training'; // drill merged into training
-  if (id === 'history') id = 'training'; // history merged into training (Training & Drill Report)
   setTimeout(_adjustAppTopPad, 50);
   document.querySelectorAll('.section').forEach(function(s){ s.classList.remove('active'); });
   document.querySelectorAll('.nav-tab').forEach(function(t){ t.classList.remove('active'); });
@@ -1544,6 +1543,7 @@ function showTab(id) {
     if (_meIsOfficer) { try { initManualActivityCard(); } catch(e){} }
   }
   if (id === 'approvals') initApprovalsTab();
+  if (id === 'history') initHistoryTab();
   if (id === 'past-alerts') initPastAlertsTab();
   // Sync collapse icons to current state
   setTimeout(fixCollapseIcons, 10);
@@ -3689,14 +3689,7 @@ function initTrainingTab() {
   var tcBtn = document.getElementById('trainingClassesOfficerBtn');
   if (tcBtn) tcBtn.style.display = isOfficer ? 'block' : 'none';
   renderTrainingClasses();
-  // ── Training & Drill History (merged from old History tab) ──
-  // Training History — visible to all (members see own; officers see all)
-  var thCard = document.getElementById('trainingHistoryCard');
-  if (thCard) thCard.style.display = 'block';
-  try { renderTrainingReview(); } catch(e){}
-  // Drill Report History — officers and admins only
-  var dhCard = document.getElementById('drillHistoryCard');
-  if (dhCard) dhCard.style.display = isOfficer ? 'block' : 'none';
+  // Drill history summary (inline on this tab for officers)
   if (isOfficer) { try { renderDrillHistory(); } catch(e){} }
 }
 
@@ -7420,8 +7413,32 @@ function renderStaffingBoard() {
                 var _win = _checkShiftClockWindow(s);
                 if (_win.ok) {
                   html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+s.id+'">&#128336; Clock In</button>';
+                } else {
+                  // Out of window — show disabled-looking button + short reason so the
+                  // gate is never silent. Tapping still surfaces the full reason via toast.
+                  var _todayStr = localDateStr();
+                  var _shortLbl = '';
+                  if (s.date < _todayStr) {
+                    _shortLbl = 'window closed';
+                  } else if (s.date > _todayStr) {
+                    _shortLbl = 'not today';
+                  } else {
+                    var _shN = parseInt((s.shiftStart||'0700').slice(0,2));
+                    var _smN = parseInt((s.shiftStart||'0700').slice(2,4)||'0');
+                    var _startMs = new Date(_todayStr+'T'+(_shN<10?'0':'')+_shN+':'+(_smN<10?'0':'')+_smN+':00').getTime();
+                    if (Date.now() < _startMs) {
+                      var _stStr = (_shN%12||12)+':'+(_smN<10?'0':'')+_smN+' '+(_shN>=12?'PM':'AM');
+                      _shortLbl = 'opens '+_stStr;
+                    } else {
+                      _shortLbl = 'window closed';
+                    }
+                  }
+                  var _titleSafe = (_win.reason||'').replace(/"/g, '&quot;');
+                  html += '<button onclick="staffClockIn(this)" data-id="'+s.id+'" title="'+_titleSafe+'" '
+                        + 'style="background:#161616;border:1px solid #2A2A2A;color:#555;border-radius:6px;padding:4px 10px;cursor:not-allowed;font-size:11px;font-weight:700;letter-spacing:0.5px;opacity:0.6;">'
+                        + '&#128336; Clock In</button>';
+                  html += '<span style="font-size:10px;color:#777;font-style:italic;margin-left:4px;white-space:nowrap;" title="'+_titleSafe+'">'+_shortLbl+'</span>';
                 }
-                // If not in window, show nothing — shift is future or expired
               }
               else {
                 html += '<span style="font-size:11px;color:#27AE60;font-weight:700;">&#10003; In</span>';
@@ -19659,7 +19676,10 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       </div>
 
 
-      <!-- ── Training & Drill History (merged from old History tab) ── -->
+    </div><!-- end section-training -->
+
+    <div id="section-history" class="section">
+
       <!-- Training History -->
       <div class="card">
         <div class="card-header" onclick="toggleAdminCardById('trainingHistoryCard')" style="cursor:pointer;user-select:none;"><div class="icon">📚</div><h2>Training History</h2><span id="trainingHistoryChevron" style="margin-left:auto;font-size:13px;color:#555;display:inline-block;transition:transform .2s;transform:rotate(-90deg);">&#9660;</span></div>
@@ -19676,7 +19696,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         </div>
       </div>
 
-    </div><!-- end section-training -->
+    </div><!-- end section-history -->
 
     <!-- ══════════════ PAST ALERTS TAB (More menu) ══════════════ -->
     <div id="section-past-alerts" class="section">
@@ -20440,8 +20460,9 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <!-- ── Section: Pages ────────────────────────────── -->
       <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:4px 0 10px 4px;">Pages</div>
       <button class="btn btn-secondary btn-full" onclick="showTab('emergency');closeMoreMenu()">🚒 Emergency Response</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('training');closeMoreMenu()">📚 Training &amp; Drill Report</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('training');closeMoreMenu()">📚 Training</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsSheet();closeMoreMenu()">🎪 Events &amp; Meetings</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('past-alerts');closeMoreMenu()">📜 Past Alerts</button>
 
       <!-- ── Section: Activity ─────────────────────────── -->
