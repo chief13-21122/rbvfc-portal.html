@@ -639,10 +639,28 @@ function initFirebase(onReady) {
   if (_fbInitialized) { if (onReady) onReady(fbApp); return; }
   if (!_fbConfigured()) { console.log("[RBVFC] Firebase not configured."); return; }
 
-  // Dynamically load Firebase compat SDK if not yet loaded
-  function _loadSdk(url, cb) {
+  // Dynamically load Firebase compat SDK if not yet loaded.
+  // Retries with exponential backoff (4 attempts, ~0.5s/1s/2s/4s spacing)
+  // to survive transient Wi-Fi blips. Surfaces a clear console error and
+  // sets window._fbSdkLoadFailed = true if all retries are exhausted.
+  function _loadSdk(url, cb, attempt) {
+    attempt = attempt || 1;
+    var MAX_ATTEMPTS = 4;
     var s = document.createElement('script');
-    s.src = url; s.onload = cb; s.onerror = function(){ console.warn('[RBVFC] Failed to load', url); };
+    s.src = url;
+    s.onload = cb;
+    s.onerror = function(){
+      try { if (s.parentNode) s.parentNode.removeChild(s); } catch(e) {}
+      if (attempt < MAX_ATTEMPTS) {
+        var delay = Math.min(8000, Math.pow(2, attempt - 1) * 500);
+        console.warn('[RBVFC] Failed to load ' + url + ' (attempt ' + attempt + '/' + MAX_ATTEMPTS + '), retrying in ' + delay + 'ms');
+        setTimeout(function(){ _loadSdk(url, cb, attempt + 1); }, delay);
+      } else {
+        console.error('[RBVFC] Failed to load ' + url + ' after ' + MAX_ATTEMPTS + ' attempts. Firebase features unavailable. Check network connectivity to gstatic.com (ad blockers, firewalls, or Wi-Fi issues).');
+        window._fbSdkLoadFailed = true;
+        window._fbSdkLoadFailedUrl = url;
+      }
+    };
     document.head.appendChild(s);
   }
 
@@ -7413,32 +7431,8 @@ function renderStaffingBoard() {
                 var _win = _checkShiftClockWindow(s);
                 if (_win.ok) {
                   html += '<button class="btn btn-sm btn-primary" onclick="staffClockIn(this)" data-id="'+s.id+'">&#128336; Clock In</button>';
-                } else {
-                  // Out of window — show disabled-looking button + short reason so the
-                  // gate is never silent. Tapping still surfaces the full reason via toast.
-                  var _todayStr = localDateStr();
-                  var _shortLbl = '';
-                  if (s.date < _todayStr) {
-                    _shortLbl = 'window closed';
-                  } else if (s.date > _todayStr) {
-                    _shortLbl = 'not today';
-                  } else {
-                    var _shN = parseInt((s.shiftStart||'0700').slice(0,2));
-                    var _smN = parseInt((s.shiftStart||'0700').slice(2,4)||'0');
-                    var _startMs = new Date(_todayStr+'T'+(_shN<10?'0':'')+_shN+':'+(_smN<10?'0':'')+_smN+':00').getTime();
-                    if (Date.now() < _startMs) {
-                      var _stStr = (_shN%12||12)+':'+(_smN<10?'0':'')+_smN+' '+(_shN>=12?'PM':'AM');
-                      _shortLbl = 'opens '+_stStr;
-                    } else {
-                      _shortLbl = 'window closed';
-                    }
-                  }
-                  var _titleSafe = (_win.reason||'').replace(/"/g, '&quot;');
-                  html += '<button onclick="staffClockIn(this)" data-id="'+s.id+'" title="'+_titleSafe+'" '
-                        + 'style="background:#161616;border:1px solid #2A2A2A;color:#555;border-radius:6px;padding:4px 10px;cursor:not-allowed;font-size:11px;font-weight:700;letter-spacing:0.5px;opacity:0.6;">'
-                        + '&#128336; Clock In</button>';
-                  html += '<span style="font-size:10px;color:#777;font-style:italic;margin-left:4px;white-space:nowrap;" title="'+_titleSafe+'">'+_shortLbl+'</span>';
                 }
+                // If not in window, show nothing — shift is future or expired
               }
               else {
                 html += '<span style="font-size:11px;color:#27AE60;font-weight:700;">&#10003; In</span>';
@@ -8836,6 +8830,8 @@ function _performAutoClockOut(sess, record) {
   // ── UI cleanup ──────────────────────────────────────────────────
   var banner = document.getElementById('clockedInReminderBanner');
   if (banner) { banner.style.display='none'; _adjustAppTopPad(); }
+  var legacyBanner = document.getElementById('clockReminderTopBanner');
+  if (legacyBanner) { legacyBanner.style.display='none'; try{_adjustAppTopPad();}catch(e){} }
   var modal = document.getElementById('_dutyOverTimeModal');
   if (modal) modal.remove();
   var endModal = document.getElementById('_endOfActivityModal');
@@ -8987,7 +8983,25 @@ function _showEndOfActivityModal(sess, record, displayName, kindLabel, scheduled
   // checkClockedInReminders can also auto-close if the modal is missed.
   if (!record._reminderSentAt) {
     record._reminderSentAt = new Date().toISOString();
+    record._pushSent = false;
     save();
+  }
+
+  // ── Push notification (fires WITH the visible reminder) ──────────────
+  // Sent before the modal renders so the device gets buzzed even if the
+  // user has the portal in the background. Guarded by _pushSent so we
+  // don't re-fire on every 60s tick during the grace window.
+  if (!record._pushSent) {
+    try {
+      var _endStrPush = scheduledEnd.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+      sendPushToMembers([sess.userId],
+        '\u23F1\uFE0F ' + kindLabel + ' ended \u2014 still on duty?',
+        displayName + ' ended at ' + _endStrPush + '. Auto clock-out in ' + AUTO_CLOCKOUT_GRACE_MINS + ' min if no response.',
+        'endact_' + (record.id || record.mtgId || record.eventId || sess.id) + '_' + scheduledEnd.toISOString().slice(0,16)
+      );
+      record._pushSent = true;
+      save();
+    } catch(e) {}
   }
 
   var graceMs = AUTO_CLOCKOUT_GRACE_MINS * 60 * 1000;
@@ -9050,22 +9064,14 @@ function _showEndOfActivityModal(sess, record, displayName, kindLabel, scheduled
     clearInterval(_eoaTimer);
     var w = document.getElementById('_endOfActivityModal');
     if (w) w.remove();
-    // Use the same path as the existing reminder banner
+    // Use the smart router that handles all session types (currentSession
+    // and synthetic sessions for shifts/events/meetings).
     try { clockOutFromReminder(); }
     catch(e) {
       // Fall back to direct clockOut for general sessions
       if (state.currentSession && !state.currentSession.end) clockOut();
     }
   };
-
-  // Simultaneous push notification
-  try {
-    sendPushToMembers([sess.userId],
-      '\u23F1\uFE0F ' + kindLabel + ' ended \u2014 still on duty?',
-      displayName + ' ended at ' + endStr + '. Auto clock-out in ' + AUTO_CLOCKOUT_GRACE_MINS + ' min if no response.',
-      'endact_' + (record.id || record.mtgId || record.eventId || sess.id) + '_' + scheduledEnd.toISOString().slice(0,16)
-    );
-  } catch(e) {}
 }
 
 // HTML escape helper for modal text
@@ -9148,7 +9154,15 @@ function checkUpcomingReminders() {
   // For active clocked-in shift/meeting/event, when scheduled end has
   // passed, surface the full-screen modal (with MM:SS countdown).
   var openSess = _getActiveClockedInSession(uid);
-  if (!openSess) return;
+  if (!openSess) {
+    // Stale modal cleanup: if the user is no longer clocked in (e.g.,
+    // clocked out on another device, admin cleared everyone, or manual
+    // clock-out from the reminder), dismiss any leftover end-of-activity
+    // modal so it doesn't sit there demanding a response.
+    var _staleModal = document.getElementById('_endOfActivityModal');
+    if (_staleModal) _staleModal.remove();
+    return;
+  }
 
   var record = (openSess._synthetic && openSess._record) ? openSess._record : openSess;
 
@@ -9307,10 +9321,62 @@ function acknowledgeClockedInReminder() {
   showToast('✅ Got it — stay safe out there!');
 }
 
+// Smart "Clock Me Out" handler for reminder banners & end-of-activity modal.
+// _getActiveClockedInSession() considers FOUR clock-in types (currentSession +
+// synthetic sessions for shifts, events, meetings). The original implementation
+// only closed state.currentSession via clockOut(), which failed silently with
+// "Not clocked in." when the reminder had surfaced via a synthetic session
+// (e.g., shift clocked in by an officer, or local state desync). Now we route
+// to the correct clock-out function based on the active session's type.
 function clockOutFromReminder() {
-  var el = document.getElementById('clockedInReminderBanner');
-  if (el) { el.style.display='none'; _adjustAppTopPad(); }
-  clockOut();
+  // Dismiss every variant of the reminder UI up front so the user doesn't see
+  // it linger if we have to fall through any branch below.
+  var el  = document.getElementById('clockedInReminderBanner');
+  if (el) { el.style.display='none'; try{_adjustAppTopPad();}catch(e){} }
+  var el2 = document.getElementById('clockReminderTopBanner');
+  if (el2) { el2.style.display='none'; try{_adjustAppTopPad();}catch(e){} }
+  var endModal = document.getElementById('_endOfActivityModal');
+  if (endModal) endModal.remove();
+
+  var uid = state.currentUserId;
+  var openSess = null;
+  try { openSess = _getActiveClockedInSession(uid); } catch(e) {}
+
+  if (!openSess) {
+    // Reminder was stale (already clocked out from elsewhere / another device).
+    // Clear any leftover reminder state on the underlying records and just
+    // confirm to the user that they're clocked out.
+    try {
+      var t = (typeof localDateStr==='function') ? localDateStr() : new Date().toISOString().slice(0,10);
+      (state.staffingShifts||[]).forEach(function(s){
+        if (s.memberId===uid && s.date===t && s._reminderSentAt && !s._reminderAckedAt) {
+          s._reminderSentAt = null; s._pushSent = false;
+        }
+      });
+      save();
+    } catch(e) {}
+    showToast('\u2705 You\u2019re already clocked out.');
+    return;
+  }
+
+  // Route to the correct clock-out function based on session type.
+  if (openSess._synthetic) {
+    if (openSess.shiftId) {
+      try { clockOutMyShift(openSess.shiftId); } catch(e) {}
+    } else if (openSess.eventId) {
+      try { clockOutSpecialEvent(openSess.eventId); } catch(e) {}
+    } else if (openSess.mtgId) {
+      // The attendance record on _record carries the occurrence date.
+      var occDate = (openSess._record && openSess._record.date) || null;
+      try { clockOutMeeting(openSess.mtgId, occDate); } catch(e) {}
+    } else {
+      // Synthetic with no identifier — defensive fallback.
+      if (state.currentSession && !state.currentSession.end) clockOut();
+    }
+  } else {
+    // Real state.currentSession — use the main clockOut path.
+    clockOut();
+  }
 }
 
 function _autoClockOutSession(sess, reason) {
@@ -15848,6 +15914,11 @@ function openPublicStats() {
   window.open(base + '?view=stats', '_blank');
 }
 
+function openPublicTrainingCalendar() {
+  var base = window.location.href.split('?')[0].split('#')[0];
+  window.open(base + '?view=calendar', '_blank');
+}
+
 function checkPublicViewMode() {
   var fullHref = window.location.href;
   var hasParam = (window.location.search.indexOf('view=public') >= 0) ||
@@ -15859,7 +15930,9 @@ function checkPublicViewMode() {
     (window.location.href.indexOf('?view=events') >= 0);
   var isStats = (window.location.search.indexOf('view=stats') >= 0) ||
     (window.location.href.indexOf('?view=stats') >= 0);
-  if (!hasParam && !isStaffing7 && !isEvents && !isStats) return false;
+  var isCalendar = (window.location.search.indexOf('view=calendar') >= 0) ||
+    (window.location.href.indexOf('?view=calendar') >= 0);
+  if (!hasParam && !isStaffing7 && !isEvents && !isStats && !isCalendar) return false;
   document.getElementById('loginOverlay').style.display = 'none';
   document.body.classList.add('public-view');
   var app = document.getElementById('app');
@@ -15867,7 +15940,8 @@ function checkPublicViewMode() {
   app.style.flexDirection = 'column';
   var nav = document.getElementById('bottomNav');
   if (nav) nav.style.display = 'none';
-  var _renderFn = isStats ? renderPublicStats
+  var _renderFn = isCalendar ? renderPublicTrainingCalendar
+                : isStats ? renderPublicStats
                 : isStaffing7 ? renderPublicStaffing7Day
                 : isEvents ? renderPublicEvents
                 : renderPublicView;
@@ -16850,6 +16924,468 @@ function renderPublicView() {
   window._tvClockInterval = setInterval(tickClock, 1000);
   if (window._pubRefreshInterval) clearInterval(window._pubRefreshInterval);
   window._pubRefreshInterval = setInterval(renderPublicView, 180000);
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  CO.13 TRAINING CALENDAR — Dakboard-style firehouse display
+//  URL: ?view=calendar
+//
+//  ── SETUP REQUIRED (see TRAINING_CALENDAR_CONFIG below) ──
+//  1. Get a Google Calendar API key:
+//       https://console.cloud.google.com/apis/credentials
+//     Enable "Google Calendar API", create an API Key, restrict it
+//     to Calendar API only.
+//  2. Make your RBVFC calendar PUBLIC:
+//       Google Calendar > Settings > [calendar] > Access permissions
+//       > "Make available to public" > "See all event details"
+//  3. Copy your Calendar ID (Settings > Integrate calendar) and paste
+//     it into mainCalendarId below.
+//
+//  ── HOW EVENTS GET ROUTED ──
+//  Bottom panels route by the LOCATION field on each Google Calendar
+//  event. Grid coloring uses legendRules (top-to-bottom, first match
+//  wins). The US Holidays calendar is overlaid separately.
+// ═══════════════════════════════════════════════════════════════
+var TRAINING_CALENDAR_CONFIG = {
+  // ── REQUIRED ──
+  apiKey: "YOUR_GOOGLE_CALENDAR_API_KEY_HERE",
+  mainCalendarId: "your-rbvfc-calendar-id@group.calendar.google.com",
+
+  // US Holidays (public Google calendar — already filled in)
+  holidaysCalendarId: "en.usa#holiday@group.v.calendar.google.com",
+
+  // ── LEGEND & GRID COLORING ──
+  // Rules check main-calendar events top-to-bottom; first match wins.
+  // The catch-all (no matcher fields) MUST be last.
+  legendRules: [
+    {
+      label: "Birthdays",
+      color: "#86efac",                          // soft green
+      matchTitle: ["birthday", "bday"],
+      allDayOnly: true
+    },
+    {
+      label: "RBVFC Training Calendar",
+      color: "#5eead4",                          // lighter teal
+      matchLocation: ["county", "rbvfc training center", "ccbc"],
+      matchTitle: []
+    },
+    {
+      label: "Co.13 Training",                   // default catch-all
+      color: "#22d3a3"                           // teal-green
+    }
+  ],
+
+  holidaysLabel: "Holidays in United States",
+  holidaysColor: "#e5e7eb",
+
+  // ── BOTTOM PANEL ROUTING (by LOCATION field) ──
+  panelRules: {
+    basement: { locationContains: ["basement"] },
+    hall:     { locationContains: ["hall"] },
+    company:  { excludeBirthdays: true, excludeLocations: ["basement", "hall"] }
+  },
+
+  // ── HIGHLIGHT OVERRIDES (title-keyword color overrides) ──
+  // Events whose title matches any keyword get the highlight color,
+  // overriding the legend rule color.
+  highlightKeywords: [
+    { match: ["trauma", "peds trauma", "decison tree", "decision tree"], color: "#f59e0b" }
+  ],
+
+  // ── FIRE RESCUE TV ──
+  // YouTube playlist embed URL, or leave blank for the placeholder.
+  // Example: "https://www.youtube.com/embed/videoseries?list=PLxxxx&autoplay=1&mute=1&loop=1"
+  fireRescueTvEmbed: "",
+
+  // ── MISC ──
+  refreshMinutes: 5,
+  lookaheadDays: 60
+};
+
+function renderPublicTrainingCalendar() {
+  var sa = document.getElementById('scrollArea');
+  if (!sa) return;
+
+  // Clear any sibling-renderer intervals
+  if (window._tvClockInterval) { clearInterval(window._tvClockInterval); window._tvClockInterval = null; }
+  if (window._pubRefreshInterval) { clearInterval(window._pubRefreshInterval); window._pubRefreshInterval = null; }
+  if (window._tdcRefreshInterval) { clearInterval(window._tdcRefreshInterval); window._tdcRefreshInterval = null; }
+
+  var CFG = TRAINING_CALENDAR_CONFIG;
+
+  // ── helpers ─────────────────────────────────────────
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function(ch){
+      return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[ch];
+    });
+  }
+  function startOfWeek(d) {
+    var x = new Date(d); x.setHours(0,0,0,0);
+    x.setDate(x.getDate() - x.getDay()); return x;
+  }
+  function addDays(d, n) { var x = new Date(d); x.setDate(x.getDate()+n); return x; }
+  function isSameDay(a, b) {
+    return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+  }
+  function fmtTime(d) {
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+  function fmtDayName(d) { return d.toLocaleDateString('en-US', { weekday: 'short' }); }
+  function fmtMonthLabel(d) { return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
+  function fmtCardDate(d) {
+    return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase();
+  }
+  function fmtCardDay(d) {
+    var day = String(d.getDate()).padStart(2, '0');
+    var month = d.toLocaleDateString('en-US', { month: 'long' });
+    var weekday = d.toLocaleDateString('en-US', { weekday: 'long' });
+    return { day: day, month: month, weekday: weekday };
+  }
+  function parseEventTime(ev) {
+    if (ev.start.dateTime) {
+      return { start: new Date(ev.start.dateTime), end: new Date(ev.end.dateTime), allDay: false };
+    } else {
+      return { start: new Date(ev.start.date + 'T00:00:00'), end: new Date(ev.end.date + 'T00:00:00'), allDay: true };
+    }
+  }
+  function textContainsAny(haystack, needles) {
+    if (!needles || !needles.length) return false;
+    var h = (haystack || '').toLowerCase();
+    return needles.some(function(n){ return h.indexOf(n.toLowerCase()) >= 0; });
+  }
+  function classifyMainEvent(ev) {
+    var allDay = !ev.start.dateTime;
+    var title = ev.summary || '';
+    var loc = ev.location || '';
+    for (var i = 0; i < CFG.legendRules.length; i++) {
+      var rule = CFG.legendRules[i];
+      var hasMatcher = (rule.matchTitle && rule.matchTitle.length) ||
+                       (rule.matchLocation && rule.matchLocation.length) ||
+                       rule.allDayOnly;
+      if (!hasMatcher) return { label: rule.label, color: rule.color };
+      if (rule.allDayOnly && !allDay) continue;
+      if (textContainsAny(title, rule.matchTitle) || textContainsAny(loc, rule.matchLocation)) {
+        return { label: rule.label, color: rule.color };
+      }
+    }
+    return { label: 'Event', color: '#9ca3af' };
+  }
+  function applyHighlight(ev, baseColor) {
+    var title = (ev.summary || '').toLowerCase();
+    for (var i = 0; i < (CFG.highlightKeywords || []).length; i++) {
+      var rule = CFG.highlightKeywords[i];
+      for (var j = 0; j < rule.match.length; j++) {
+        if (title.indexOf(rule.match[j].toLowerCase()) >= 0) return rule.color;
+      }
+    }
+    return baseColor;
+  }
+  function matchesBasement(ev) { return textContainsAny(ev.location, CFG.panelRules.basement.locationContains); }
+  function matchesHall(ev)     { return textContainsAny(ev.location, CFG.panelRules.hall.locationContains); }
+  function matchesCompany(ev) {
+    var rule = CFG.panelRules.company;
+    if (rule.excludeBirthdays && classifyMainEvent(ev).label === 'Birthdays') return false;
+    if (textContainsAny(ev.location, rule.excludeLocations)) return false;
+    return true;
+  }
+  function fetchEvents(calendarId, timeMin, timeMax) {
+    var url = new URL('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calendarId) + '/events');
+    url.searchParams.set('key', CFG.apiKey);
+    url.searchParams.set('singleEvents', 'true');
+    url.searchParams.set('orderBy', 'startTime');
+    url.searchParams.set('timeMin', timeMin.toISOString());
+    url.searchParams.set('timeMax', timeMax.toISOString());
+    url.searchParams.set('maxResults', '250');
+    return fetch(url.toString()).then(function(res){
+      if (!res.ok) {
+        return res.text().then(function(t){ throw new Error('Calendar ' + calendarId + ': ' + res.status + ' ' + t.slice(0,200)); });
+      }
+      return res.json();
+    }).then(function(data){ return data.items || []; });
+  }
+
+  // ── HTML scaffold + scoped styles ───────────────────
+  var h = '';
+  h += '<style id="tdcStyles">';
+  h += ':root { --tdc-bg:#000; --tdc-panel:#2a2d33; --tdc-panel-soft:#3a3d44; --tdc-border:#3a3d44; --tdc-text:#f3f4f6; --tdc-dim:#9ca3af; --tdc-today:#6b7280; --tdc-red:#f87171; --tdc-amber:#fbbf24; }';
+  h += 'body.public-view #scrollArea:has(.tdc-display) { padding:0 !important; }';
+  h += '.tdc-display, .tdc-display * { box-sizing:border-box; }';
+  h += '.tdc-display { font-family:Inter,system-ui,-apple-system,sans-serif; background:var(--tdc-bg); color:var(--tdc-text); height:100vh; width:100vw; padding:1vh 1.5vw; display:grid; grid-template-rows:auto 1fr auto; gap:1vh; overflow:hidden; font-weight:400; }';
+  h += '.tdc-header { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; background:var(--tdc-panel); border-radius:6px; padding:0.8vh 1vw; min-height:4.5vh; }';
+  h += '.tdc-legend { display:flex; align-items:center; gap:1.2vw; font-size:1.4vh; color:var(--tdc-text); flex-wrap:wrap; }';
+  h += '.tdc-legend-title { font-weight:600; margin-right:0.4vw; color:var(--tdc-dim); letter-spacing:0.05em; }';
+  h += '.tdc-legend-item { display:flex; align-items:center; gap:0.4vw; }';
+  h += '.tdc-legend-dot { width:0.9vh; height:0.9vh; border-radius:50%; display:inline-block; }';
+  h += '.tdc-title { font-size:2.6vh; font-weight:400; letter-spacing:0.04em; text-align:center; color:var(--tdc-text); margin:0; }';
+  h += '.tdc-week { display:grid; grid-template-columns:repeat(7, 1fr); border-top:1px solid var(--tdc-border); overflow:hidden; }';
+  h += '.tdc-day { border-right:1px solid var(--tdc-border); padding:0.8vh 0.6vw; display:flex; flex-direction:column; gap:0.4vh; min-width:0; overflow:hidden; }';
+  h += '.tdc-day:last-child { border-right:none; }';
+  h += '.tdc-dayname { font-size:1.4vh; color:var(--tdc-dim); font-weight:400; }';
+  h += '.tdc-daydate { font-size:2.2vh; font-weight:400; color:var(--tdc-text); margin-bottom:0.6vh; display:inline-flex; align-items:center; justify-content:center; min-width:3.2vh; height:3.2vh; padding:0 0.6vh; border-radius:50%; }';
+  h += '.tdc-daydate.today { background:var(--tdc-today); color:#fff; }';
+  h += '.tdc-daydate.month-label { border-radius:0; padding:0; min-width:0; font-size:1.8vh; }';
+  h += '.tdc-events { display:flex; flex-direction:column; gap:0.4vh; overflow:hidden; flex:1; min-height:0; }';
+  h += '.tdc-event { font-size:1.35vh; line-height:1.3; word-break:break-word; }';
+  h += '.tdc-event .t { font-weight:500; margin-right:0.3em; }';
+  h += '.tdc-bottom { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:1vw; border-top:2px solid #fff; padding-top:1.2vh; min-height:35vh; }';
+  h += '.tdc-panel { display:flex; flex-direction:column; gap:1vh; min-height:0; }';
+  h += '.tdc-panel-header { background:var(--tdc-panel); border-radius:6px; padding:1vh 1vw; font-size:2.2vh; font-weight:400; text-align:center; color:var(--tdc-text); }';
+  h += '.tdc-panel-body { flex:1; display:flex; flex-direction:column; gap:1vh; min-height:0; overflow:hidden; }';
+  h += '.tdc-card { background:var(--tdc-panel); border-radius:6px; padding:1.2vh 1vw; display:flex; flex-direction:column; gap:0.6vh; }';
+  h += '.tdc-card-meta { display:flex; justify-content:space-between; align-items:baseline; font-size:1.3vh; color:var(--tdc-text); font-weight:500; letter-spacing:0.04em; }';
+  h += '.tdc-card-meta .date { text-transform:uppercase; }';
+  h += '.tdc-card-meta .time { font-size:2.2vh; font-weight:300; }';
+  h += '.tdc-card-title { font-size:2.6vh; font-weight:400; line-height:1.15; color:var(--tdc-text); }';
+  h += '.tdc-time-block { display:grid; grid-template-columns:auto 1fr; gap:0.8vw; background:var(--tdc-panel); border-radius:6px; padding:1vh 1vw 1vh 0; overflow:hidden; position:relative; }';
+  h += '.tdc-time-block::before { content:""; position:absolute; left:0; top:0; bottom:0; width:0.4vw; background:var(--tdc-red); }';
+  h += '.tdc-time-block-time { padding-left:1vw; font-size:1.6vh; font-weight:500; color:var(--tdc-text); display:flex; align-items:center; white-space:nowrap; }';
+  h += '.tdc-time-block-title { font-size:1.7vh; font-weight:400; color:var(--tdc-text); line-height:1.25; align-self:center; word-break:break-word; }';
+  h += '.tdc-day-banner { display:flex; align-items:baseline; gap:0.6vw; }';
+  h += '.tdc-day-banner-num { font-size:3vh; font-weight:300; color:var(--tdc-text); line-height:1; }';
+  h += '.tdc-day-banner-meta { font-size:1.6vh; color:var(--tdc-dim); }';
+  h += '.tdc-hall-card { background:var(--tdc-panel); border-radius:6px; padding:1.4vh 1.2vw 1.4vh 1.4vw; flex:1; display:flex; flex-direction:column; gap:0.8vh; position:relative; overflow:hidden; }';
+  h += '.tdc-hall-card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:0.4vw; background:var(--tdc-amber); }';
+  h += '.tdc-hall-card .tdc-card-meta { padding-left:0.6vw; }';
+  h += '.tdc-hall-card .tdc-card-title { padding-left:0.6vw; font-size:3.2vh; line-height:1.1; }';
+  h += '.tdc-hall-card .tdc-hall-note { padding-left:0.6vw; font-size:1.6vh; color:var(--tdc-text); margin-top:auto; }';
+  h += '.tdc-ftv { background:var(--tdc-panel-soft); border-radius:6px; flex:1; display:flex; align-items:center; justify-content:center; color:var(--tdc-dim); font-size:1.8vh; position:relative; overflow:hidden; }';
+  h += '.tdc-ftv iframe { width:100%; height:100%; border:0; display:block; }';
+  h += '.tdc-ftv-logo { position:absolute; top:-2vh; left:50%; transform:translateX(-50%); z-index:2; }';
+  h += '.tdc-ftv-logo-text { font-family:Inter,sans-serif; font-weight:700; background:#d32f2f; color:#fff; padding:0.6vh 1.2vw; border-radius:0.8vh; box-shadow:0 2px 8px rgba(0,0,0,0.5); letter-spacing:0.05em; font-size:2vh; border:2px solid #fbbf24; }';
+  h += '.tdc-ftv-logo-text .tv-suffix { background:#fbbf24; color:#d32f2f; padding:0 0.4vw; border-radius:0.3vh; margin-left:0.3vw; }';
+  h += '.tdc-loading { color:var(--tdc-dim); font-style:italic; font-size:1.3vh; padding:0.4vh 0; }';
+  h += '.tdc-error { color:var(--tdc-red); font-size:1.3vh; padding:0.4vh 0; }';
+  h += '.tdc-nav { position:absolute; top:1vh; right:1.5vw; display:flex; gap:6px; z-index:5; }';
+  h += '.tdc-nav a { font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#555; text-decoration:none; border:1px solid #2A2A2A; border-radius:4px; padding:3px 7px; }';
+  h += '</style>';
+
+  var pubBase = window.location.href.split('?')[0].split('#')[0];
+
+  h += '<div class="tdc-display">';
+  h += '  <div class="tdc-nav">'
+     + '    <a href="' + pubBase + '?view=public">TV Board</a>'
+     + '    <a href="' + pubBase + '?view=staffing7">7-Day</a>'
+     + '    <a href="' + pubBase + '?view=events">Events</a>'
+     + '    <a href="' + pubBase + '?view=stats">Stats</a>'
+     + '  </div>';
+  h += '  <header class="tdc-header">';
+  h += '    <div class="tdc-legend" id="tdcLegend"><span class="tdc-legend-title">LEGEND</span></div>';
+  h += '    <h1 class="tdc-title">Co.13 TRAINING CALENDAR</h1>';
+  h += '    <div></div>';
+  h += '  </header>';
+  h += '  <div class="tdc-week" id="tdcWeek"></div>';
+  h += '  <div class="tdc-bottom">';
+  h += '    <div class="tdc-panel">';
+  h += '      <div class="tdc-panel-header">WHAT\'S NEXT COMPANY</div>';
+  h += '      <div class="tdc-panel-body" id="tdcNext"><div class="tdc-loading">Loading…</div></div>';
+  h += '    </div>';
+  h += '    <div class="tdc-panel">';
+  h += '      <div class="tdc-ftv-logo"><span class="tdc-ftv-logo-text">FIRE RESCUE<span class="tv-suffix">TV</span></span></div>';
+  h += '      <div class="tdc-ftv" id="tdcFtv"><div>ⓘ Video content will display here.</div></div>';
+  h += '    </div>';
+  h += '    <div class="tdc-panel">';
+  h += '      <div class="tdc-panel-header">Basement Schedule</div>';
+  h += '      <div class="tdc-panel-body" id="tdcBasement"><div class="tdc-loading">Loading…</div></div>';
+  h += '    </div>';
+  h += '    <div class="tdc-panel">';
+  h += '      <div class="tdc-panel-header">Hall Schedule</div>';
+  h += '      <div class="tdc-panel-body" id="tdcHall"><div class="tdc-loading">Loading…</div></div>';
+  h += '    </div>';
+  h += '  </div>';
+  h += '</div>';
+
+  sa.innerHTML = h;
+  document.title = 'Co.13 Training Calendar';
+
+  // ── render legend ───────────────────────────────────
+  (function renderLegend() {
+    var legend = document.getElementById('tdcLegend');
+    var seen = {};
+    var items = [];
+    CFG.legendRules.forEach(function(r){
+      if (seen[r.label]) return;
+      seen[r.label] = 1;
+      items.push({ label: r.label, color: r.color });
+    });
+    items.push({ label: CFG.holidaysLabel, color: CFG.holidaysColor });
+    legend.insertAdjacentHTML('beforeend',
+      items.map(function(i){
+        return '<span class="tdc-legend-item"><span class="tdc-legend-dot" style="background:'+i.color+'"></span>'+escapeHtml(i.label)+'</span>';
+      }).join('')
+    );
+  })();
+
+  // ── Fire Rescue TV ──────────────────────────────────
+  if (CFG.fireRescueTvEmbed) {
+    document.getElementById('tdcFtv').innerHTML =
+      '<iframe src="'+CFG.fireRescueTvEmbed+'" allow="autoplay; encrypted-media" allowfullscreen></iframe>';
+  }
+
+  // ── config guard ────────────────────────────────────
+  if (CFG.apiKey === 'YOUR_GOOGLE_CALENDAR_API_KEY_HERE' ||
+      CFG.mainCalendarId.indexOf('your-') === 0) {
+    var msg = '⚠ Set TRAINING_CALENDAR_CONFIG.apiKey and .mainCalendarId in the portal source.';
+    ['tdcNext','tdcBasement','tdcHall'].forEach(function(id){
+      document.getElementById(id).innerHTML = '<div class="tdc-error">'+msg+'</div>';
+    });
+    document.getElementById('tdcWeek').innerHTML =
+      '<div style="grid-column:1/-1;padding:2vh;color:#f87171;font-size:1.6vh;">'+msg+'</div>';
+    return;
+  }
+
+  // ── render week grid ────────────────────────────────
+  function renderWeek(mainEvents, holidayEvents) {
+    var grid = document.getElementById('tdcWeek');
+    if (!grid) return;
+    grid.innerHTML = '';
+    var today = new Date();
+    var weekStart = startOfWeek(today);
+    for (var i = 0; i < 7; i++) {
+      var day = addDays(weekStart, i);
+      var col = document.createElement('div');
+      col.className = 'tdc-day';
+      var dayName = document.createElement('div');
+      dayName.className = 'tdc-dayname';
+      dayName.textContent = fmtDayName(day);
+      col.appendChild(dayName);
+      var dayDate = document.createElement('div');
+      var showMonth = day.getDate() === 1 || i === 0;
+      if (showMonth) {
+        dayDate.className = 'tdc-daydate month-label';
+        dayDate.textContent = fmtMonthLabel(day);
+      } else {
+        dayDate.className = 'tdc-daydate' + (isSameDay(day, today) ? ' today' : '');
+        dayDate.textContent = day.getDate();
+      }
+      col.appendChild(dayDate);
+      var eventsDiv = document.createElement('div');
+      eventsDiv.className = 'tdc-events';
+      var dayEvents = [];
+      mainEvents.forEach(function(ev){
+        var t = parseEventTime(ev);
+        if (isSameDay(t.start, day)) {
+          var cls = classifyMainEvent(ev);
+          dayEvents.push({ ev: ev, time: t, color: applyHighlight(ev, cls.color) });
+        }
+      });
+      holidayEvents.forEach(function(ev){
+        var t = parseEventTime(ev);
+        if (isSameDay(t.start, day)) {
+          dayEvents.push({ ev: ev, time: t, color: CFG.holidaysColor });
+        }
+      });
+      dayEvents.sort(function(a,b){ return a.time.start - b.time.start; });
+      dayEvents.forEach(function(item){
+        var div = document.createElement('div');
+        div.className = 'tdc-event';
+        div.style.color = item.color;
+        var timeStr = item.time.allDay ? '' : '<span class="t">'+fmtTime(item.time.start)+'</span>';
+        div.innerHTML = timeStr + escapeHtml(item.ev.summary || '(no title)');
+        eventsDiv.appendChild(div);
+      });
+      col.appendChild(eventsDiv);
+      grid.appendChild(col);
+    }
+  }
+
+  function renderWhatsNext(mainEvents) {
+    var c = document.getElementById('tdcNext'); if (!c) return; c.innerHTML = '';
+    var now = new Date();
+    var upcoming = mainEvents.filter(matchesCompany)
+      .map(function(ev){ return { ev: ev, time: parseEventTime(ev) }; })
+      .filter(function(x){ return x.time.start >= now; })
+      .sort(function(a,b){ return a.time.start - b.time.start; })
+      .slice(0, 2);
+    if (!upcoming.length) { c.innerHTML = '<div class="tdc-loading">No upcoming events</div>'; return; }
+    upcoming.forEach(function(item){
+      c.insertAdjacentHTML('beforeend',
+        '<div class="tdc-card">'
+        + '<div class="tdc-card-meta">'
+        +   '<span class="date">'+fmtCardDate(item.time.start)+'</span>'
+        +   '<span class="time">'+(item.time.allDay ? '' : fmtTime(item.time.start))+'</span>'
+        + '</div>'
+        + '<div class="tdc-card-title">'+escapeHtml(item.ev.summary || '(no title)')+'</div>'
+        + '</div>'
+      );
+    });
+  }
+
+  function renderBasement(mainEvents) {
+    var c = document.getElementById('tdcBasement'); if (!c) return; c.innerHTML = '';
+    var now = new Date();
+    var upcoming = mainEvents.filter(matchesBasement)
+      .map(function(ev){ return { ev: ev, time: parseEventTime(ev) }; })
+      .filter(function(x){ return x.time.start >= now; })
+      .sort(function(a,b){ return a.time.start - b.time.start; })
+      .slice(0, 2);
+    if (!upcoming.length) { c.innerHTML = '<div class="tdc-loading">No upcoming events</div>'; return; }
+    upcoming.forEach(function(item){
+      var p = fmtCardDay(item.time.start);
+      c.insertAdjacentHTML('beforeend',
+        '<div class="tdc-day-banner">'
+        +   '<div class="tdc-day-banner-num">'+p.day+'</div>'
+        +   '<div class="tdc-day-banner-meta">'+p.month+', '+p.weekday+'</div>'
+        + '</div>'
+        + '<div class="tdc-time-block">'
+        +   '<div class="tdc-time-block-time">'+(item.time.allDay ? 'All Day' : fmtTime(item.time.start))+'</div>'
+        +   '<div class="tdc-time-block-title">'+escapeHtml(item.ev.summary || '(no title)')+'</div>'
+        + '</div>'
+      );
+    });
+  }
+
+  function renderHall(mainEvents) {
+    var c = document.getElementById('tdcHall'); if (!c) return; c.innerHTML = '';
+    var now = new Date();
+    var sorted = mainEvents.filter(matchesHall)
+      .map(function(ev){ return { ev: ev, time: parseEventTime(ev) }; })
+      .filter(function(x){ return x.time.start >= now; })
+      .sort(function(a,b){ return a.time.start - b.time.start; });
+    var next = sorted[0];
+    if (!next) { c.innerHTML = '<div class="tdc-loading">No upcoming events</div>'; return; }
+    var timeRange = next.time.allDay ? 'All Day'
+                  : fmtTime(next.time.start) + ' &nbsp;&mdash;&nbsp; ' + fmtTime(next.time.end);
+    var note = '';
+    if (next.ev.description) {
+      var plain = next.ev.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      note = plain.length > 80 ? plain.slice(0, 80) + '…' : plain;
+    }
+    c.insertAdjacentHTML('beforeend',
+      '<div class="tdc-hall-card">'
+      + '<div class="tdc-card-meta">'
+      +   '<span class="date">'+fmtCardDate(next.time.start)+'</span>'
+      +   '<span class="time">'+timeRange+'</span>'
+      + '</div>'
+      + '<div class="tdc-card-title">'+escapeHtml(next.ev.summary || '(no title)')+'</div>'
+      + (note ? '<div class="tdc-hall-note">'+escapeHtml(note)+'</div>' : '')
+      + '</div>'
+    );
+  }
+
+  // ── fetch & render ──────────────────────────────────
+  function loadAll() {
+    var weekStart = startOfWeek(new Date());
+    var timeMin = weekStart;
+    var timeMax = addDays(weekStart, 7 + CFG.lookaheadDays);
+    var mainP = fetchEvents(CFG.mainCalendarId, timeMin, timeMax);
+    var holP  = fetchEvents(CFG.holidaysCalendarId, timeMin, timeMax).catch(function(){ return []; });
+    Promise.all([mainP, holP]).then(function(results){
+      var mainEvents = results[0];
+      var holidayEvents = results[1];
+      renderWeek(mainEvents, holidayEvents);
+      renderWhatsNext(mainEvents);
+      renderBasement(mainEvents);
+      renderHall(mainEvents);
+    }).catch(function(err){
+      console.error(err);
+      var w = document.getElementById('tdcWeek');
+      if (w) w.innerHTML = '<div style="grid-column:1/-1;padding:2vh;color:#f87171;font-size:1.6vh;">⚠ '+escapeHtml(err.message)+'</div>';
+    });
+  }
+  loadAll();
+  window._tdcRefreshInterval = setInterval(loadAll, (CFG.refreshMinutes || 5) * 60 * 1000);
 }
 
 
@@ -20408,6 +20944,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         <button class="btn btn-sm btn-secondary" style="width:100%;margin-top:6px;" onclick="openPublicStaffing7Day()">&#128197; 7-Day Staffing</button>
         <button class="btn btn-sm btn-secondary" style="width:100%;margin-top:6px;" onclick="openPublicEvents()">&#127881; Events &amp; Calendar</button>
         <button class="btn btn-sm btn-secondary" style="width:100%;margin-top:6px;" onclick="openPublicStats()">&#128202; Statistics Dashboard</button>
+        <button class="btn btn-sm btn-secondary" style="width:100%;margin-top:6px;" onclick="openPublicTrainingCalendar()">&#128197; Training Calendar (TV)</button>
       </div>
 
     
