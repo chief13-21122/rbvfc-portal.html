@@ -693,6 +693,19 @@ function initFirebase(onReady) {
           try { fbApp = firebase.app(); } catch(e) { fbApp = firebase.initializeApp(cfg); }
           fbAuth = firebase.auth(fbApp);
           fbDb   = firebase.firestore(fbApp);
+          // Configure Firestore transport BEFORE any other operation. With
+          // experimentalAutoDetectLongPolling, the SDK starts with WebChannel
+          // (fast streaming) and auto-falls-back to plain HTTP long-polling if
+          // it detects the stream is being broken — which is what produces the
+          // "WebChannelConnection RPC 'Listen' stream ... transport errored"
+          // warnings on captive portals, HTTPS-inspection proxies, station
+          // Wi-Fi, and some VPNs. settings() throws if called twice (after a
+          // retry), which is harmless, so we swallow that error.
+          try {
+            fbDb.settings({ experimentalAutoDetectLongPolling: true, merge: true });
+          } catch(settingsErr) {
+            // Already set in a previous initFirebase() pass — non-fatal.
+          }
           // Enable offline persistence
           fbDb.enablePersistence({synchronizeTabs: true}).catch(function(e){
             if (e.code !== 'failed-precondition' && e.code !== 'unimplemented')
