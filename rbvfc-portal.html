@@ -514,6 +514,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 #losapActHistBody,
 #erLogBody,
 #staffingAlertBody,
+#apparatusStaffingBody,
 #alertHistoryBody,
 #customGroupsBody,
 #unitToggleBody,
@@ -538,6 +539,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 #losapActHistChev,
 #erLogChev,
 #staffingAlertChevron,
+#apparatusStaffingChev,
 #alertHistoryChevron,
 #customGroupsChevron,
 #unitToggleChevron,
@@ -1446,7 +1448,7 @@ var state = {
   losapActivities: [],       // personal LOSAP log entries
   emergencyResponses: [],    // all emergency responses (entered by dispatcher/officer)
   trainingSubmissions: [],   // training awaiting approval
-  scheduledDrills: [],        // [{id,date,time,drillCode,drillName,hours,members,location,notes,createdBy,createdAt,reportId}]
+  scheduledDrills: [],        // [{id,date,time,drillCode,drillName,hours,members,confirmedMembers,location,notes,createdBy,createdAt,reportId}]
   losapPending: [],          // losap activities submitted for another member, awaiting approval
   losapNotifications: [],    // unread point-award notifications per member
   memberActivities: {},
@@ -1466,7 +1468,7 @@ var state = {
   staffingEnabled: null,      // null = all units enabled by default
   staffingAlerts: [],        // [{id,msg,sentBy,sentAt,group,targetMembers,clears:[{memberId,clearedAt}]}]
   alertGroups: [],           // [{id,name,memberIds}] — custom groups
-  specialEvents: [],         // [{id,title,date,time,location,desc,signups:[{memberId,signedUpAt,clockedIn,clockedInAt}]}]
+  specialEvents: [],         // [{id,title,date,time,location,desc,members:[uid],signups:[{memberId,signedUpAt,clockedIn,clockedInAt}]}]
   unitDisplayFilter: {},     // {unitId: bool} — which units member wants visible
   positionRankOverrides: {},  // admin overrides: {posName: [rank1, rank2, ...]}
   cadPendingCalls: [],         // calls fetched from Gmail sync, pending logging
@@ -5627,6 +5629,14 @@ function renderScheduledDrills() {
       return mbr ? mbr.last+', '+mbr.first : mid;
     }).join(' • ');
 
+    var confirmedCount = (d.confirmedMembers||[]).length;
+    var invitedCount   = (d.members||[]).length;
+    var rsvpBadge = invitedCount
+      ? '<div style="font-size:11px;color:'+(confirmedCount?'#27AE60':'#666')+';margin-top:3px;">'
+        + '\u2705 ' + confirmedCount + ' of ' + invitedCount + ' invited member' + (invitedCount===1?'':'s') + ' confirmed'
+        + '</div>'
+      : '';
+
     var actions = '';
     if (isOfficer) {
       if (!hasReport) {
@@ -5649,6 +5659,7 @@ function renderScheduledDrills() {
       +     (d.hours?'<div style="font-size:12px;color:#666;">⏱ '+d.hours+'h planned &nbsp;·&nbsp; 🏅 '+Math.max(1,Math.floor(d.hours/2))+' pt'+(Math.max(1,Math.floor(d.hours/2))!==1?'s':'')+'</div>':'')
       +     (d.notes?'<div style="font-size:12px;color:#666;margin-top:3px;font-style:italic;">'+d.notes+'</div>':'')
       +     (memberNames?'<div style="font-size:11px;color:#555;margin-top:5px;">Expected: '+memberNames+'</div>':'')
+      +     rsvpBadge
       +   '</div>'
       +   '<span style="font-size:10px;font-weight:700;color:'+statusColor+';padding:3px 8px;border-radius:4px;background:'+statusColor+'22;white-space:nowrap;">'+statusLabel+'</span>'
       + '</div>'
@@ -6440,9 +6451,12 @@ function getLinkedPartners(unitId, inList) {
 }
 
 // Rank hierarchy (higher index = higher rank)
+// PFF (Probationary Firefighter) sits just above Probationary; FF/EMT-P sits
+// just above FFII (firefighter w/ paramedic cert); PFF/AT sits just below AT.
 var RANK_ORDER = [
-  'Administrative Member','Auxiliary Member','Probationary','EMT-P',
-  'FFI','FFII','FADO','Tiller','Mate I','Mate II','MVO','BRS','AT','ATDA',
+  'Administrative Member','Auxiliary Member','Probationary','PFF','EMT-P',
+  'FFI','FFII','FF/EMT-P','FADO','Tiller','Mate I','Mate II','MVO','BRS',
+  'PFF/AT','AT','ATDA',
   'Lieutenant','Captain','Assistant Chief','Fire Chief'
 ];
 // User-facing rank list (matches the Add/Edit Member "Rank" dropdown).
@@ -6920,6 +6934,62 @@ function mtgClearAllMembers() {
   });
 }
 
+// ── Special Event invitation list (member checkboxes on the create/edit form) ──
+function populateSeMemberList(preSelected) {
+  var container = document.getElementById('seMemberList');
+  if (!container) return;
+  var members = (state.roster||[]).filter(function(m){ return m.active !== false; })
+    .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); });
+  var usePreSelected = Array.isArray(preSelected);
+  container.innerHTML = '';
+  members.forEach(function(m) {
+    // Default for new event: nobody invited (open event). When editing, restore from ev.members.
+    var checked = usePreSelected ? preSelected.indexOf(m.id) >= 0 : false;
+    var lbl = document.createElement('label');
+    lbl.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;margin-bottom:3px;transition:background .15s;background:'
+      + (checked ? 'rgba(26,188,156,0.08)' : 'transparent')
+      + ';border:1px solid ' + (checked ? 'rgba(26,188,156,0.3)' : 'transparent') + ';';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.value = m.id; cb.className = 'se-member-cb';
+    cb.checked = checked;
+    cb.style.cssText = 'accent-color:#1ABC9C;width:14px;height:14px;flex-shrink:0;';
+    cb.addEventListener('change', function() {
+      if (cb.checked) { lbl.style.background='rgba(26,188,156,0.08)'; lbl.style.borderColor='rgba(26,188,156,0.3)'; }
+      else            { lbl.style.background='transparent'; lbl.style.borderColor='transparent'; }
+    });
+    var nameSpan = document.createElement('span');
+    nameSpan.style.cssText = 'font-size:13px;color:#D0D0D0;';
+    nameSpan.textContent = m.last + ', ' + m.first;
+    var rankSpan = document.createElement('span');
+    rankSpan.style.cssText = 'font-size:10px;color:#555;margin-left:auto;';
+    rankSpan.textContent = m.rank || m.appRole || '';
+    lbl.appendChild(cb); lbl.appendChild(nameSpan); lbl.appendChild(rankSpan);
+    container.appendChild(lbl);
+  });
+}
+
+function seSelectAllMembers() {
+  document.querySelectorAll('#seMemberList .se-member-cb').forEach(function(cb) {
+    cb.checked = true;
+    var lbl = cb.closest('label');
+    if (lbl) { lbl.style.background='rgba(26,188,156,0.08)'; lbl.style.borderColor='rgba(26,188,156,0.3)'; }
+  });
+}
+
+function seClearAllMembers() {
+  document.querySelectorAll('#seMemberList .se-member-cb').forEach(function(cb) {
+    cb.checked = false;
+    var lbl = cb.closest('label');
+    if (lbl) { lbl.style.background='transparent'; lbl.style.borderColor='transparent'; }
+  });
+}
+
+function _readSeInvitedMembers() {
+  var ids = [];
+  document.querySelectorAll('#seMemberList .se-member-cb:checked').forEach(function(cb){ ids.push(cb.value); });
+  return ids;
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 //  MANUAL ACTIVITY ENTRY (Officers & Admin)
@@ -7080,9 +7150,6 @@ function initStaffingTab() {
 
   var oc = document.getElementById('staffingOfficerControls');
   if (oc) oc.style.display = isOfficer ? 'block' : 'none';
-  // CLOCK OUT EVERYONE — admin-only, even inside officer controls
-  var _coeBtn = document.getElementById('clockOutEveryoneBtn');
-  if (_coeBtn) _coeBtn.style.display = isAdmin ? 'block' : 'none';
   var ac = document.getElementById('staffingAlertCard');
   if (ac) ac.style.display = 'block'; // All members see active alerts
   var mc = document.getElementById('staffingMonthCard');
@@ -10395,8 +10462,22 @@ function renderMyShifts() {
     .sort(function(a,b){ return (a.date||'').localeCompare(b.date||'') || (a.shiftStart||'0700').localeCompare(b.shiftStart||'0700'); });
 
   var myEvents = (state.specialEvents||[]).filter(function(ev){
-    return ev.date >= today && (ev.signups||[]).some(function(s){ return s.memberId===uid; });
+    if (ev.date < today) return false;
+    var isInvited  = (ev.members||[]).indexOf(uid) >= 0;
+    var isSignedUp = (ev.signups||[]).some(function(s){ return s.memberId===uid; });
+    return isInvited || isSignedUp;
   }).sort(function(a,b){ return (a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||''); });
+
+  // Scheduled drills the user is either invited to or has RSVP'd "I'll be there" for.
+  var myDrillItems = [];
+  (state.scheduledDrills||[]).forEach(function(d){
+    if (!d.date || d.date < today) return;
+    if (d.reportId) return; // already happened / has a report — no point showing as upcoming
+    var isInvited   = (d.members||[]).indexOf(uid) >= 0;
+    var isConfirmed = (d.confirmedMembers||[]).indexOf(uid) >= 0;
+    if (!isInvited && !isConfirmed) return;
+    myDrillItems.push({ type:'scheduledDrill', date:d.date, data:d, confirmed:isConfirmed });
+  });
 
   // Upcoming enrolled training class sessions
   var myClasses = (state.trainingClasses||[]).filter(function(c){
@@ -10416,21 +10497,27 @@ function renderMyShifts() {
     _seenCD[k] = true; return true;
   }).slice(0, 14);
 
-  if (!myShifts.length && !myEvents.length && !myClassItems.length) {
+  if (!myShifts.length && !myEvents.length && !myClassItems.length && !myDrillItems.length) {
     container.innerHTML = '<p style="color:#666;font-size:13px;text-align:center;padding:20px;">No upcoming shifts or events. Sign up on the board below.</p>';
     return;
   }
 
   var myMtgItems = [];
   (state.meetings||[]).forEach(function(mtg) {
+    // Meetings show in MY SHIFTS & EVENTS when either (a) the user is on the
+    // invitation list (mtg.members) — and gets an "I'll be there" button — or
+    // (b) they've already signed up. Open meetings with no invitation list
+    // remain browse-and-sign-up only via the Events & Meetings sheet.
+    var hasInviteList = !!(mtg.members && mtg.members.length);
+    var isInvited     = hasInviteList && mtg.members.indexOf(uid) >= 0;
     var nOcc = nextMeetingOccurrence(mtg);
     if (!nOcc) return;
     var att = (state.meetingAttendance||[]).find(function(a){ return a.mtgId===mtg.id&&a.date===nOcc&&a.memberId===uid; });
-    if (att || mtg.recurrence) myMtgItems.push({ type:'meeting', date:nOcc, data:mtg, att:att||null });
+    if (att || isInvited) myMtgItems.push({ type:'meeting', date:nOcc, data:mtg, att:att });
   });
   var allItems = myShifts.map(function(s){ return {type:'shift', date:s.date, data:s}; })
     .concat(myEvents.map(function(ev){ return {type:'event', date:ev.date, data:ev}; }))
-    .concat(myClassItems).concat(myMtgItems)
+    .concat(myClassItems).concat(myMtgItems).concat(myDrillItems)
     .sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
 
   var _SHOW_LIMIT = 4;
@@ -10532,6 +10619,10 @@ function renderMyShifts() {
       } else if (signup) {
         // Cancel signup (only when not clocked in, mirrors the × button on shift cards)
         html += '<button class="btn btn-danger btn-sm" title="Cancel signup" onclick="cancelSpecialEventSignup(this)" data-ev="'+ev.id+'">&#10005;</button>';
+      } else {
+        // Invited but not yet signed up — offer "I'll be there"
+        html += '<button class="btn btn-sm btn-success" style="font-weight:700;" '
+             + 'onclick="confirmEventAttendance(\''+ev.id+'\')">\u270B I\'ll be there</button>';
       }
       html += '</div></div>';
 
@@ -10606,11 +10697,45 @@ function renderMyShifts() {
           :_can
             ?'<button onclick="clockInMeeting(\''+_m.id+'\',\''+_od+'\')" class="btn btn-sm btn-primary">\u23F0 Clock In</button>'
             :!_a
-              ?'<button onclick="signUpForMeeting(\''+_m.id+'\',\''+_od+'\')" class="btn btn-sm btn-success">\u270B Sign Up</button>'
+              ?'<button onclick="signUpForMeeting(\''+_m.id+'\',\''+_od+'\')" class="btn btn-sm btn-success">\u270B I\'ll be there</button>'
               :'<span style="font-size:11px;color:#27AE60;">\u2713 Going</span>'
                +'<button onclick="cancelMeetingSignup(\''+_m.id+'\',\''+_od+'\')" class="btn btn-sm btn-secondary" style="font-size:10px;">Cancel</button>'
           )
         +'</div></div>';
+    } else if (item.type === 'scheduledDrill') {
+      // Invited scheduled drill — show with "I'll be there" / "Going" state
+      var _d = item.data;
+      var _confirmed = !!item.confirmed;
+      var _drillAccent = (typeof ACT_COLORS !== 'undefined' && ACT_COLORS.drill) ? ACT_COLORS.drill : '#E67E22';
+      var _drillTime = '';
+      if (_d.time) {
+        var _dp = _d.time.split(':');
+        var _dh = parseInt(_dp[0]);
+        _drillTime = (_dh%12||_dh===0?(_dh%12||12):_dh)+':'+(_dp[1]||'00')+' '+(_dh>=12?'PM':'AM');
+      }
+      var _drillLabel = (_d.drillCode ? _d.drillCode+' — ' : '') + (_d.drillName || 'Drill');
+      html += '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#181818;'
+        + 'border:1px solid '+(_confirmed?'#27AE60':_drillAccent)+';border-left:4px solid '+(_confirmed?'#27AE60':_drillAccent)+';border-radius:10px;margin-bottom:8px;flex-wrap:wrap;">';
+      html += dateBox;
+      html += '<div style="flex:1;min-width:0;">'
+        + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+        +   '<span style="font-size:10px;background:rgba(230,126,34,0.12);color:'+_drillAccent+';border:1px solid rgba(230,126,34,0.5);border-radius:4px;padding:1px 5px;flex-shrink:0;">DRILL</span>'
+        +   '<span style="font-weight:700;font-size:14px;color:#F0F0F0;">'+_drillLabel+'</span>'
+        + '</div>'
+        + '<div style="font-size:12px;color:#888;margin-top:2px;">'
+        +   (_drillTime ? _drillTime + ' &nbsp;&middot;&nbsp; ' : '')
+        +   (_d.location || '')
+        +   (_d.hours ? ' &nbsp;&middot;&nbsp; ' + _d.hours + 'h planned' : '')
+        + '</div>'
+        + (_d.notes ? '<div style="font-size:11px;color:#666;margin-top:3px;font-style:italic;">'+_d.notes+'</div>' : '')
+        + (_confirmed ? '<div style="font-size:11px;color:#27AE60;margin-top:3px;font-weight:700;">\u2713 You\'re on the roster</div>' : '')
+        + '</div>'
+        + '<div style="display:flex;flex-direction:column;gap:6px;justify-content:center;">'
+        + (_confirmed
+            ? '<button onclick="cancelScheduledDrillAttendance(\''+_d.id+'\')" class="btn btn-sm btn-secondary" style="font-size:10px;">Cancel</button>'
+            : '<button onclick="confirmScheduledDrillAttendance(\''+_d.id+'\')" class="btn btn-sm btn-success" style="font-weight:700;">\u270B I\'ll be there</button>')
+        + '</div>'
+        + '</div>';
     }
   });
   if (allItems.length > _SHOW_LIMIT) {
@@ -11910,6 +12035,79 @@ function cancelMeetingSignup(mtgId, occurrenceDate) {
   showToast('Meeting signup cancelled.');
 }
 
+// ── "I'll be there" handlers (invited-member RSVP from MY SHIFTS & EVENTS) ──
+
+// Special event RSVP. If the event has positions, redirect to the events board
+// (position selection is required there). Otherwise add a no-position signup.
+function confirmEventAttendance(evId) {
+  var uid = state.currentUserId;
+  var ev = (state.specialEvents||[]).find(function(e){ return e.id===evId; });
+  if (!ev) return;
+  if (!ev.signups) ev.signups = [];
+  if (ev.signups.some(function(s){ return s.memberId===uid; })) {
+    showToast('Already signed up.');
+    try { renderMyShifts(); } catch(e){}
+    return;
+  }
+  if (ev.positions && ev.positions.length) {
+    // Positioned event — need a position pick. Open the Special Events tab and scroll to it.
+    var memberCard = document.getElementById('specialEventsMemberCard');
+    if (memberCard && memberCard.style.display !== 'none') {
+      memberCard.scrollIntoView({ behavior:'smooth', block:'start' });
+    } else {
+      try { switchTab('staff'); } catch(_e){}
+      setTimeout(function(){
+        var c = document.getElementById('specialEventsMemberCard');
+        if (c) c.scrollIntoView({ behavior:'smooth', block:'start' });
+      }, 200);
+    }
+    showToast('\u2139\ufe0f Pick a position to sign up for "'+ev.title+'".');
+    return;
+  }
+  // No positions — direct signup
+  ev.signups.push({ memberId:uid, position:'', signedUpAt:new Date().toISOString(),
+    clockedIn:false, clockedInAt:null, clockedOutAt:null });
+  save();
+  try { renderBothSpecialEventViews(); } catch(_e){}
+  try { renderMyShifts(); } catch(_e){}
+  try { sendCalendarInvite(uid, eventToCalDetails(ev)); } catch(_e){}
+  try { gcalPushEvent(ev).then(function(id){
+    if(id){ var s=(ev.signups||[]).find(function(x){return x.memberId===uid;}); if(s){s._gcalEventId=id; save();} }
+  }).catch(function(){}); } catch(_e){}
+  showToast('\u2705 You\'re on the roster for "'+ev.title+'"!');
+}
+
+// Scheduled drill RSVP. Adds the user to d.confirmedMembers.
+function confirmScheduledDrillAttendance(drillId) {
+  var uid = state.currentUserId;
+  var d = (state.scheduledDrills||[]).find(function(x){ return x.id===drillId; });
+  if (!d) return;
+  if (!Array.isArray(d.confirmedMembers)) d.confirmedMembers = [];
+  if (d.confirmedMembers.indexOf(uid) >= 0) {
+    showToast('Already confirmed.');
+    try { renderMyShifts(); } catch(e){}
+    return;
+  }
+  d.confirmedMembers.push(uid);
+  d.updatedAt = new Date().toISOString();
+  save();
+  try { renderScheduledDrills(); } catch(_e){}
+  try { renderMyShifts(); } catch(_e){}
+  showToast('\u2705 You\'re on the roster for "'+(d.drillName||'drill')+'"!');
+}
+
+function cancelScheduledDrillAttendance(drillId) {
+  var uid = state.currentUserId;
+  var d = (state.scheduledDrills||[]).find(function(x){ return x.id===drillId; });
+  if (!d || !Array.isArray(d.confirmedMembers)) return;
+  d.confirmedMembers = d.confirmedMembers.filter(function(id){ return id !== uid; });
+  d.updatedAt = new Date().toISOString();
+  save();
+  try { renderScheduledDrills(); } catch(_e){}
+  try { renderMyShifts(); } catch(_e){}
+  showToast('Drill RSVP cancelled.');
+}
+
 function clockInMeeting(mtgId, occurrenceDate) {
   var uid = state.currentUserId;
   var mtg = (state.meetings||[]).find(function(m){ return m.id===mtgId; });
@@ -12282,6 +12480,8 @@ function cancelEditSpecialEvent() {
   ['seTitle','seStartDate','seEndDate','seStartTime','seEndTime','seLocation','seDesc','seTotalNeeded'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
   var posContainer = document.getElementById('sePositionsContainer');
   if (posContainer) posContainer.innerHTML = sePositionRow();
+  // Reset invitee checkboxes (rebuild as "nobody invited" default)
+  populateSeMemberList([]);
   var submitBtn = document.getElementById('seSubmitBtn');
   if (submitBtn) submitBtn.textContent = '✓ Create Event';
   var cancelBtn = document.getElementById('seCancelEditBtn');
@@ -12315,6 +12515,8 @@ function openEditSpecialEvent(evId) {
       posContainer.innerHTML = sePositionRow();
     }
   }
+  // Restore the invitee checkboxes from ev.members (empty array = nobody pre-checked)
+  populateSeMemberList(ev.members || []);
   var submitBtn = document.getElementById('seSubmitBtn');
   if (submitBtn) submitBtn.textContent = '✓ Save Changes';
   var cancelBtn = document.getElementById('seCancelEditBtn');
@@ -12330,6 +12532,9 @@ function renderSpecialEventAdmin() {
   if (formEl) {
     var posC = document.getElementById('sePositionsContainer');
     if (posC && !posC.children.length) posC.innerHTML = sePositionRow();
+    // Populate invitee checkboxes — only if not already built (preserves selections during render-on-save)
+    var seML = document.getElementById('seMemberList');
+    if (seML && !seML.children.length) populateSeMemberList([]);
     // Populate Created By display
     var uid = state.currentUserId;
     var me = (state.roster||[]).find(function(m){ return m.id===uid; });
@@ -12513,6 +12718,7 @@ function saveSpecialEvent() {
       existing.time=startTime; existing.location=location; existing.desc=desc; existing.description=desc; existing.totalNeeded=totalNeeded;
       existing.positions=positions; existing.updatedAt=new Date().toISOString();
       existing.updatedBy=_eiId;
+      existing.members = _readSeInvitedMembers();
       if (_icId) { existing.inCharge=_icId; existing.inChargeName=_icMbr?_icMbr.last+', '+_icMbr.first:''; }
       save();
       cancelEditSpecialEvent();
@@ -12536,6 +12742,7 @@ function saveSpecialEvent() {
     desc: desc,
     positions: positions,
     totalNeeded: totalNeeded,
+    members: _readSeInvitedMembers(),
     signups: [],
     inCharge: ((document.getElementById('seInCharge')||{}).value||''),
     inChargeName: (function(){ var _ic=((document.getElementById('seInCharge')||{}).value||''); var _m=(state.roster||[]).find(function(m){return m.id===_ic;}); return _m?_m.last+', '+_m.first:''; })(),
@@ -12551,6 +12758,7 @@ function saveSpecialEvent() {
   ['seTitle','seStartDate','seEndDate','seStartTime','seEndTime','seLocation','seDesc','seTotalNeeded'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
   var posC = document.getElementById('sePositionsContainer');
   if (posC) posC.innerHTML = sePositionRow();
+  populateSeMemberList([]); // clear invitee checkboxes after create
   renderBothSpecialEventViews();
   showToast('✅ Event created!'); showSubmitConfirmation('\"'+title+'\" has been added to the schedule.', '🎟️');
 }
@@ -19346,6 +19554,14 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
                 <div style="font-size:10px;color:#555;margin-bottom:6px;">Each position can have a slot count.</div>
                 <div id="sePositionsContainer"></div>
               </div>
+              <div style="margin-bottom:12px;">
+                <label style="font-size:11px;color:#888;display:block;margin-bottom:6px;">Invite Members <span style="color:#555;">(checked members will see this in their MY SHIFTS &amp; EVENTS with an "I'll be there" button)</span></label>
+                <div style="display:flex;gap:8px;margin-bottom:8px;">
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="seSelectAllMembers()">Select All</button>
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="seClearAllMembers()">Clear All</button>
+                </div>
+                <div id="seMemberList" style="max-height:180px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#141414;"></div>
+              </div>
               <input type="hidden" id="seEditId" value="">
               <div style="display:flex;gap:8px;">
                 <button class="btn btn-primary" id="seSubmitBtn" onclick="saveSpecialEvent()" style="flex:1;">&#10003; Create Event</button>
@@ -20002,9 +20218,10 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
       <!-- ═══ APPARATUS STAFFING SECTION ═══ -->
       <div class="card" id="apparatusStaffingSection" style="padding:0;overflow:visible;margin-bottom:0;border-radius:12px;">
-        <div class="card-header" style="background:#1A0000;border-radius:12px 12px 0 0;margin:0;">
+        <div class="card-header" onclick="toggleStaffCard('apparatusStaffingBody','apparatusStaffingChev')" style="cursor:pointer;user-select:none;background:#1A0000;border-radius:12px 12px 0 0;margin:0;">
           <div class="icon">🚒</div>
           <h2 style="font-family:'Barlow Condensed',sans-serif;letter-spacing:2px;text-transform:uppercase;">Apparatus Staffing</h2>
+          <span id="apparatusStaffingChev" style="margin-left:auto;color:#C8102E;font-size:15px;display:inline-block;transition:transform .2s;">▼</span>
         </div>
         <div id="apparatusStaffingBody">
       <div class="card">
@@ -20025,7 +20242,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
       <!-- Officer Controls (officers/admin only) -->
       <div id="staffingOfficerControls" style="display:none;">
-        <button class="btn btn-danger btn-full" id="clockOutEveryoneBtn" onclick="adminClockOutAll()" style="margin-bottom:10px;background:#2A0000;border-color:#C8102E;color:#C8102E;font-weight:700;letter-spacing:1px;font-family:'Barlow Condensed',sans-serif;font-size:15px;display:none;">
+        <button class="btn btn-danger btn-full" onclick="adminClockOutAll()" style="margin-bottom:10px;background:#2A0000;border-color:#C8102E;color:#C8102E;font-weight:700;letter-spacing:1px;font-family:'Barlow Condensed',sans-serif;font-size:15px;">
           🔴 CLOCK OUT EVERYONE
         </button>
 
