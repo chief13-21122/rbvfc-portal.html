@@ -632,36 +632,62 @@ function initFirebase(onReady) {
   if (!_fbConfigured()) { console.log("[RBVFC] Firebase not configured."); return; }
 
   // Dynamically load Firebase compat SDK if not yet loaded.
-  // Retries with exponential backoff (4 attempts, ~0.5s/1s/2s/4s spacing)
-  // to survive transient Wi-Fi blips. Surfaces a clear console error and
-  // sets window._fbSdkLoadFailed = true if all retries are exhausted.
-  function _loadSdk(url, cb, attempt) {
+  // Strategy: 2 attempts per CDN with exponential backoff, then fall over to
+  // the next CDN mirror. Three mirrors total (gstatic → jsdelivr → unpkg), so
+  // worst case is ~6 script-load attempts spread over ~10 seconds before we
+  // give up. This survives transient Wi-Fi blips AND ad-blocker rules that
+  // target Google CDNs but rarely cover the npm-package mirrors.
+  function _loadSdk(url, onSuccess, onFinalFail, attempt) {
     attempt = attempt || 1;
-    var MAX_ATTEMPTS = 4;
+    var MAX_ATTEMPTS = 2;
     var s = document.createElement('script');
     s.src = url;
-    s.onload = cb;
+    s.onload = onSuccess;
     s.onerror = function(){
       try { if (s.parentNode) s.parentNode.removeChild(s); } catch(e) {}
       if (attempt < MAX_ATTEMPTS) {
-        var delay = Math.min(8000, Math.pow(2, attempt - 1) * 500);
+        var delay = Math.min(4000, Math.pow(2, attempt - 1) * 500);
         console.warn('[RBVFC] Failed to load ' + url + ' (attempt ' + attempt + '/' + MAX_ATTEMPTS + '), retrying in ' + delay + 'ms');
-        setTimeout(function(){ _loadSdk(url, cb, attempt + 1); }, delay);
+        setTimeout(function(){ _loadSdk(url, onSuccess, onFinalFail, attempt + 1); }, delay);
       } else {
-        console.error('[RBVFC] Failed to load ' + url + ' after ' + MAX_ATTEMPTS + ' attempts. Firebase features unavailable. Check network connectivity to gstatic.com (ad blockers, firewalls, or Wi-Fi issues).');
-        window._fbSdkLoadFailed = true;
-        window._fbSdkLoadFailedUrl = url;
+        console.warn('[RBVFC] Exhausted attempts for ' + url);
+        if (onFinalFail) onFinalFail();
       }
     };
     document.head.appendChild(s);
   }
 
-  // Sequential SDK load: App → Auth → Firestore → anonymous sign-in → sync
-  var CDN = 'https://www.gstatic.com/firebasejs/9.23.0/';
-  _loadSdk(CDN + 'firebase-app-compat.js', function() {
-    _loadSdk(CDN + 'firebase-auth-compat.js', function() {
-      _loadSdk(CDN + 'firebase-messaging-compat.js', function() {
-      _loadSdk(CDN + 'firebase-firestore-compat.js', function() {
+  // Firebase JS SDK 9.23.0 CDN mirrors, tried in order.
+  // gstatic is the canonical/fastest; jsdelivr and unpkg are fallbacks for
+  // users behind ad blockers or firewalls that block Google CDNs.
+  var _FB_CDNS = [
+    'https://www.gstatic.com/firebasejs/9.23.0/',
+    'https://cdn.jsdelivr.net/npm/firebase@9.23.0/',
+    'https://unpkg.com/firebase@9.23.0/'
+  ];
+
+  function _loadFirebaseFile(filename, onSuccess, cdnIdx) {
+    cdnIdx = cdnIdx || 0;
+    if (cdnIdx >= _FB_CDNS.length) {
+      console.error('[RBVFC] Failed to load ' + filename + ' from all ' + _FB_CDNS.length + ' CDN mirrors. Firebase features unavailable — sync, push notifications, and cloud auth will not work. Common causes: ad blocker (gstatic.com is frequently blocked), station Wi-Fi firewall, service-worker cache, or DNS issue.');
+      window._fbSdkLoadFailed = true;
+      window._fbSdkLoadFailedFile = filename;
+      try { _showFbSdkFailureBanner(filename); } catch(e) { console.warn('[RBVFC] Could not show failure banner:', e); }
+      return;
+    }
+    _loadSdk(_FB_CDNS[cdnIdx] + filename, onSuccess, function onFinalFail() {
+      if (cdnIdx + 1 < _FB_CDNS.length) {
+        console.warn('[RBVFC] CDN ' + _FB_CDNS[cdnIdx] + ' unreachable for ' + filename + ' — falling over to ' + _FB_CDNS[cdnIdx + 1]);
+      }
+      _loadFirebaseFile(filename, onSuccess, cdnIdx + 1);
+    });
+  }
+
+  // Sequential SDK load: App → Auth → Messaging → Firestore → anonymous sign-in → sync
+  _loadFirebaseFile('firebase-app-compat.js', function() {
+    _loadFirebaseFile('firebase-auth-compat.js', function() {
+      _loadFirebaseFile('firebase-messaging-compat.js', function() {
+      _loadFirebaseFile('firebase-firestore-compat.js', function() {
         try {
           var cfg = getFirebaseConfig();
           try { fbApp = firebase.app(); } catch(e) { fbApp = firebase.initializeApp(cfg); }
@@ -692,6 +718,52 @@ function initFirebase(onReady) {
       }); // messaging
     });  // auth
   }); // app
+}
+
+// In-app warning banner shown when the Firebase SDK can't be loaded from any
+// CDN. Non-blocking — the portal continues working from local cache. Includes
+// a Retry button that clears the failure flag and re-runs initFirebase().
+function _showFbSdkFailureBanner(filename) {
+  if (document.getElementById('_fbSdkFailureBanner')) return; // already shown
+  var b = document.createElement('div');
+  b.id = '_fbSdkFailureBanner';
+  b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9998;background:#5a3a00;color:#FFE082;padding:10px 44px 10px 14px;font-size:12px;line-height:1.4;text-align:center;border-bottom:1px solid #8a5a00;box-shadow:0 2px 8px rgba(0,0,0,.4);box-sizing:border-box;';
+  b.innerHTML =
+    '\u26a0 <strong>Cloud sync unavailable</strong> \u2014 the Firebase SDK could not be loaded. ' +
+    'The portal is running from local cache; new sessions and edits will not sync until reconnected. ' +
+    'Common causes: ad blocker, station Wi-Fi firewall, service-worker cache. ' +
+    '<button id="_fbSdkRetryBtn" style="background:#FFE082;color:#3a2400;border:none;border-radius:4px;padding:3px 11px;margin-left:8px;font-size:11px;font-weight:700;cursor:pointer;">Retry</button>' +
+    '<button id="_fbSdkDismissBtn" style="position:absolute;top:6px;right:10px;background:none;border:none;color:#FFE082;font-size:20px;font-weight:700;cursor:pointer;line-height:1;padding:0 4px;" aria-label="Dismiss">\u00d7</button>';
+  document.body.appendChild(b);
+  // Nudge the app's top padding down so the banner doesn't cover the header.
+  try {
+    var app = document.getElementById('app');
+    if (app) app.style.paddingTop = (parseInt(app.style.paddingTop || 0, 10) + 44) + 'px';
+  } catch(e) {}
+  document.getElementById('_fbSdkRetryBtn').onclick = function() {
+    window._fbSdkLoadFailed = false;
+    var n = document.getElementById('_fbSdkFailureBanner');
+    if (n && n.parentNode) n.parentNode.removeChild(n);
+    try {
+      var app = document.getElementById('app');
+      if (app && app.style.paddingTop) {
+        var cur = parseInt(app.style.paddingTop, 10);
+        if (cur >= 44) app.style.paddingTop = (cur - 44) + 'px';
+      }
+    } catch(e) {}
+    try { initFirebase(); } catch(e) { console.error('[RBVFC] Retry failed:', e); }
+  };
+  document.getElementById('_fbSdkDismissBtn').onclick = function() {
+    var n = document.getElementById('_fbSdkFailureBanner');
+    if (n && n.parentNode) n.parentNode.removeChild(n);
+    try {
+      var app = document.getElementById('app');
+      if (app && app.style.paddingTop) {
+        var cur = parseInt(app.style.paddingTop, 10);
+        if (cur >= 44) app.style.paddingTop = (cur - 44) + 'px';
+      }
+    } catch(e) {}
+  };
 }
 
 // ── Company document path ─────────────────────────────────
