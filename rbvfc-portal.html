@@ -10671,11 +10671,7 @@ function renderMyShifts() {
     _seenCD[k] = true; return true;
   }).slice(0, 14);
 
-  if (!myShifts.length && !myEvents.length && !myClassItems.length && !myDrillItems.length) {
-    container.innerHTML = '<p style="color:#666;font-size:13px;text-align:center;padding:20px;">No upcoming shifts or events. Sign up on the board below.</p>';
-    return;
-  }
-
+  // Build meeting items first so the empty-state check below covers them.
   var myMtgItems = [];
   (state.meetings||[]).forEach(function(mtg) {
     // Meetings show in MY SHIFTS & EVENTS when either (a) the user is on the
@@ -10695,6 +10691,12 @@ function renderMyShifts() {
     var att = (state.meetingAttendance||[]).find(function(a){ return a.mtgId===mtg.id&&a.date===nOcc&&a.memberId===uid; });
     if (att || isInvited || isCreator || isInCharge) myMtgItems.push({type:'meeting', date:nOcc, data:mtg, att:att });
   });
+
+  if (!myShifts.length && !myEvents.length && !myClassItems.length && !myDrillItems.length && !myMtgItems.length) {
+    container.innerHTML = '<p style="color:#666;font-size:13px;text-align:center;padding:20px;">No upcoming shifts or events. Sign up on the board below.</p>';
+    return;
+  }
+
   var allItems = myShifts.map(function(s){ return {type:'shift', date:s.date, data:s}; })
     .concat(myEvents.map(function(ev){ return {type:'event', date:ev.date, data:ev}; }))
     .concat(myClassItems).concat(myMtgItems).concat(myDrillItems)
@@ -10703,6 +10705,7 @@ function renderMyShifts() {
   var _SHOW_LIMIT = 4;
   var html = '';
   allItems.forEach(function(item, _itemIdx) {
+    try {
     if (_itemIdx === _SHOW_LIMIT && allItems.length > _SHOW_LIMIT) {
       html += '<div id="myShiftsOverflow" style="display:none;">';
     }
@@ -10885,7 +10888,12 @@ function renderMyShifts() {
       var _me=new Date(_ms.getTime()+(_m.duration||60)*60000);
       var _ci=_a&&_a.clockedInAt&&!_a.clockedOutAt;
       var _can=_nw>=new Date(_ms.getTime()-3600000)&&_nw<=_me&&_od===today&&!_alreadyOnDuty;
-      var _tp=(function(){ var p=_m.time.split(':'); var h=parseInt(p[0]); return (h%12||12)+':'+p[1]+' '+(h>=12?'PM':'AM'); })();
+      var _tp=(function(){
+        if (!_m.time) return '';
+        var p=String(_m.time).split(':'); var h=parseInt(p[0]);
+        if (isNaN(h)) return '';
+        return (h%12||12)+':'+(p[1]||'00')+' '+(h>=12?'PM':'AM');
+      })();
       var _rl={weekly:'Weekly',biweekly:'Every 2 wks',monthly:'Monthly'};
       html += '<div style="background:#181818;border:2px solid '+(_ci?'#27AE60':'#2A1400')+';border-left:4px solid '+(_ci?'#27AE60':'#F5A623')+';border-radius:12px;padding:14px;display:flex;gap:12px;align-items:stretch;">'
         +'<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:44px;background:#111;border-radius:8px;padding:8px 4px;">'
@@ -10968,6 +10976,11 @@ function renderMyShifts() {
             : '<button onclick="confirmScheduledDrillAttendance(\''+_d.id+'\')" class="btn btn-sm btn-success" style="font-weight:700;">\u270B Count me in!</button>')
         + '</div>'
         + '</div>';
+    }
+    } catch (_renderErr) {
+      // One bad item shouldn't blank the whole dashboard. Log it and continue
+      // so the rest of the list still renders.
+      console.error('[RBVFC] renderMyShifts: skipping bad item', item, _renderErr);
     }
   });
   if (allItems.length > _SHOW_LIMIT) {
