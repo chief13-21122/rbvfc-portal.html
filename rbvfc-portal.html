@@ -9438,6 +9438,22 @@ function checkUpcomingReminders() {
   }
 
   if (schedEnd && now >= schedEnd) {
+    // Only surface the modal within a reasonable window after the scheduled
+    // end — if the activity ended hours or days ago and the user is still
+    // showing as clocked in, that's stale data, not a live prompt. The
+    // clearStaleClockedInFlags() sweep (run on every load + every poll tick)
+    // auto-closes such records at the scheduled end, so we just suppress
+    // the modal here and let cleanup handle it.
+    var msSinceEnd = now - schedEnd;
+    var MAX_MODAL_AGE_MS = 30 * 60 * 1000; // 30 minutes
+    if (msSinceEnd > MAX_MODAL_AGE_MS) {
+      // Trigger cleanup explicitly so this clears on this very tick
+      try { clearStaleClockedInFlags(); } catch(e){}
+      // Also clear any leftover modal DOM in case one is already up
+      var _leftover = document.getElementById('_endOfActivityModal');
+      if (_leftover) _leftover.remove();
+      return;
+    }
     _showEndOfActivityModal(openSess, record, displayName, kindLabel, schedEnd);
   }
 }
@@ -9787,6 +9803,60 @@ function clearStaleClockedInFlags() {
       s.status = 'completed'; hadStale = true;
     }
   });
+
+  // ── Stale SPECIAL EVENT signups ─────────────────────────────────────────
+  // A signup with clockedIn=true and no clockedOutAt that's >2 hours past
+  // its scheduled end is treated as forgotten. Close it AT the scheduled end
+  // so LOSAP credit is correct, and so the End-of-Activity modal doesn't
+  // pop up on other members who later log in on a shared device.
+  var STALE_GRACE_MS = 2 * 3600 * 1000;
+  var nowMs = Date.now();
+  (state.specialEvents||[]).forEach(function(ev) {
+    (ev.signups||[]).forEach(function(sg) {
+      if (!sg.clockedIn || sg.clockedOutAt) return;
+      var win = (typeof _eventScheduleWindow === 'function') ? _eventScheduleWindow(ev) : null;
+      if (!win || !win.end) {
+        // Couldn't resolve scheduled end — fall back to date-based check
+        if (ev.date && ev.date < today) {
+          sg.clockedOutAt = ev.date + 'T23:59:59.000Z';
+          sg.clockedIn = false;
+          sg._autoClosedReason = 'Stale event signup auto-cleanup (no schedule resolvable)';
+          hadStale = true;
+        }
+        return;
+      }
+      if (nowMs > win.end.getTime() + STALE_GRACE_MS) {
+        sg.clockedOutAt = win.end.toISOString();
+        sg.clockedIn = false;
+        sg._autoClosedReason = 'Stale event signup auto-cleanup (>2h past scheduled end)';
+        hadStale = true;
+      }
+    });
+  });
+
+  // ── Stale MEETING attendance records ───────────────────────────────────
+  // Same logic for meeting clock-ins.
+  (state.meetingAttendance||[]).forEach(function(att) {
+    if (!att.clockedInAt || att.clockedOutAt) return;
+    var mtg = (state.meetings||[]).find(function(m){ return m.id === att.mtgId; });
+    if (!mtg) return;
+    var mtgDate = att.date || mtg.date;
+    var winM = (typeof _meetingScheduleWindow === 'function') ? _meetingScheduleWindow(mtg, mtgDate) : null;
+    if (!winM || !winM.end) {
+      if (mtgDate && mtgDate < today) {
+        att.clockedOutAt = mtgDate + 'T23:59:59.000Z';
+        att._autoClosedReason = 'Stale meeting attendance auto-cleanup (no schedule resolvable)';
+        hadStale = true;
+      }
+      return;
+    }
+    if (nowMs > winM.end.getTime() + STALE_GRACE_MS) {
+      att.clockedOutAt = winM.end.toISOString();
+      att._autoClosedReason = 'Stale meeting attendance auto-cleanup (>2h past scheduled end)';
+      hadStale = true;
+    }
+  });
+
   // Also close open sessions older than 24 hours (prevents false clock-in warnings)
   var cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   (state.sessions||[]).forEach(function(s) {
