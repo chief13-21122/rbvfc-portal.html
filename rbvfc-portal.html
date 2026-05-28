@@ -10610,6 +10610,65 @@ function renderMyClassesToday() {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────
+// DIAGNOSTIC: invoke from browser console as  _diagMyShifts()
+// to see exactly which meetings/drills/events are present in state
+// and whether they pass the MY SHIFTS & EVENTS filter for the
+// current user. Reports each item's id, title, date, invite list
+// membership, and which rule (if any) excluded it.
+// ─────────────────────────────────────────────────────────────────
+window._diagMyShifts = function() {
+  var uid = state.currentUserId;
+  var today = localDateStr();
+  var rpt = { user: uid, today: today, meetings: [], drills: [], events: [] };
+
+  (state.meetings || []).forEach(function(mtg) {
+    var hasInviteList = !!(mtg.members && mtg.members.length);
+    var nOcc = nextMeetingOccurrence(mtg);
+    rpt.meetings.push({
+      id: mtg.id, title: mtg.title, date: mtg.date,
+      hasInviteList: hasInviteList,
+      isInvited: hasInviteList && mtg.members.indexOf(uid) >= 0,
+      isCreator: mtg.createdBy === uid,
+      isInCharge: mtg.inCharge === uid,
+      declined: (mtg.declined||[]).indexOf(uid) >= 0,
+      nextOccurrence: nOcc,
+      hasRecurrence: !!(mtg.recurrence && mtg.recurrence.freq)
+    });
+  });
+
+  (state.scheduledDrills || []).forEach(function(d) {
+    rpt.drills.push({
+      id: d.id, name: d.drillName, code: d.drillCode, date: d.date,
+      hasReportId: !!d.reportId, reportId: d.reportId,
+      isConfirmed: (d.confirmedMembers||[]).indexOf(uid) >= 0,
+      isPast: d.date < today
+    });
+  });
+
+  (state.specialEvents || []).forEach(function(ev) {
+    rpt.events.push({
+      id: ev.id, title: ev.title, date: ev.date,
+      isInvited: (ev.members||[]).indexOf(uid) >= 0,
+      isSignedUp: (ev.signups||[]).some(function(s){return s.memberId===uid;}),
+      isCreator: ev.createdBy === uid,
+      isInCharge: ev.inCharge === uid,
+      declined: (ev.declined||[]).indexOf(uid) >= 0,
+      isPast: ev.date < today
+    });
+  });
+
+  console.log('[RBVFC] === MY SHIFTS & EVENTS DIAGNOSTIC ===');
+  console.log('Current user:', uid, 'Today:', today);
+  console.log('Total meetings in state:', rpt.meetings.length);
+  console.table(rpt.meetings);
+  console.log('Total scheduled drills in state:', rpt.drills.length);
+  console.table(rpt.drills);
+  console.log('Total special events in state:', rpt.events.length);
+  console.table(rpt.events);
+  return rpt;
+};
+
 function renderMyShifts() {
   var container = document.getElementById('myShiftsContainer');
   var clockContainer = document.getElementById('clockTabMyShiftsContainer');
@@ -10646,12 +10705,29 @@ function renderMyShifts() {
   // Drills are open training opportunities; anyone in the company should be able to
   // RSVP themselves via "Count me in!" even if they weren't on the original list.
   var myDrillItems = [];
+  var _diagDrillSkipped = []; // for diagnostics in console
   (state.scheduledDrills||[]).forEach(function(d){
-    if (!d.date || d.date < today) return;
-    if (d.reportId) return; // already happened / has a report — no point showing as upcoming
+    if (!d.date) {
+      _diagDrillSkipped.push({id:d.id, name:d.drillName, reason:'no date'});
+      return;
+    }
+    if (d.date < today) {
+      _diagDrillSkipped.push({id:d.id, name:d.drillName, reason:'past date', date:d.date});
+      return;
+    }
+    // Only hide drills that have a report AND are in the past. A scheduled drill
+    // with a draft/auto-created report attached but still in the future should
+    // remain visible so members can RSVP.
+    if (d.reportId && d.date < today) {
+      _diagDrillSkipped.push({id:d.id, name:d.drillName, reason:'past + has report', date:d.date});
+      return;
+    }
     var isConfirmed = (d.confirmedMembers||[]).indexOf(uid) >= 0;
     myDrillItems.push({ type:'scheduledDrill', date:d.date, data:d, confirmed:isConfirmed });
   });
+  if (_diagDrillSkipped.length) {
+    console.log('[RBVFC] renderMyShifts: skipped '+_diagDrillSkipped.length+' drill(s):', _diagDrillSkipped);
+  }
 
   // Upcoming enrolled training class sessions
   var myClasses = (state.trainingClasses||[]).filter(function(c){
@@ -10673,24 +10749,39 @@ function renderMyShifts() {
 
   // Build meeting items first so the empty-state check below covers them.
   var myMtgItems = [];
+  var _diagMtgSkipped = []; // for diagnostics in console
   (state.meetings||[]).forEach(function(mtg) {
-    // Meetings show in MY SHIFTS & EVENTS when either (a) the user is on the
-    // invitation list (mtg.members) — and gets an "I'll be there" button — or
-    // (b) they've already signed up, OR (c) they created the meeting, OR
-    // (d) they are the Member In Charge. Open meetings with no invitation
-    // list and no organizer-link remain browse-and-sign-up only via the
-    // Events & Meetings sheet.
-    // Hide meetings the user explicitly declined.
-    if ((mtg.declined||[]).indexOf(uid) >= 0) return;
+    // Meetings show in MY SHIFTS & EVENTS when ANY of the following hold:
+    //   (a) they were invited (mtg.members includes them), OR
+    //   (b) they've already signed up (state.meetingAttendance), OR
+    //   (c) they created the meeting, OR
+    //   (d) they are the Member In Charge, OR
+    //   (e) the meeting is OPEN (no invite list) — same default as drills.
+    // Members who explicitly declined are always hidden.
+    if ((mtg.declined||[]).indexOf(uid) >= 0) {
+      _diagMtgSkipped.push({id:mtg.id, title:mtg.title, reason:'declined'});
+      return;
+    }
     var hasInviteList = !!(mtg.members && mtg.members.length);
     var isInvited     = hasInviteList && mtg.members.indexOf(uid) >= 0;
     var isCreator     = mtg.createdBy === uid;
     var isInCharge    = mtg.inCharge === uid;
+    var isOpen        = !hasInviteList; // empty invite list = open to all
     var nOcc = nextMeetingOccurrence(mtg);
-    if (!nOcc) return;
+    if (!nOcc) {
+      _diagMtgSkipped.push({id:mtg.id, title:mtg.title, reason:'no upcoming occurrence', date:mtg.date});
+      return;
+    }
     var att = (state.meetingAttendance||[]).find(function(a){ return a.mtgId===mtg.id&&a.date===nOcc&&a.memberId===uid; });
-    if (att || isInvited || isCreator || isInCharge) myMtgItems.push({type:'meeting', date:nOcc, data:mtg, att:att });
+    if (att || isInvited || isCreator || isInCharge || isOpen) {
+      myMtgItems.push({type:'meeting', date:nOcc, data:mtg, att:att });
+    } else {
+      _diagMtgSkipped.push({id:mtg.id, title:mtg.title, reason:'not invited & not open'});
+    }
   });
+  if (_diagMtgSkipped.length) {
+    console.log('[RBVFC] renderMyShifts: skipped '+_diagMtgSkipped.length+' meeting(s):', _diagMtgSkipped);
+  }
 
   if (!myShifts.length && !myEvents.length && !myClassItems.length && !myDrillItems.length && !myMtgItems.length) {
     container.innerHTML = '<p style="color:#666;font-size:13px;text-align:center;padding:20px;">No upcoming shifts or events. Sign up on the board below.</p>';
