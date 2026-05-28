@@ -10470,14 +10470,14 @@ function renderMyShifts() {
     return isInvited || isSignedUp || isCreator || isInCharge;
   }).sort(function(a,b){ return (a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||''); });
 
-  // Scheduled drills the user is either invited to or has RSVP'd "I'll be there" for.
+  // Scheduled drills — show every upcoming drill to every member, not only invitees.
+  // Drills are open training opportunities; anyone in the company should be able to
+  // RSVP themselves via "Count me in!" even if they weren't on the original list.
   var myDrillItems = [];
   (state.scheduledDrills||[]).forEach(function(d){
     if (!d.date || d.date < today) return;
     if (d.reportId) return; // already happened / has a report — no point showing as upcoming
-    var isInvited   = (d.members||[]).indexOf(uid) >= 0;
     var isConfirmed = (d.confirmedMembers||[]).indexOf(uid) >= 0;
-    if (!isInvited && !isConfirmed) return;
     myDrillItems.push({ type:'scheduledDrill', date:d.date, data:d, confirmed:isConfirmed });
   });
 
@@ -10713,7 +10713,7 @@ function renderMyShifts() {
           )
         +'</div></div>';
     } else if (item.type === 'scheduledDrill') {
-      // Invited scheduled drill — show with "I'll be there" / "Going" state
+      // Invited or open scheduled drill — show with "Count me in!" or "Going" state.
       var _d = item.data;
       var _confirmed = !!item.confirmed;
       var _drillAccent = (typeof ACT_COLORS !== 'undefined' && ACT_COLORS.drill) ? ACT_COLORS.drill : '#E67E22';
@@ -10724,6 +10724,23 @@ function renderMyShifts() {
         _drillTime = (_dh%12||_dh===0?(_dh%12||12):_dh)+':'+(_dp[1]||'00')+' '+(_dh>=12?'PM':'AM');
       }
       var _drillLabel = (_d.drillCode ? _d.drillCode+' — ' : '') + (_d.drillName || 'Drill');
+      // Build a compact confirmed-attendee preview so members can see who's coming
+      // before they RSVP themselves. Shows first 3 surnames + "+N more" if longer.
+      var _drillConfirmedHtml = (function(){
+        var _cm = _d.confirmedMembers || [];
+        if (!_cm.length) {
+          return '<div style="font-size:11px;color:#888;margin-top:3px;">\uD83D\uDC65 No one confirmed yet \u2014 be the first!</div>';
+        }
+        var _names = _cm.slice(0, 3).map(function(_mid){
+          var _mbr = (state.roster||[]).find(function(_m){ return _m.id===_mid; });
+          return _mbr ? _mbr.last : '?';
+        });
+        var _extra = _cm.length > 3 ? ' +' + (_cm.length - 3) + ' more' : '';
+        return '<div style="font-size:11px;margin-top:3px;">'
+          + '<span style="color:'+_drillAccent+';font-weight:700;">\uD83D\uDC65 ' + _cm.length + ' confirmed:</span> '
+          + '<span style="color:#AAA;">' + _names.join(', ') + _extra + '</span>'
+          + '</div>';
+      })();
       html += '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#181818;'
         + 'border:1px solid '+(_confirmed?'#27AE60':_drillAccent)+';border-left:4px solid '+(_confirmed?'#27AE60':_drillAccent)+';border-radius:10px;margin-bottom:8px;flex-wrap:wrap;">';
       html += dateBox;
@@ -10738,12 +10755,13 @@ function renderMyShifts() {
         +   (_d.hours ? ' &nbsp;&middot;&nbsp; ' + _d.hours + 'h planned' : '')
         + '</div>'
         + (_d.notes ? '<div style="font-size:11px;color:#666;margin-top:3px;font-style:italic;">'+_d.notes+'</div>' : '')
+        + _drillConfirmedHtml
         + (_confirmed ? '<div style="font-size:11px;color:#27AE60;margin-top:3px;font-weight:700;">\u2713 You\'re on the roster</div>' : '')
         + '</div>'
         + '<div style="display:flex;flex-direction:column;gap:6px;justify-content:center;">'
         + (_confirmed
             ? '<button onclick="cancelScheduledDrillAttendance(\''+_d.id+'\')" class="btn btn-sm btn-secondary" style="font-size:10px;">Cancel</button>'
-            : '<button onclick="confirmScheduledDrillAttendance(\''+_d.id+'\')" class="btn btn-sm btn-success" style="font-weight:700;">\u270B I\'ll be there</button>')
+            : '<button onclick="confirmScheduledDrillAttendance(\''+_d.id+'\')" class="btn btn-sm btn-success" style="font-weight:700;">\u270B Count me in!</button>')
         + '</div>'
         + '</div>';
     }
