@@ -10563,6 +10563,8 @@ function renderMyShifts() {
 
   var myEvents = (state.specialEvents||[]).filter(function(ev){
     if (ev.date < today) return false;
+    // Hide events the user explicitly declined
+    if ((ev.declined||[]).indexOf(uid) >= 0) return false;
     var isInvited  = (ev.members||[]).indexOf(uid) >= 0;
     var isSignedUp = (ev.signups||[]).some(function(s){ return s.memberId===uid; });
     var isCreator  = ev.createdBy === uid;
@@ -10612,6 +10614,8 @@ function renderMyShifts() {
     // (d) they are the Member In Charge. Open meetings with no invitation
     // list and no organizer-link remain browse-and-sign-up only via the
     // Events & Meetings sheet.
+    // Hide meetings the user explicitly declined.
+    if ((mtg.declined||[]).indexOf(uid) >= 0) return;
     var hasInviteList = !!(mtg.members && mtg.members.length);
     var isInvited     = hasInviteList && mtg.members.indexOf(uid) >= 0;
     var isCreator     = mtg.createdBy === uid;
@@ -10639,6 +10643,20 @@ function renderMyShifts() {
       + '<div style="font-size:22px;font-weight:900;color:#C8102E;line-height:1;letter-spacing:1px;">' + d.getDate() + '</div>'
       + '<div style="font-size:10px;color:#666;text-transform:uppercase;">' + dayN + '</div>'
       + '</div>';
+    // Universal "More" button — opens a detail modal with all applicable info for this item.
+    // Each card type appends this to its flex:1 content block right before close.
+    var _moreItemId = (function(){
+      if (item.type === 'shift')           return item.data.id;
+      if (item.type === 'event')           return item.data.id;
+      if (item.type === 'class')           return item.data.id + '|' + item.date;
+      if (item.type === 'meeting')         return item.data.id + '|' + item.date;
+      if (item.type === 'scheduledDrill')  return item.data.id;
+      return '';
+    })();
+    var moreBtn = '<button onclick="openShiftItemDetail(\''+item.type+'\',\''+_moreItemId+'\')" '
+      + 'style="margin-top:6px;background:transparent;border:1px solid #333;color:#888;'
+      + 'border-radius:12px;padding:2px 10px;cursor:pointer;font-size:10px;letter-spacing:0.5px;">'
+      + '&#9432; More</button>';
 
     if (item.type === 'shift') {
       var s = item.data;
@@ -10655,6 +10673,7 @@ function renderMyShifts() {
         + '<div style="font-size:12px;color:#888;margin-top:2px;">' + _pLbl + ' &nbsp;&middot;&nbsp; ' + shiftLabel(s) + '</div>';
       if (isToday && !s.clockedIn) html += '<div style="font-size:11px;color:#F5A623;font-weight:700;margin-top:2px;">&#9888; Shift starts today</div>';
       if (s.clockedIn) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#10003; Clocked In ' + new Date(s.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '</div>';
+      html += moreBtn;
       html += '</div>';
       if (isToday && !s.clockedIn) {
         if (_alreadyOnDuty) {
@@ -10707,7 +10726,8 @@ function renderMyShifts() {
         + '</div>'
         + (ev.description||ev.desc ? '<div style="font-size:12px;color:#777;margin-top:4px;font-style:italic;">' + (ev.description||ev.desc) + '</div>' : '')
         + seStaffingBar(ev)
-        + sePositionSummary(ev);
+        + sePositionSummary(ev)
+        + moreBtn;
       if (isToday && signup && !isClockedIn && !_alreadyOnDuty) {
         var _evNow=new Date(), _evStart=new Date(ev.date+'T'+(ev.startTime||ev.time||'00:00')+':00');
         var _evEnd=ev.endTime?new Date(ev.date+'T'+ev.endTime+':00'):new Date(_evStart.getTime()+7200000);
@@ -10719,12 +10739,19 @@ function renderMyShifts() {
         }
       }
       if (isClockedIn) html += '<div style="font-size:11px;color:#27AE60;font-weight:700;margin-top:2px;">&#128994; Clocked In' + (signup.clockedInAt ? ' at ' + new Date(signup.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '') + '</div>';
+      // ✓ Going badge in the body so members see immediate confirmation after RSVP
+      if (signup && !isClockedIn) {
+        html += '<div style="font-size:11px;color:#27AE60;margin-top:3px;font-weight:700;">\u2713 You\'re on the roster'
+          + (signup.position && signup.position !== 'General Staffing' ? ' as <span style="color:#1ABC9C;">'+signup.position+'</span>' : '')
+          + (signup.position === 'General Staffing' ? ' (\uD83D\uDC65 General Staffing)' : '')
+          + '</div>';
+      }
       // Clock Out button when currently clocked in to this event
       if (isClockedIn) {
         html += '<button class="btn btn-sm" style="background:rgba(231,76,60,0.15);border:1px solid #E74C3C;color:#E74C3C;font-weight:700;" onclick="clockOutSpecialEvent(this)" data-ev="'+ev.id+'">&#9209; Clock Out</button>';
       } else if (signup) {
-        // Cancel signup (only when not clocked in, mirrors the × button on shift cards)
-        html += '<button class="btn btn-danger btn-sm" title="Cancel signup" onclick="cancelSpecialEventSignup(this)" data-ev="'+ev.id+'">&#10005;</button>';
+        // Already signed up — clear "Cancel" button (no ambiguous ✕)
+        html += '<button class="btn btn-sm btn-secondary" style="font-size:10px;" onclick="cancelSpecialEventSignup(this)" data-ev="'+ev.id+'">Cancel</button>';
       } else {
         // Invited but not yet signed up. Button label differs:
         //   • Positioned event → "Sign Up" (opens position-picker modal)
@@ -10733,6 +10760,9 @@ function renderMyShifts() {
         var _evSignupLabel = _evHasPositions ? '\u270B Sign Up' : '\u270B I\'ll be there';
         html += '<button class="btn btn-sm btn-success" style="font-weight:700;" '
              + 'onclick="confirmEventAttendance(\''+ev.id+'\')">'+_evSignupLabel+'</button>';
+        // Decline — removes the event from MY SHIFTS & EVENTS without signing up
+        html += '<button class="btn btn-sm" style="background:#1A1A1A;border:1px solid #555;color:#888;font-size:10px;" '
+             + 'onclick="declineSpecialEvent(\''+ev.id+'\')">Decline</button>';
       }
       html += '</div></div>';
 
@@ -10774,6 +10804,7 @@ function renderMyShifts() {
         html += '<button class="btn btn-sm" style="margin-top:4px;background:rgba(231,76,60,0.15);border:1px solid #E74C3C;color:#E74C3C;font-weight:700;font-size:11px;" '
              + 'onclick="clockOutMyClass(\''+cls.id+'\',\''+sessionDate+'\')">&#9209; Clock Out</button>';
       }
+      html += moreBtn;
       html += '</div></div>';
     }
 
@@ -10800,6 +10831,7 @@ function renderMyShifts() {
         +'<div style="font-weight:700;font-size:15px;color:#F0F0F0;">'+_m.title+'</div>'
         +'<div style="font-size:12px;color:#888;margin-top:2px;">'+_tp+(_m.duration?' \u00b7 '+_m.duration+'min':'')+(_m.location?' \u00b7 '+_m.location:'')+'</div>'
         +(_ci?'<div style="font-size:11px;color:#27AE60;margin-top:3px;font-weight:700;">\u2713 Clocked In</div>':'')
+        +moreBtn
         +'</div>'
         +'<div style="display:flex;flex-direction:column;gap:6px;justify-content:center;">'
         +(_ci
@@ -10808,7 +10840,8 @@ function renderMyShifts() {
             ?'<button onclick="clockInMeeting(\''+_m.id+'\',\''+_od+'\')" class="btn btn-sm btn-primary">\u23F0 Clock In</button>'
             :!_a
               ?'<button onclick="signUpForMeeting(\''+_m.id+'\',\''+_od+'\')" class="btn btn-sm btn-success">\u270B I\'ll be there</button>'
-              :'<span style="font-size:11px;color:#27AE60;">\u2713 Going</span>'
+                +'<button onclick="declineMeeting(\''+_m.id+'\')" class="btn btn-sm" style="background:#1A1A1A;border:1px solid #555;color:#888;font-size:10px;">Decline</button>'
+              :'<span style="font-size:11px;color:#27AE60;font-weight:700;">\u2713 Going</span>'
                +'<button onclick="cancelMeetingSignup(\''+_m.id+'\',\''+_od+'\')" class="btn btn-sm btn-secondary" style="font-size:10px;">Cancel</button>'
           )
         +'</div></div>';
@@ -10857,6 +10890,7 @@ function renderMyShifts() {
         + (_d.notes ? '<div style="font-size:11px;color:#666;margin-top:3px;font-style:italic;">'+_d.notes+'</div>' : '')
         + _drillConfirmedHtml
         + (_confirmed ? '<div style="font-size:11px;color:#27AE60;margin-top:3px;font-weight:700;">\u2713 You\'re on the roster</div>' : '')
+        + moreBtn
         + '</div>'
         + '<div style="display:flex;flex-direction:column;gap:6px;justify-content:center;">'
         + (_confirmed
@@ -11797,6 +11831,8 @@ function signUpSpecialEvent(elOrId) {
   if (!ev) return;
   if (!ev.signups) ev.signups = [];
   if (ev.signups.some(function(s){ return s.memberId===uid; })) { showToast('Already signed up.'); return; }
+  // Clear any prior decline so this event reappears on the dashboard
+  if (ev.declined) ev.declined = ev.declined.filter(function(id){ return id !== uid; });
   // Capture position if event has positions
   var selectedPos = '';
   var btn = typeof elOrId === 'string' ? null : elOrId;
@@ -12143,6 +12179,11 @@ function signUpForMeeting(mtgId, occurrenceDate) {
   if (state.meetingAttendance.find(function(a){ return a.mtgId===mtgId&&a.date===occurrenceDate&&a.memberId===uid; })) {
     showToast('Already signed up.'); return;
   }
+  // Clear any prior decline so the meeting reappears on their dashboard
+  var _mtgForUndecline = (state.meetings||[]).find(function(m){ return m.id===mtgId; });
+  if (_mtgForUndecline && _mtgForUndecline.declined) {
+    _mtgForUndecline.declined = _mtgForUndecline.declined.filter(function(id){ return id !== uid; });
+  }
   var mtg=(state.meetings||[]).find(function(m){ return m.id===mtgId; });
   state.meetingAttendance.push({ id:'ma_'+Date.now(), mtgId:mtgId, date:occurrenceDate,
     memberId:uid, signedUpAt:new Date().toISOString(), clockedInAt:null, clockedOutAt:null });
@@ -12165,6 +12206,42 @@ function cancelMeetingSignup(mtgId, occurrenceDate) {
   save();
   try { renderMyShifts(); } catch(e){}
   showToast('Meeting signup cancelled.');
+}
+
+// ── DECLINE handlers (clear an item from MY SHIFTS & EVENTS without RSVP) ────
+// "Decline" marks the user as not attending this meeting/event without signing
+// them up or showing them in the attendee list. The item disappears from their
+// dashboard; the full Events & Meetings sheet still shows it so they can
+// reverse their decision if needed.
+
+function declineMeeting(mtgId) {
+  var uid = state.currentUserId;
+  var mtg = (state.meetings||[]).find(function(m){ return m.id===mtgId; });
+  if (!mtg) return;
+  if (!Array.isArray(mtg.declined)) mtg.declined = [];
+  if (mtg.declined.indexOf(uid) < 0) mtg.declined.push(uid);
+  // Also remove any existing signup so they aren't on the roster either
+  state.meetingAttendance = (state.meetingAttendance||[]).filter(function(a){
+    return !(a.mtgId===mtgId && a.memberId===uid);
+  });
+  save();
+  try { renderMyShifts(); } catch(e){}
+  try { renderMeetingsList(); } catch(e){}
+  showToast('Removed "'+(mtg.title||'meeting')+'" from your dashboard.');
+}
+
+function declineSpecialEvent(evId) {
+  var uid = state.currentUserId;
+  var ev = (state.specialEvents||[]).find(function(e){ return e.id===evId; });
+  if (!ev) return;
+  if (!Array.isArray(ev.declined)) ev.declined = [];
+  if (ev.declined.indexOf(uid) < 0) ev.declined.push(uid);
+  // Also remove any existing signup
+  ev.signups = (ev.signups||[]).filter(function(s){ return s.memberId !== uid; });
+  save();
+  try { renderMyShifts(); } catch(e){}
+  try { renderBothSpecialEventViews(); } catch(e){}
+  showToast('Removed "'+(ev.title||'event')+'" from your dashboard.');
 }
 
 // ── "I'll be there" handlers (invited-member RSVP from MY SHIFTS & EVENTS) ──
@@ -12202,6 +12279,8 @@ function confirmEventAttendance(evId) {
     return;
   }
   // No positions — direct signup
+  // Clear any prior decline so this event reappears on the dashboard
+  if (ev.declined) ev.declined = ev.declined.filter(function(id){ return id !== uid; });
   ev.signups.push({ memberId:uid, position:'', signedUpAt:new Date().toISOString(),
     clockedIn:false, clockedInAt:null, clockedOutAt:null });
   save();
@@ -12320,6 +12399,8 @@ function _signupSpecialEventWithPosition(evId, position) {
     showToast('Already signed up.');
     return;
   }
+  // Clear any prior decline so this event reappears on the dashboard
+  if (ev.declined) ev.declined = ev.declined.filter(function(id){ return id !== uid; });
   // Re-check position fill at click time (race-safe against concurrent signups).
   // Only enforce the slot cap for defined positions; "General Staffing"
   // and any other fallback role have no slot limit.
@@ -12342,6 +12423,204 @@ function _signupSpecialEventWithPosition(evId, position) {
     if(id){ var s=(ev.signups||[]).find(function(x){return x.memberId===uid;}); if(s){s._gcalEventId=id; save();} }
   }).catch(function(){}); } catch(_e){}
   showToast('\u2705 Signed up as '+position+' for "'+ev.title+'"!');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  MORE-INFO DETAIL MODAL — invoked from any MY SHIFTS & EVENTS card.
+//  Surfaces all applicable info that doesn't fit on the compact card:
+//    • Shifts:    linked partner, position(s), clock status, unit
+//    • Events:    full description, every signup (name + position +
+//                 clock status), invitee list, declined list
+//    • Meetings:  description, recurrence, In Charge, full attendee
+//                 list, declined list
+//    • Drills:    full notes, every confirmed member
+//    • Classes:   instructor, location, session date
+// ═══════════════════════════════════════════════════════════════════
+function openShiftItemDetail(itemType, itemId) {
+  // Wipe any existing modal first
+  var ex = document.getElementById('shiftItemDetailModal');
+  if (ex) ex.remove();
+
+  var roster = state.roster || [];
+  var nameOf = function(mid){
+    var m = roster.find(function(r){ return r.id===mid; });
+    return m ? (m.last+', '+m.first) : (mid||'?');
+  };
+  var fmtDate = function(ds){
+    if (!ds) return '';
+    return new Date(ds+'T12:00:00').toLocaleDateString([],{weekday:'long',month:'short',day:'numeric',year:'numeric'});
+  };
+  var fmtTime = function(ts){
+    if (!ts) return '';
+    var p = ts.split(':'); var h = parseInt(p[0]);
+    return (h%12||12)+':'+p[1]+' '+(h>=12?'PM':'AM');
+  };
+
+  var title = 'Details';
+  var bodyHtml = '';
+
+  if (itemType === 'shift') {
+    var s = (state.staffingShifts||[]).find(function(x){ return x.id === itemId; });
+    if (!s) { showToast('Shift not found.'); return; }
+    title = (UNIT_LABELS[s.unitId]||s.unitId) + ' \u00b7 ' + (s.position||'');
+    var lnk = s.linkedShiftId ? (state.staffingShifts||[]).find(function(x){ return x.id===s.linkedShiftId; }) : null;
+    bodyHtml =
+      _siRow('Date', fmtDate(s.date)) +
+      _siRow('Unit', UNIT_LABELS[s.unitId]||s.unitId) +
+      _siRow('Position', s.position||'\u2014') +
+      _siRow('Time', shiftLabel(s)) +
+      (lnk ? _siRow('Linked Partner Slot', (UNIT_LABELS[lnk.unitId]||lnk.unitId)+' / '+(lnk.position||'\u2014')) : '') +
+      (s.clockedIn ? _siRow('Status', '\uD83D\uDFE2 Clocked In at '+new Date(s.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})) : '') +
+      (s.notes ? _siRow('Notes', s.notes) : '');
+  }
+
+  else if (itemType === 'event') {
+    var ev = (state.specialEvents||[]).find(function(x){ return x.id === itemId; });
+    if (!ev) { showToast('Event not found.'); return; }
+    title = ev.title || 'Event';
+    var locStr = ev.location || '';
+    var timeStr = ev.startTime ? ev.startTime+(ev.endTime?' \u2013 '+ev.endTime:'') : (ev.time||'');
+    var rangeStr = ev.startDate && ev.endDate && ev.endDate !== ev.startDate
+      ? fmtDate(ev.startDate)+' \u2013 '+fmtDate(ev.endDate) : fmtDate(ev.date);
+    // Signups table
+    var signupHtml = (ev.signups||[]).length
+      ? (ev.signups||[]).map(function(sg){
+          var clk = sg.clockedIn ? '<span style="color:#27AE60;">\uD83D\uDFE2 In</span>'
+            : sg.clockedOutAt ? '<span style="color:#888;">\u2713 Completed</span>'
+            : '<span style="color:#666;">\u2014</span>';
+          return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #222;font-size:12px;">'
+            +'<span style="color:#CCC;">'+nameOf(sg.memberId)+(sg.position?' <span style="color:#7EC8E3;font-size:10px;">('+sg.position+')</span>':'')+'</span>'
+            +'<span>'+clk+'</span></div>';
+        }).join('')
+      : '<div style="font-size:11px;color:#444;padding:4px 0;">No signups yet.</div>';
+    var inviteList = (ev.members||[]).length
+      ? (ev.members||[]).map(nameOf).join(', ')
+      : '<span style="color:#444;">Open to all members</span>';
+    var declinedList = (ev.declined||[]).length
+      ? (ev.declined||[]).map(nameOf).join(', ')
+      : '';
+    bodyHtml =
+      _siRow('Date', rangeStr) +
+      (timeStr ? _siRow('Time', timeStr) : '') +
+      (locStr ? _siRow('Location', locStr) : '') +
+      (ev.inCharge ? _siRow('In Charge', nameOf(ev.inCharge)) : '') +
+      (ev.createdBy ? _siRow('Created By', nameOf(ev.createdBy)) : '') +
+      ((ev.description||ev.desc) ? _siRow('Description', ev.description||ev.desc) : '') +
+      _siRow('Invited', inviteList) +
+      (declinedList ? _siRow('Declined', '<span style="color:#C8102E;">'+declinedList+'</span>') : '') +
+      _siRow('Signed Up (' + (ev.signups||[]).length + ')', signupHtml);
+  }
+
+  else if (itemType === 'meeting') {
+    var parts = itemId.split('|');
+    var mtg = (state.meetings||[]).find(function(x){ return x.id === parts[0]; });
+    if (!mtg) { showToast('Meeting not found.'); return; }
+    var occDate = parts[1];
+    title = mtg.title || 'Meeting';
+    var rlbl = {weekly:'Weekly',biweekly:'Every 2 weeks',monthly:'Monthly'};
+    var attList = (state.meetingAttendance||[])
+      .filter(function(a){ return a.mtgId===mtg.id && a.date===occDate; });
+    var attHtml = attList.length
+      ? attList.map(function(a){
+          var clk = a.clockedInAt && a.clockedOutAt ? '<span style="color:#888;">\u2713 Done</span>'
+            : a.clockedInAt ? '<span style="color:#27AE60;">\uD83D\uDFE2 In</span>'
+            : '<span style="color:#666;">\u2014</span>';
+          return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #222;font-size:12px;">'
+            +'<span style="color:#CCC;">'+nameOf(a.memberId)+'</span>'
+            +'<span>'+clk+'</span></div>';
+        }).join('')
+      : '<div style="font-size:11px;color:#444;padding:4px 0;">No one signed up yet.</div>';
+    var inviteList = (mtg.members||[]).length
+      ? (mtg.members||[]).map(nameOf).join(', ')
+      : '<span style="color:#444;">Open to all members</span>';
+    var declinedList = (mtg.declined||[]).length
+      ? (mtg.declined||[]).map(nameOf).join(', ')
+      : '';
+    bodyHtml =
+      _siRow('Date', fmtDate(occDate)) +
+      (mtg.time ? _siRow('Time', fmtTime(mtg.time)+(mtg.duration?' \u00b7 '+mtg.duration+' min':'')) : '') +
+      (mtg.location ? _siRow('Location', mtg.location) : '') +
+      (mtg.recurrence && mtg.recurrence.freq ? _siRow('Repeats', rlbl[mtg.recurrence.freq]||mtg.recurrence.freq) : '') +
+      (mtg.inCharge ? _siRow('In Charge', nameOf(mtg.inCharge)) : '') +
+      (mtg.createdBy ? _siRow('Scheduled By', nameOf(mtg.createdBy)) : '') +
+      (mtg.desc ? _siRow('Description', mtg.desc) : '') +
+      _siRow('Invited', inviteList) +
+      (declinedList ? _siRow('Declined', '<span style="color:#C8102E;">'+declinedList+'</span>') : '') +
+      _siRow('Attending (' + attList.length + ')', attHtml);
+  }
+
+  else if (itemType === 'scheduledDrill') {
+    var dr = (state.scheduledDrills||[]).find(function(x){ return x.id === itemId; });
+    if (!dr) { showToast('Drill not found.'); return; }
+    title = (dr.drillCode ? dr.drillCode+' \u2014 ' : '') + (dr.drillName || 'Drill');
+    var cm = dr.confirmedMembers || [];
+    var cmHtml = cm.length
+      ? cm.map(function(mid){
+          return '<div style="padding:4px 0;border-bottom:1px solid #222;font-size:12px;color:#CCC;">'+nameOf(mid)+'</div>';
+        }).join('')
+      : '<div style="font-size:11px;color:#444;padding:4px 0;">No one confirmed yet.</div>';
+    var inviteList = (dr.members||[]).length
+      ? (dr.members||[]).map(nameOf).join(', ')
+      : '<span style="color:#444;">Open to all members</span>';
+    bodyHtml =
+      _siRow('Date', fmtDate(dr.date)) +
+      (dr.time ? _siRow('Time', fmtTime(dr.time)) : '') +
+      (dr.location ? _siRow('Location', dr.location) : '') +
+      (dr.hours ? _siRow('Planned Hours', dr.hours + 'h') : '') +
+      (dr.notes ? _siRow('Notes', dr.notes) : '') +
+      _siRow('Invited', inviteList) +
+      _siRow('Confirmed (' + cm.length + ')', cmHtml);
+  }
+
+  else if (itemType === 'class') {
+    var cparts = itemId.split('|');
+    var cls = (state.classes||[]).find(function(x){ return x.id === cparts[0]; });
+    if (!cls) { showToast('Class not found.'); return; }
+    title = cls.name || 'Class';
+    var sessDate = cparts[1];
+    var ct = '';
+    if (cls.startTime) {
+      var sh = parseInt(cls.startTime.slice(0,2)), sm = cls.startTime.slice(2);
+      ct = (sh%12||12)+':'+sm+' '+(sh>=12?'PM':'AM');
+      if (cls.endTime) {
+        var eh = parseInt(cls.endTime.slice(0,2)), em = cls.endTime.slice(2);
+        ct += ' \u2013 '+(eh%12||12)+':'+em+' '+(eh>=12?'PM':'AM');
+      }
+    }
+    bodyHtml =
+      _siRow('Session Date', fmtDate(sessDate)) +
+      (ct ? _siRow('Time', ct) : '') +
+      (cls.instructor ? _siRow('Instructor', cls.instructor) : '') +
+      (cls.location ? _siRow('Location', cls.location) : '') +
+      (cls.description ? _siRow('Description', cls.description) : '');
+  }
+
+  var modal = document.createElement('div');
+  modal.id = 'shiftItemDetailModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  modal.innerHTML =
+    '<div style="background:#1A1A1A;border:1px solid #C8102E;border-top:4px solid #C8102E;border-radius:14px;padding:22px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;box-sizing:border-box;">'
+    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:14px;">'
+    +   '<div style="flex:1;min-width:0;">'
+    +     '<div style="font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:700;color:#C8102E;letter-spacing:2px;text-transform:uppercase;">Details</div>'
+    +     '<div style="font-size:16px;font-weight:700;color:#F0F0F0;margin-top:2px;">'+title+'</div>'
+    +   '</div>'
+    +   '<button id="_siCloseBtn" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;line-height:1;padding:0 4px;flex-shrink:0;">\u00D7</button>'
+    + '</div>'
+    + '<div>' + bodyHtml + '</div>'
+    + '</div>';
+  document.body.appendChild(modal);
+  document.getElementById('_siCloseBtn').addEventListener('click', function(){ modal.remove(); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) modal.remove(); });
+}
+
+// Helper: render a label/value row for the detail modal
+function _siRow(label, value) {
+  if (!value) return '';
+  return '<div style="margin-bottom:10px;">'
+    + '<div style="font-size:9px;color:#888;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;margin-bottom:3px;">'+label+'</div>'
+    + '<div style="font-size:13px;color:#DDD;line-height:1.5;">'+value+'</div>'
+    + '</div>';
 }
 
 // Scheduled drill RSVP. Adds the user to d.confirmedMembers.
@@ -12694,6 +12973,18 @@ function renderMeetingsList() {
         }
         return expectedNoShow + '<div style="font-size:11px;color:#888;margin-top:5px;border-top:1px solid #222;padding-top:5px;">'          +'<span style="color:#555;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:9px;">Attending ('+attendees.length+'):</span> '          +'<span style="color:#AAA;">'+names+'</span></div>';
       })()
+      +(function(){
+        // Decline Roster — members who explicitly declined this meeting
+        var declined = (mtg.declined||[]);
+        if (!declined.length) return '';
+        var dNames = declined.map(function(did){
+          var mbr = (state.roster||[]).find(function(m){ return m.id===did; });
+          return mbr ? mbr.last+', '+mbr.first : did;
+        }).join(' &nbsp;&bull;&nbsp; ');
+        return '<div style="font-size:11px;color:#888;margin-top:5px;border-top:1px solid #222;padding-top:5px;">'
+          +'<span style="color:#C8102E;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:9px;">\u2718 Declined ('+declined.length+'):</span> '
+          +'<span style="color:#888;">'+dNames+'</span></div>';
+      })()
       +(mtg.inCharge?(function(){ var _ic=(state.roster||[]).find(function(m){ return m.id===mtg.inCharge; }); return _ic?'<div style="font-size:12px;color:#F5A623;font-weight:700;margin-top:3px;">&#128100; In Charge: '+_ic.last+', '+_ic.first+'</div>':''; })():'')
       +(mtg.createdBy?(function(){ var _cb=(state.roster||[]).find(function(m){ return m.id===mtg.createdBy; }); return _cb?'<div style="font-size:11px;color:#555;margin-top:2px;">Scheduled by: '+_cb.last+', '+_cb.first+'</div>':''; })():'')
       +'</div>'
@@ -12864,6 +13155,19 @@ function renderSpecialEventAdmin() {
           return '<div style="font-size:11px;color:'+color+';margin-bottom:6px;margin-top:2px;">'+cnt+(total?' / '+total+' members'+(cnt>=total?' ✅ Fully staffed':' needed'):' signed up')+'</div>';
         })()
         +'<div style="background:#111;border-radius:6px;padding:4px 8px;">'+signupRows+'</div>'
+        +(function(){
+          // Decline Roster — members who explicitly declined this event
+          var declined = (ev.declined||[]);
+          if (!declined.length) return '';
+          var dRows = declined.map(function(did){
+            var m = (state.roster||[]).find(function(r){ return r.id===did; });
+            var name = m ? m.last+', '+m.first : did;
+            return '<div style="font-size:11px;color:#888;padding:3px 0;">\u2718 '+name+'</div>';
+          }).join('');
+          return '<div style="margin-top:6px;background:#1A0606;border:1px solid #3A0A0A;border-radius:6px;padding:6px 10px;">'
+            +'<div style="font-size:9px;font-weight:700;color:#C8102E;letter-spacing:1px;text-transform:uppercase;margin-bottom:3px;">\u2718 Declined ('+declined.length+')</div>'
+            +dRows+'</div>';
+        })()
       +'</div>'
       +'<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px;">'
       +'<button onclick="openEditSpecialEvent(\''+ev.id+'\')" style="background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;cursor:pointer;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;" title="Edit event">&#9998; Edit</button>'
@@ -20485,12 +20789,11 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
       <!-- ═══ APPARATUS STAFFING SECTION ═══ -->
       <div class="card" id="apparatusStaffingSection" style="padding:0;overflow:visible;margin-bottom:0;border-radius:12px;">
-        <div class="card-header" onclick="toggleStaffCard('apparatusStaffingBody','apparatusStaffingChev')" style="cursor:pointer;user-select:none;background:#1A0000;border-radius:12px 12px 0 0;margin:0;">
+        <div class="card-header" style="background:#1A0000;border-radius:12px 12px 0 0;margin:0;">
           <div class="icon">🚒</div>
           <h2 style="font-family:'Barlow Condensed',sans-serif;letter-spacing:2px;text-transform:uppercase;">Apparatus Staffing</h2>
-          <span id="apparatusStaffingChev" style="margin-left:auto;color:#C8102E;font-size:15px;display:inline-block;transition:transform .2s;">▼</span>
         </div>
-        <div id="apparatusStaffingBody">
+        <div id="apparatusStaffingBody" style="display:block;">
       <div class="card">
         <div class="card-header">
           <div class="icon">🚒</div>
@@ -20509,9 +20812,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
       <!-- Officer Controls (officers/admin only) -->
       <div id="staffingOfficerControls" style="display:none;">
-        <button class="btn btn-danger btn-full" onclick="adminClockOutAll()" style="margin-bottom:10px;background:#2A0000;border-color:#C8102E;color:#C8102E;font-weight:700;letter-spacing:1px;font-family:'Barlow Condensed',sans-serif;font-size:15px;">
-          🔴 CLOCK OUT EVERYONE
-        </button>
 
         <!-- Send Alert -->
         <div class="card">
