@@ -514,6 +514,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 #losapActHistBody,
 #erLogBody,
 #staffingAlertBody,
+#apparatusStaffingBody,
 #alertHistoryBody,
 #customGroupsBody,
 #unitToggleBody,
@@ -538,6 +539,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 #losapActHistChev,
 #erLogChev,
 #staffingAlertChevron,
+#apparatusStaffingChev,
 #alertHistoryChevron,
 #customGroupsChevron,
 #unitToggleChevron,
@@ -7148,9 +7150,6 @@ function initStaffingTab() {
 
   var oc = document.getElementById('staffingOfficerControls');
   if (oc) oc.style.display = isOfficer ? 'block' : 'none';
-  // CLOCK OUT EVERYONE: admin-only (officers should not see this)
-  var _coeBtn = document.getElementById('staffingClockOutEveryoneBtn');
-  if (_coeBtn) _coeBtn.style.display = isAdmin ? 'block' : 'none';
   var ac = document.getElementById('staffingAlertCard');
   if (ac) ac.style.display = 'block'; // All members see active alerts
   var mc = document.getElementById('staffingMonthCard');
@@ -10466,7 +10465,9 @@ function renderMyShifts() {
     if (ev.date < today) return false;
     var isInvited  = (ev.members||[]).indexOf(uid) >= 0;
     var isSignedUp = (ev.signups||[]).some(function(s){ return s.memberId===uid; });
-    return isInvited || isSignedUp;
+    var isCreator  = ev.createdBy === uid;
+    var isInCharge = ev.inCharge === uid;
+    return isInvited || isSignedUp || isCreator || isInCharge;
   }).sort(function(a,b){ return (a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||''); });
 
   // Scheduled drills the user is either invited to or has RSVP'd "I'll be there" for.
@@ -10507,14 +10508,18 @@ function renderMyShifts() {
   (state.meetings||[]).forEach(function(mtg) {
     // Meetings show in MY SHIFTS & EVENTS when either (a) the user is on the
     // invitation list (mtg.members) — and gets an "I'll be there" button — or
-    // (b) they've already signed up. Open meetings with no invitation list
-    // remain browse-and-sign-up only via the Events & Meetings sheet.
+    // (b) they've already signed up, OR (c) they created the meeting, OR
+    // (d) they are the Member In Charge. Open meetings with no invitation
+    // list and no organizer-link remain browse-and-sign-up only via the
+    // Events & Meetings sheet.
     var hasInviteList = !!(mtg.members && mtg.members.length);
     var isInvited     = hasInviteList && mtg.members.indexOf(uid) >= 0;
+    var isCreator     = mtg.createdBy === uid;
+    var isInCharge    = mtg.inCharge === uid;
     var nOcc = nextMeetingOccurrence(mtg);
     if (!nOcc) return;
     var att = (state.meetingAttendance||[]).find(function(a){ return a.mtgId===mtg.id&&a.date===nOcc&&a.memberId===uid; });
-    if (att || isInvited) myMtgItems.push({ type:'meeting', date:nOcc, data:mtg, att:att });
+    if (att || isInvited || isCreator || isInCharge) myMtgItems.push({type:'meeting', date:nOcc, data:mtg, att:att });
   });
   var allItems = myShifts.map(function(s){ return {type:'shift', date:s.date, data:s}; })
     .concat(myEvents.map(function(ev){ return {type:'event', date:ev.date, data:ev}; }))
@@ -12654,7 +12659,7 @@ function renderBothSpecialEventViews() {
   // Refresh whichever view is active
   if (document.getElementById('specialEventsManagerCard') &&
       document.getElementById('specialEventsManagerCard').style.display !== 'none') {
-    renderSpecialEvents('specialEventsContainerManager');
+    renderSpecialEvents('specialEventsManagerContainer');
     renderSpecialEventAdmin();
   } else {
     renderSpecialEvents('specialEventsContainer');
@@ -20217,11 +20222,12 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         <div id="myShiftsContainer"><p style="color:#666;font-size:13px;text-align:center;padding:20px;">No upcoming shifts or events.</p></div>
       </div>
 
-      <!-- ═══ APPARATUS STAFFING SECTION (always open) ═══ -->
+      <!-- ═══ APPARATUS STAFFING SECTION ═══ -->
       <div class="card" id="apparatusStaffingSection" style="padding:0;overflow:visible;margin-bottom:0;border-radius:12px;">
-        <div class="card-header" style="background:#1A0000;border-radius:12px 12px 0 0;margin:0;">
+        <div class="card-header" onclick="toggleStaffCard('apparatusStaffingBody','apparatusStaffingChev')" style="cursor:pointer;user-select:none;background:#1A0000;border-radius:12px 12px 0 0;margin:0;">
           <div class="icon">🚒</div>
           <h2 style="font-family:'Barlow Condensed',sans-serif;letter-spacing:2px;text-transform:uppercase;">Apparatus Staffing</h2>
+          <span id="apparatusStaffingChev" style="margin-left:auto;color:#C8102E;font-size:15px;display:inline-block;transition:transform .2s;">▼</span>
         </div>
         <div id="apparatusStaffingBody">
       <div class="card">
@@ -20242,7 +20248,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
       <!-- Officer Controls (officers/admin only) -->
       <div id="staffingOfficerControls" style="display:none;">
-        <button id="staffingClockOutEveryoneBtn" class="btn btn-danger btn-full" onclick="adminClockOutAll()" style="display:none;margin-bottom:10px;background:#2A0000;border-color:#C8102E;color:#C8102E;font-weight:700;letter-spacing:1px;font-family:'Barlow Condensed',sans-serif;font-size:15px;">
+        <button class="btn btn-danger btn-full" onclick="adminClockOutAll()" style="margin-bottom:10px;background:#2A0000;border-color:#C8102E;color:#C8102E;font-weight:700;letter-spacing:1px;font-family:'Barlow Condensed',sans-serif;font-size:15px;">
           🔴 CLOCK OUT EVERYONE
         </button>
 
