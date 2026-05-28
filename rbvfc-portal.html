@@ -1016,6 +1016,7 @@ function initFirebaseMessaging() {
       window._swRegistration = reg;
       window._swStatus = 'ok';
       console.log('[RBVFC] SW pre-registered at:', reg.scope);
+      try { _wireSwUpdateDetection(reg); } catch(e){ console.warn('[RBVFC] Update-detection wiring failed:', e); }
       try {
         fbMessaging = firebase.messaging(fbApp);
         fbMessaging.onMessage(function(payload) {
@@ -1034,6 +1035,105 @@ function initFirebaseMessaging() {
       } catch(e) {}
       try { renderPushStatus(); } catch(e){}
     });
+}
+
+// ── SERVICE-WORKER UPDATE DETECTION ──────────────────────────────────────────
+// When a newer service worker is deployed to GitHub, the browser downloads it
+// in the background and parks it in the "installed/waiting" state. We detect
+// that moment and surface a small "Update available — tap to refresh" banner so
+// members can pick up the new portal version with one tap instead of having to
+// manually clear caches. Works together with the network-first SW; this just
+// makes the hand-off visible and instant.
+function _wireSwUpdateDetection(reg) {
+  if (!reg) return;
+
+  // If a worker is already waiting (e.g. updated while the app was closed), offer it now.
+  if (reg.waiting && navigator.serviceWorker.controller) {
+    showUpdateAvailableBanner(reg.waiting);
+  }
+
+  // Fired when the browser finds a new SW and starts installing it.
+  reg.addEventListener('updatefound', function() {
+    var newWorker = reg.installing;
+    if (!newWorker) return;
+    newWorker.addEventListener('statechange', function() {
+      // 'installed' + an existing controller === a genuine UPDATE (not first install).
+      if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+        showUpdateAvailableBanner(newWorker);
+      }
+    });
+  });
+
+  // When the new SW takes control, reload once so the page runs the fresh code.
+  if (!window._swReloadWired) {
+    window._swReloadWired = true;
+    navigator.serviceWorker.addEventListener('controllerchange', function() {
+      if (window._swReloading) return;
+      window._swReloading = true;
+      window.location.reload();
+    });
+  }
+
+  // Proactively check for a new SW shortly after load, and whenever the app is
+  // brought back to the foreground (covers installed PWAs left open for days).
+  try { reg.update(); } catch(e){}
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') {
+      try { reg.update(); } catch(e){}
+    }
+  });
+}
+
+function showUpdateAvailableBanner(worker) {
+  // Don't stack duplicates.
+  if (document.getElementById('swUpdateBanner')) return;
+  window._swPendingWorker = worker || (window._swRegistration && window._swRegistration.waiting);
+
+  var banner = document.createElement('div');
+  banner.id = 'swUpdateBanner';
+  banner.style.cssText =
+    'position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:5000;' +
+    'display:flex;align-items:center;gap:12px;max-width:92%;' +
+    'background:#1A1A1A;border:1px solid #C8102E;border-radius:12px;' +
+    'padding:10px 14px;box-shadow:0 6px 24px rgba(0,0,0,.5);' +
+    'font-family:Inter,sans-serif;animation:swBannerIn .25s ease-out;';
+  banner.innerHTML =
+    '<span style="font-size:18px;flex-shrink:0;">\uD83D\uDD04</span>' +
+    '<div style="flex:1;min-width:0;">' +
+      '<div style="font-size:13px;font-weight:700;color:#F0F0F0;">Update available</div>' +
+      '<div style="font-size:11px;color:#888;">A newer version of the portal is ready.</div>' +
+    '</div>' +
+    '<button id="swUpdateBtn" style="flex-shrink:0;background:#C8102E;border:none;color:#fff;' +
+      'font-weight:700;font-size:12px;border-radius:8px;padding:8px 14px;cursor:pointer;">Tap to refresh</button>' +
+    '<button id="swUpdateDismiss" style="flex-shrink:0;background:none;border:none;color:#666;' +
+      'font-size:18px;cursor:pointer;line-height:1;padding:0 2px;" aria-label="Dismiss">\u00D7</button>';
+
+  // Inject the keyframes once.
+  if (!document.getElementById('swBannerKeyframes')) {
+    var st = document.createElement('style');
+    st.id = 'swBannerKeyframes';
+    st.textContent = '@keyframes swBannerIn{from{opacity:0;transform:translate(-50%,12px);}to{opacity:1;transform:translate(-50%,0);}}';
+    document.head.appendChild(st);
+  }
+
+  document.body.appendChild(banner);
+
+  document.getElementById('swUpdateBtn').addEventListener('click', function() {
+    var w = window._swPendingWorker;
+    if (w) {
+      // Ask the waiting SW to activate; controllerchange handler reloads the page.
+      try { w.postMessage('SKIP_WAITING'); } catch(e){}
+      // Fallback: if controllerchange doesn't fire within 1.5s, reload anyway.
+      setTimeout(function(){ if (!window._swReloading) { window._swReloading = true; window.location.reload(); } }, 1500);
+    } else {
+      window.location.reload();
+    }
+    banner.remove();
+  });
+
+  document.getElementById('swUpdateDismiss').addEventListener('click', function() {
+    banner.remove(); // they'll get it on next natural reload
+  });
 }
 
 function registerServiceWorker() {
