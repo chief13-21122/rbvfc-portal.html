@@ -11524,6 +11524,11 @@ function sePositionSummary(ev) {
     return '<span style="font-size:10px;color:'+color+';margin-right:10px;">'+
       (full?'✅':'◻')+' '+pName+' <span style="color:#555;">'+filled+'/'+slots+'</span></span>';
   }).join('');
+  // General-staffing count, shown only if anyone has signed up that way
+  var _genN = (ev.signups||[]).filter(function(s){ return s.position === 'General Staffing'; }).length;
+  if (_genN > 0) {
+    rows += '<span style="font-size:10px;color:#5DADE2;margin-right:10px;">\uD83D\uDC65 General <span style="color:#555;">+'+_genN+'</span></span>';
+  }
   return '<div style="margin-top:5px;line-height:1.9;">'+rows+'</div>';
 }
 
@@ -11597,21 +11602,17 @@ function renderSpecialEvents(containerId) {
             var label  = pName + ' (' + filled + '/' + slots + (full?' — FULL':' open') + ')';
             return '<option value="'+pName+'" '+(full?'disabled style="color:#555;"':'')+'>'+label+'</option>';
           }).join('');
-          var allFull = ev.positions.every(function(p) {
-            var pName = typeof p==='string' ? p : p.name;
-            var slots = typeof p==='string' ? 1  : (p.slots||1);
-            return (ev.signups||[]).filter(function(s){ return s.position===pName; }).length >= slots;
-          });
-          if (!allFull) {
-            actions += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">'+
-              '<select class="se-pos-sel" data-ev="'+ev.id+'" style="flex:1;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:6px 8px;color:#F0F0F0;font-size:12px;">'+
-              '<option value="">— Select position —</option>'+posOpts+
-              '</select>'+
-              '<button class="btn btn-sm btn-success" onclick="signUpSpecialEvent(this)" data-ev="'+ev.id+'">✋ Sign Up</button>'+
-              '</div>';
-          } else {
-            actions += '<span style="font-size:11px;color:#555;display:block;margin-top:4px;">All positions are full.</span>';
-          }
+          // General Staffing — always available, no slot cap. Appended after
+          // the specific positions so members who don't want a defined role
+          // can still help out.
+          var _genCount = (ev.signups||[]).filter(function(s){ return s.position === 'General Staffing'; }).length;
+          posOpts += '<option value="General Staffing">\uD83D\uDC65 General Staffing (' + _genCount + ' signed up)</option>';
+          actions += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">'+
+            '<select class="se-pos-sel" data-ev="'+ev.id+'" style="flex:1;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:6px 8px;color:#F0F0F0;font-size:12px;">'+
+            '<option value="">— Select position —</option>'+posOpts+
+            '</select>'+
+            '<button class="btn btn-sm btn-success" onclick="signUpSpecialEvent(this)" data-ev="'+ev.id+'">✋ Sign Up</button>'+
+            '</div>';
         } else {
           actions += '<button class="btn btn-sm btn-success" onclick="signUpSpecialEvent(this)" data-ev="'+ev.id+'">✋ Sign Up</button>';
         }
@@ -11689,14 +11690,17 @@ function signUpSpecialEvent(elOrId) {
     }
     if (posSel) selectedPos = posSel.value;
     if (ev.positions.length && !selectedPos) { showToast('\u26a0\ufe0f Please select a position first.'); return; }
-    // Check if selected position is already full
+    // Check if selected position is already full — only for defined positions.
+    // "General Staffing" and other fallback roles have no slot cap.
     if (selectedPos) {
       var posObj = ev.positions.find(function(p){ return (typeof p==='string'?p:p.name) === selectedPos; });
-      var slots  = posObj ? (posObj.slots||1) : 1;
-      var filled = (ev.signups||[]).filter(function(s){ return s.position===selectedPos; }).length;
-      if (filled >= slots) {
-        showToast('\u26a0\ufe0f That position is already full ('+filled+'/'+slots+' slots taken).');
-        return;
+      if (posObj) {
+        var slots  = (typeof posObj==='string') ? 1 : (posObj.slots||1);
+        var filled = (ev.signups||[]).filter(function(s){ return s.position===selectedPos; }).length;
+        if (filled >= slots) {
+          showToast('\u26a0\ufe0f That position is already full ('+filled+'/'+slots+' slots taken).');
+          return;
+        }
       }
     }
   }
@@ -12139,6 +12143,21 @@ function openPositionPickerModal(evId) {
       + '</div>';
   }).join('');
 
+  // General Staffing — always-available alternative for members who want to
+  // help out without committing to a specific role. No slot cap.
+  var generalCount = (ev.signups||[]).filter(function(s){ return s.position === 'General Staffing'; }).length;
+  var generalHtml = '<div data-pos="General Staffing" class="_ppPosOpt" '
+    + 'style="background:#0F1A24;border:1px solid #5DADE2;border-radius:8px;'
+    + 'padding:12px 14px;margin-top:14px;'
+    + 'display:flex;justify-content:space-between;align-items:center;gap:10px;'
+    + 'cursor:pointer;transition:transform 0.1s, background 0.15s;">'
+    + '<div style="flex:1;min-width:0;">'
+    + '<div style="font-size:14px;font-weight:700;color:#5DADE2;">\uD83D\uDC65 General Staffing</div>'
+    + '<div style="font-size:11px;color:#888;margin-top:2px;">No specific role &middot; '+generalCount+' signed up</div>'
+    + '</div>'
+    + '<span style="color:#5DADE2;font-size:22px;flex-shrink:0;line-height:1;">\u203A</span>'
+    + '</div>';
+
   var modal = document.createElement('div');
   modal.id = 'positionPickerModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px;';
@@ -12148,7 +12167,7 @@ function openPositionPickerModal(evId) {
     + '<div style="font-size:15px;font-weight:700;color:#F0F0F0;text-align:center;margin-bottom:4px;">'+ev.title+'</div>'
     + '<div style="font-size:12px;color:#888;text-align:center;margin-bottom:18px;">'+dateStr+(timeStr?' &middot; '+timeStr:'')+(ev.location?' &middot; '+ev.location:'')+'</div>'
     + '<div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Pick a position</div>'
-    + '<div id="_ppOptions">' + posListHtml + '</div>'
+    + '<div id="_ppOptions">' + posListHtml + generalHtml + '</div>'
     + '<button id="_ppCancelBtn" style="width:100%;background:#1A1A1A;border:1px solid #333;color:#888;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;margin-top:6px;">Cancel</button>'
     + '</div>';
   document.body.appendChild(modal);
@@ -12183,13 +12202,17 @@ function _signupSpecialEventWithPosition(evId, position) {
     showToast('Already signed up.');
     return;
   }
-  // Re-check position fill at click time (race-safe against concurrent signups)
+  // Re-check position fill at click time (race-safe against concurrent signups).
+  // Only enforce the slot cap for defined positions; "General Staffing"
+  // and any other fallback role have no slot limit.
   var posObj = (ev.positions||[]).find(function(p){ return (typeof p==='string'?p:p.name) === position; });
-  var slots  = posObj ? (typeof posObj==='string'?1:(posObj.slots||1)) : 1;
-  var filled = (ev.signups||[]).filter(function(s){ return s.position===position; }).length;
-  if (filled >= slots) {
-    showToast('\u26a0\ufe0f That position just filled up.');
-    return;
+  if (posObj) {
+    var slots  = (typeof posObj==='string') ? 1 : (posObj.slots||1);
+    var filled = (ev.signups||[]).filter(function(s){ return s.position===position; }).length;
+    if (filled >= slots) {
+      showToast('\u26a0\ufe0f That position just filled up.');
+      return;
+    }
   }
   ev.signups.push({ memberId:uid, position:position, signedUpAt:new Date().toISOString(),
     clockedIn:false, clockedInAt:null, clockedOutAt:null });
