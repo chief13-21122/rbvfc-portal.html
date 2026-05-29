@@ -12,11 +12,12 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Co.13 Portal">
-<meta name="application-name" content="Co.13 Portal">
+<meta name="apple-mobile-web-app-title" content="LOSAP Portal">
+<meta name="application-name" content="LOSAP Portal">
 <meta name="theme-color" content="#C8102E">
 <link rel="icon" id="dynamicFavicon" type="image/png" href="">
 <link rel="apple-touch-icon" id="appleTouchIcon" href="">
+<link rel="manifest" href="/rbvfc-portal.html/manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -825,34 +826,8 @@ function _fbSplitState() {
 
 // ── Save to Firestore (debounced) ────────────────────────────────────────────
 var _fbSaveTimer = null;
-// Hydration gate: blocks Firestore writes until we have *received* at least one
-// snapshot of remote state for this session. Without this, a fresh device load
-// can write its stale localStorage-cached state to Firestore before the live
-// snapshot arrives — overwriting newer data that other devices have created
-// (e.g., a meeting another officer just scheduled). The flag flips true in
-// _startFbSync's first onSnapshot callback and in loadFromFirestore's success
-// branch. Any save() calls before that point are deferred and replayed once
-// hydration completes. As a safety net, if neither path fires within 10s
-// (e.g., device offline), we auto-open the gate so writes still work locally.
-var _fbHydrated = false;
-var _fbSavePending = false;
-var _fbHydrationTimeout = null;
-setTimeout(function() {
-  if (!_fbHydrated && _fbConfigured()) {
-    console.warn('[RBVFC] Firestore hydration timed out after 10s — opening gate as fallback.');
-    _markFbHydrated();
-  }
-}, 10000);
-
 function _fbSave() {
   if (!_fbConfigured() || !_fbInitialized || !fbDb) return;
-  // Block writes until we've hydrated from Firestore at least once.
-  // Mark a pending save so we can flush after hydration.
-  if (!_fbHydrated) {
-    _fbSavePending = true;
-    console.log('[RBVFC] _fbSave deferred — waiting for Firestore hydration.');
-    return;
-  }
   clearTimeout(_fbSaveTimer);
   _fbSaveTimer = setTimeout(function() {
     var parts = _fbSplitState();
@@ -865,18 +840,6 @@ function _fbSave() {
       .then(function(){ console.log('[RBVFC] Firestore saved (3 docs).'); })
       .catch(function(e){ console.error('[RBVFC] Firestore save error:', e.message); });
   }, 800);
-}
-
-// Called once we've received fresh remote state. Flips the hydration gate on
-// and flushes any deferred save that came in during the boot/login window.
-function _markFbHydrated() {
-  if (_fbHydrated) return;
-  _fbHydrated = true;
-  console.log('[RBVFC] Firestore hydrated — writes now enabled.');
-  if (_fbSavePending) {
-    _fbSavePending = false;
-    _fbSave();
-  }
 }
 
 // ── Real-time listeners — one per doc ────────────────────────────────────────
@@ -993,10 +956,6 @@ function _startFbSync() {
 
   _fbSyncUnsubMain = fbDb.doc(_fbDocMain()).onSnapshot(function(doc) {
     if (doc.exists) _mergeAndRender(doc.data());
-    // Mark hydrated on first snapshot delivery — even an empty/non-existent doc
-    // counts (nothing to overwrite). Without this, writes stay blocked forever
-    // on a brand-new Firestore project that has no docs yet.
-    _markFbHydrated();
   }, function(e){ console.warn('[RBVFC] Main sync error:', e.message); });
 
   _fbSyncUnsubActs = fbDb.doc(_fbDocActs()).onSnapshot(function(doc) {
@@ -1705,12 +1664,8 @@ function loadFromFirestore(onComplete) {
         state.trainingSubmissions = docs[2].data().trainingSubmissions;
       try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
       console.log('[RBVFC] Loaded from Firestore (3 docs).');
-      _markFbHydrated();
     } else {
       console.log('[RBVFC] No Firestore docs yet — pushing local state.');
-      // Brand-new project — no remote data to overwrite. Safe to flip the
-      // hydration gate so the first save can go through.
-      _markFbHydrated();
       _fbSave();
     }
     if (onComplete) onComplete(true);
