@@ -7805,7 +7805,65 @@ function renderStaffingBoard() {
 
   });
 
+  // ── Preserve in-progress officer "Assign Member" selections ─────────────
+  // This board is re-rendered by the Firestore snapshot listener on EVERY
+  // write (clock timer ticks, reminders, other devices' activity, etc.).
+  // Rebuilding container.innerHTML below wipes any half-finished assignment,
+  // which is why the section "resets" right after a position is picked and
+  // before the eligible-member dropdown can be used. Snapshot the live
+  // selections now, then restore them after the rebuild.
+  var _assignSnapshot = {};
+  try {
+    var _priorAssigns = container.querySelectorAll('[id^="assignPos_"]');
+    Array.prototype.forEach.call(_priorAssigns, function(ps){
+      var uId     = ps.id.replace('assignPos_','');
+      var memEl   = document.getElementById('assignMember_' + uId);
+      var startEl = document.getElementById('assignStart_'  + uId);
+      var hoursEl = document.getElementById('assignHours_'  + uId);
+      // Only preserve when the officer has actually started an assignment,
+      // so we never clobber freshly-rendered defaults.
+      if (ps.value || (memEl && memEl.value)) {
+        _assignSnapshot[uId] = {
+          pos:    ps.value,
+          member: memEl   ? memEl.value   : '',
+          start:  startEl ? startEl.value : '',
+          hours:  hoursEl ? hoursEl.value : ''
+        };
+      }
+    });
+  } catch(e){}
+
   container.innerHTML = html;
+
+  // ── Restore in-progress officer "Assign Member" selections ──────────────
+  try {
+    Object.keys(_assignSnapshot).forEach(function(uId){
+      var saved   = _assignSnapshot[uId];
+      var posEl   = document.getElementById('assignPos_'    + uId);
+      var startEl = document.getElementById('assignStart_'  + uId);
+      var hoursEl = document.getElementById('assignHours_'  + uId);
+      if (!posEl) return;
+      // Restore start/hours FIRST — updateAssignMemberDropdown reads them to
+      // compute the eligibility window.
+      if (saved.start && startEl) startEl.value = saved.start;
+      if (saved.hours && hoursEl) hoursEl.value = saved.hours;
+      if (saved.pos) {
+        posEl.value = saved.pos;
+        // Repopulate the eligible-member dropdown for the restored position…
+        try { updateAssignMemberDropdown(uId, date); } catch(e){}
+        // …then re-select the member if they're still eligible.
+        if (saved.member) {
+          var memEl = document.getElementById('assignMember_' + uId);
+          if (memEl) {
+            var stillEligible = Array.prototype.some.call(memEl.options, function(o){
+              return o.value === saved.member;
+            });
+            if (stillEligible) memEl.value = saved.member;
+          }
+        }
+      }
+    });
+  } catch(e){}
 
   // Also update inline summary card on Training tab
 }
