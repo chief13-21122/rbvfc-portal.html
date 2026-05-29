@@ -1,0 +1,31 @@
+{
+  "name": "LOSAP Portal",
+  "short_name": "LOSAP Portal",
+  "description": "Riviera Beach Volunteer Fire Company — Member LOSAP Portal",
+  "start_url": "/rbvfc-portal.html/rbvfc-portal.html",
+  "scope": "/rbvfc-portal.html/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d0d0d",
+  "theme_color": "#C8102E",
+  "icons": [
+    {
+      "src": "/rbvfc-portal.html/icon-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/rbvfc-portal.html/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/rbvfc-portal.html/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
