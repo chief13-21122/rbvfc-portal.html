@@ -3957,10 +3957,19 @@ function updateDriveStatusPanel(status) {
     var lastStr = (status==='ok' && state._driveLastUpload)
       ? ' <span style="color:#555;font-size:10px;">&nbsp;\u00b7&nbsp; Last upload: ' + new Date(state._driveLastUpload).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) + '</span>'
       : '';
+    // Show WHICH script this test/upload actually targets (matches uploadCertToDrive resolution)
+    var _activeUrl = state.cadScriptUrl || state.sheetWebhookUrl || '';
+    var _srcLabel  = state.cadScriptUrl ? 'CAD Script' : (state.sheetWebhookUrl ? 'Sheet Webhook' : '');
+    var _idm = _activeUrl.match(/\/s\/([A-Za-z0-9_-]+)\//);
+    var _fp  = _idm ? (_idm[1].slice(0,6) + '\u2026' + _idm[1].slice(-4)) : '';
+    var srcStr = _activeUrl
+      ? '<div style="font-size:10px;color:#666;margin-top:4px;">Testing: <span style="color:#888;font-weight:600;">'+_srcLabel+'</span>'+(_fp?' \u00b7 \u2026'+_fp:'')+'</div>'
+      : '';
     el.innerHTML = '<div style="display:flex;align-items:center;gap:8px;background:'+c.bg+';border:1px solid '+c.border+';border-radius:8px;padding:8px 12px;">'
       + '<div style="width:8px;height:8px;border-radius:50%;background:'+c.dot+';flex-shrink:0;'+(status==='ok'?'box-shadow:0 0 6px '+c.dot+';':'')+'"></div>'
       + '<span style="font-size:12px;font-weight:700;color:'+c.lc+';">'+c.label+'</span>'
-      + lastStr + '</div>';
+      + lastStr + '</div>'
+      + srcStr;
   }
   if (badge) {
     if (status === 'ok') {
@@ -3977,35 +3986,58 @@ function updateDriveStatusPanel(status) {
   }
 }
 
+// Shared classifier for non-success Apps Script / Drive responses.
+// Used by BOTH the connection test and the upload handler so their
+// diagnostics stay in lockstep. Returns a short human-readable reason.
+function _diagnoseDriveResponse(text, httpStatus) {
+  var t = text || '';
+  if (/<html|accounts\.google\.com|Sign in|Authorization|requires you to sign in/i.test(t)) {
+    return 'Got a Google login/HTML page \u2014 set the deployment access to \u201cAnyone\u201d and use the /exec URL.';
+  }
+  if (t.indexOf('Unknown action') >= 0 || t.indexOf('Connected OK') >= 0) {
+    return 'Apps Script needs redeployment \u2014 pingDrive/uploadCert handler missing. Add the patch (\u201cCopy Apps Script Patch\u201d) and deploy a NEW version.';
+  }
+  return 'Unexpected response' + (httpStatus ? ' (HTTP ' + httpStatus + ')' : '') + ': ' + t.slice(0, 80);
+}
+
 function testDriveConnection() {
-  var url = state.sheetWebhookUrl;
+  // Use the SAME script resolution as uploadCertToDrive(), so a passing test
+  // guarantees uploads hit the same deployment. (Previously this tested only
+  // sheetWebhookUrl while uploads prefer cadScriptUrl — a mismatch that caused
+  // "Unexpected response" when the patch lived on the CAD script.)
+  var url = state.cadScriptUrl || state.sheetWebhookUrl;
   if (!url) { showToast('\u26a0\ufe0f Save your Apps Script URL first.'); return; }
   if (!state.driveFolderId) { showToast('\u26a0\ufe0f Enter a Drive Folder ID first.'); return; }
   updateDriveStatusPanel('none');
+  var _httpStatus = 0;
   fetch(url + '?action=pingDrive&folderId=' + encodeURIComponent(state.driveFolderId))
-    .then(function(r) { return r.text(); })
+    .then(function(r) { _httpStatus = r.status; return r.text(); })
     .then(function(text) {
-      // Try JSON first (new Apps Script with pingDrive handler)
+      var t = text || '';
+      // Try JSON first (Apps Script with pingDrive handler)
       try {
-        var d = JSON.parse(text);
+        var d = JSON.parse(t);
         if (d.ok) {
           state._driveConnected = true; save();
           updateDriveStatusPanel('ok');
           showToast('\u2705 Drive folder connected: ' + (d.folderName || state.driveFolderId));
-        } else {
+        } else if (d.error) {
           updateDriveStatusPanel('error');
-          showToast('\u26a0\ufe0f Drive error: ' + (d.error || 'check folder ID'));
+          showToast('\u26a0\ufe0f Drive error: ' + d.error);
+        } else {
+          // Valid JSON but not a pingDrive reply — handler not on THIS script
+          updateDriveStatusPanel('error');
+          showToast('\u26a0\ufe0f Script reached, but no pingDrive handler. Add the patch (\u201cCopy Apps Script Patch\u201d) and redeploy a NEW version.');
         }
       } catch (parseErr) {
-        // Plain text response — Apps Script reachable but pingDrive handler not yet added
-        // The folder ID can't be verified without the handler, but script is reachable
-        if (text && text.indexOf('Connected') >= 0) {
+        // Non-JSON response — figure out what came back so it's diagnosable
+        if (t.indexOf('Connected') >= 0) {
           state._driveConnected = true; save();
           updateDriveStatusPanel('ok');
           showToast('\u2705 Apps Script reachable. Add the pingDrive handler to verify folder access. See \u201cCopy Apps Script Patch\u201d.');
         } else {
           updateDriveStatusPanel('error');
-          showToast('\u26a0\ufe0f Unexpected response. Check Apps Script URL.');
+          showToast('\u26a0\ufe0f ' + _diagnoseDriveResponse(t, _httpStatus));
         }
       }
     })
@@ -4080,7 +4112,7 @@ function uploadCertToDrive(submissionId, onComplete) {
 }
 
 function _handleCertUploadResponse(text, s, onComplete, suffix) {
-  var d = {}; try { d = JSON.parse(text); } catch(e) { d = { ok: false, error: 'Bad response: '+text.slice(0,80) }; }
+  var d = {}; try { d = JSON.parse(text); } catch(e) { d = { ok: false, error: _diagnoseDriveResponse(text) }; }
   if (d.ok !== false && d.fileId) {
     s._driveFileId = d.fileId; s._driveLink = d.fileUrl||'';
     s._driveUploaded = new Date().toISOString();
