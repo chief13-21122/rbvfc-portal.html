@@ -609,6 +609,7 @@ var fbApp = null, fbDb = null, fbAuth = null, fbMessaging = null;
 var _fbSyncUnsubscribe = null;   // real-time listener handle
 var _fbSyncing = false;
 var _fbInitialized = false;
+var _fbInitialLoadDone = false;   // true after the first successful Firestore read; gates ALL writes to prevent boot-race wipes
 
 function getFirebaseConfig() {
   // Baked-in config — works in incognito/kiosk without localStorage
@@ -824,20 +825,63 @@ function _fbSplitState() {
   return { main: full, acts: acts, train: train };
 }
 
+// ── Anti-wipe guard ──────────────────────────────────────────────────────────
+// Remembers the highest known record count per protected array, then refuses to
+// let any save shrink a populated array back to empty — the classic boot-race
+// wipe (a save firing with empty/stale state before the remote load lands).
+var _fbLastGoodCounts = {};
+var _FB_PROTECTED = {
+  main:  ['roster','meetings','specialEvents','staffingShifts','meetingAttendance','scheduledDrills','trainingClasses'],
+  acts:  ['losapActivities'],
+  train: ['trainingSubmissions']
+};
+function _fbRecordGoodCounts(src) {
+  if (!src) return;
+  Object.keys(_FB_PROTECTED).forEach(function(docKey){
+    _FB_PROTECTED[docKey].forEach(function(k){
+      var arr = src[k];
+      if (Array.isArray(arr) && arr.length > (_fbLastGoodCounts[k]||0)) {
+        _fbLastGoodCounts[k] = arr.length;
+      }
+    });
+  });
+}
+function _fbDocSafeToWrite(docKey, docData) {
+  var keys = _FB_PROTECTED[docKey] || [];
+  for (var i=0;i<keys.length;i++){
+    var k = keys[i];
+    var have = (docData && Array.isArray(docData[k])) ? docData[k].length : 0;
+    if ((_fbLastGoodCounts[k]||0) > 0 && have === 0) {
+      console.warn('[RBVFC] Anti-wipe guard BLOCKED ' + docKey + ' write — "' + k +
+        '" would drop from ' + _fbLastGoodCounts[k] + ' to 0. Skipping this write.');
+      return false;
+    }
+  }
+  return true;
+}
+
 // ── Save to Firestore (debounced) ────────────────────────────────────────────
 var _fbSaveTimer = null;
 function _fbSave() {
   if (!_fbConfigured() || !_fbInitialized || !fbDb) return;
+  // Load-gate: never push to Firestore until we have completed at least one read.
+  // This is what prevents a fresh-deploy / empty-localStorage boot from clobbering
+  // the remote docs with empty state before loadFromFirestore() has run.
+  if (!_fbInitialLoadDone) {
+    console.log('[RBVFC] Save suppressed — initial Firestore load not yet complete.');
+    return;
+  }
   clearTimeout(_fbSaveTimer);
   _fbSaveTimer = setTimeout(function() {
     var parts = _fbSplitState();
-    var saves = [
-      fbDb.doc(_fbDocMain()).set(parts.main),
-      fbDb.doc(_fbDocActs()).set(parts.acts),
-      fbDb.doc(_fbDocTrain()).set(parts.train)
-    ];
+    _fbRecordGoodCounts(state);   // track upward growth before guarding
+    var saves = [];
+    if (_fbDocSafeToWrite('main',  parts.main))  saves.push(fbDb.doc(_fbDocMain()).set(parts.main,  {merge:true}));
+    if (_fbDocSafeToWrite('acts',  parts.acts))  saves.push(fbDb.doc(_fbDocActs()).set(parts.acts,  {merge:true}));
+    if (_fbDocSafeToWrite('train', parts.train)) saves.push(fbDb.doc(_fbDocTrain()).set(parts.train, {merge:true}));
+    if (!saves.length) { console.warn('[RBVFC] Firestore save: all docs blocked by anti-wipe guard.'); return; }
     Promise.all(saves)
-      .then(function(){ console.log('[RBVFC] Firestore saved (3 docs).'); })
+      .then(function(){ console.log('[RBVFC] Firestore saved (' + saves.length + ' doc(s)).'); })
       .catch(function(e){ console.error('[RBVFC] Firestore save error:', e.message); });
   }, 800);
 }
@@ -877,6 +921,10 @@ function _mergeAndRender(remote) {
   if (_savedSession && !state.currentSession) {
     state.currentSession = _savedSession;
   }
+  // A live snapshot is itself a successful remote read — open the write gate and
+  // baseline the anti-wipe guard from this confirmed-good data.
+  _fbInitialLoadDone = true;
+  _fbRecordGoodCounts(state);
   try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
   try { renderMyShifts(); }     catch(e){}
   try { renderStaffingBoard(); } catch(e){}
@@ -1662,12 +1710,15 @@ function loadFromFirestore(onComplete) {
         state.losapActivities = docs[1].data().losapActivities;
       if (docs[2].exists && docs[2].data().trainingSubmissions)
         state.trainingSubmissions = docs[2].data().trainingSubmissions;
+      _fbRecordGoodCounts(state);   // baseline the anti-wipe guard from real remote data
       try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
       console.log('[RBVFC] Loaded from Firestore (3 docs).');
     } else {
       console.log('[RBVFC] No Firestore docs yet — pushing local state.');
-      _fbSave();
     }
+    // We have completed a full read round-trip — writes are now safe to fire.
+    _fbInitialLoadDone = true;
+    if (!anyExists) _fbSave();   // seed empty Firestore only after the gate is open
     if (onComplete) onComplete(true);
   }).catch(function(e) {
     console.warn('[RBVFC] Firestore load error (using local cache):', e.message);
@@ -15886,6 +15937,75 @@ function exportJSON() {
   var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download='rbvfc-data-'+localDateStr()+'.json'; a.click();
 }
+
+// ── Restore from a JSON backup (admin-only disaster recovery) ────────────────
+// Reads an exported backup, previews the record-count changes, and on confirm
+// merges it into live state and saves. The patched save path (load-gate +
+// anti-wipe guard) carries it safely to Firestore; the live listener echoes it
+// back to every other device.
+var _RESTORE_PREVIEW_KEYS = ['roster','meetings','specialEvents','staffingShifts',
+  'meetingAttendance','scheduledDrills','trainingClasses','losapActivities','trainingSubmissions'];
+
+function handleBackupImport(file) {
+  if (!file) return;
+  var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+  if (!me || me.appRole !== 'admin') { showToast('\u26a0\ufe0f Admin only.'); return; }
+  var reader = new FileReader();
+  reader.onload = function() {
+    var imported;
+    try { imported = JSON.parse(reader.result); }
+    catch(e) { showToast('\u26a0\ufe0f Invalid JSON file.'); return; }
+    if (!imported || typeof imported !== 'object' || Array.isArray(imported)) {
+      showToast('\u26a0\ufe0f That file is not a portal backup.'); return;
+    }
+    var lines = _RESTORE_PREVIEW_KEYS.map(function(k){
+      var cur = Array.isArray(state[k])    ? state[k].length    : 0;
+      var bak = Array.isArray(imported[k]) ? imported[k].length : 0;
+      var d = bak - cur;
+      var ds = d>0 ? ' (+'+d+')' : d<0 ? ' ('+d+')' : '';
+      return '  ' + k + ': ' + cur + ' \u2192 ' + bak + ds;
+    }).join('\n');
+    var msg = 'Restore from this backup?\n\n'
+      + 'This REPLACES current data and syncs to Firebase for ALL devices.\n\n'
+      + lines + '\n\nProceed?';
+    if (confirm(msg)) applyBackupImport(imported);
+  };
+  reader.onerror = function(){ showToast('\u26a0\ufe0f Could not read file.'); };
+  reader.readAsText(file);
+}
+
+function applyBackupImport(imported) {
+  var me = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+  if (!me || me.appRole !== 'admin') { showToast('\u26a0\ufe0f Admin only.'); return; }
+  // Preserve this device's identity + working Firebase config across the merge
+  var _uid  = state.currentUserId;
+  var _pin  = state.adminPin;
+  var _sess = state.currentSession;
+  var _cfg  = { fbApiKey:state.fbApiKey, fbProjectId:state.fbProjectId,
+    fbAuthDomain:state.fbAuthDomain, fbStorageBucket:state.fbStorageBucket,
+    fbMessagingSenderId:state.fbMessagingSenderId, fbAppId:state.fbAppId };
+  Object.assign(state, imported);
+  state.currentUserId = _uid;
+  state.adminPin      = _pin;
+  state.currentSession= _sess;
+  // Restore saved config values; scrub any YOUR_ placeholders the backup carried
+  Object.keys(_cfg).forEach(function(k){
+    if (_cfg[k]) state[k] = _cfg[k];
+    if (typeof state[k]==='string' && state[k].indexOf('YOUR_')===0) delete state[k];
+  });
+  // Re-arm the anti-wipe baseline from the restored data, then persist + sync
+  try { _fbRecordGoodCounts(state); } catch(e){}
+  save();
+  try { renderMyShifts(); }     catch(e){}
+  try { renderStaffingBoard(); } catch(e){}
+  try { renderLOSAP(); }        catch(e){}
+  try { renderCompanyLOSAP(); } catch(e){}
+  try { renderMeetingsList(); } catch(e){}
+  try { updateStats(); }        catch(e){}
+  showToast('\u2705 Backup restored \u2014 syncing to Firebase\u2026');
+  try { showSubmitConfirmation('Data restored from backup and is syncing to all devices.'); } catch(e){}
+}
+
 function exportCSV() {
   var rows=[['Last','First','Badge','Rank','Role','Points','Hours']];
   (state.roster||[]).forEach(function(m){
@@ -21970,11 +22090,13 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           </div>
           <div id="rawDataCollapse" style="display:none;padding:14px;background:#111;border-top:1px solid #333;">
             <div style="font-size:11px;color:#888;margin-bottom:10px;line-height:1.5;">
-              Download a full backup of all portal data as a JSON file. Store it somewhere safe — this is your disaster recovery copy if Firebase ever needs to be restored.
+              Download a full backup of all portal data as a JSON file. Store it somewhere safe — this is your disaster recovery copy if Firebase ever needs to be restored. <strong style="color:#7EE3A0;">Restore</strong> reads a backup file back in, shows you what will change, then syncs it to every device.
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
               <button class="btn btn-secondary btn-sm" onclick="exportJSON()">📦 Download Full Backup (.json)</button>
               <button class="btn btn-secondary btn-sm" onclick="exportCSV()">📊 Export CSV</button>
+              <button class="btn btn-sm" onclick="document.getElementById('restoreJsonInput').click()" style="background:#1A2A1A;border-color:#27AE60;color:#7EE3A0;">📥 Restore from Backup (.json)</button>
+              <input type="file" id="restoreJsonInput" accept=".json,application/json" style="display:none;" onchange="handleBackupImport(this.files[0]); this.value='';">
             </div>
 
             <div style="border-top:1px solid #333;padding-top:12px;">
