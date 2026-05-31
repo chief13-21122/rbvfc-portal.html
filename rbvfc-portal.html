@@ -502,6 +502,9 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
   body.public-view #tabBar { display:none !important; }
 }
 /* ─── All collapsible card windows closed by default ─── */
+#specialEventsManagerBody,
+#specialEventsMemberBody,
+#meetingsManagerBody,
 #myClassesTodayBody,
 #clockTabMyShiftsBody,
 #recentSessionsBody,
@@ -524,6 +527,9 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
   display: none;
 }
 /* Chevrons pointing right (closed state) by default */
+#specialEventsManagerChevron,
+#specialEventsMemberChevron,
+#meetingsManagerChevron,
 #myClassesTodayChevron,
 #clockTabMyShiftsChevron,
 #recentSessionsChev,
@@ -545,6 +551,8 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 #respondingApparatusChev {
   transform: rotate(-90deg);
 }
+.collateral-duty-info summary::-webkit-details-marker { display: none; }
+.collateral-duty-info summary { list-style: none; }
 </style>
 <!-- Firebase SDKs loaded dynamically by initFirebase() when config is saved -->
 <script>
@@ -2485,50 +2493,32 @@ function saveActivity() {
     pts = calcActivityPts('duties', hours);
   }
 
-  if (isForOther) {
-    // Route to pending approval
-    if (!Array.isArray(state.losapPending)) state.losapPending = [];
-    state.losapPending.unshift({
-      id: 'pact_'+Date.now(),
-      memberId: selectedMemberId,
-      submittedBy: uid,
-      submittedAt: new Date().toISOString(),
-      date: date,
-      category: cat,
-      desc: desc,
-      pts: pts,
-      hours: hours,
-      notes: notes,
-      status: 'pending'
-    });
-    save();
-    clearActivityForm();
-    updateApprovalsBadge();
-    var targetMember = (state.roster||[]).find(function(m){ return m.id===selectedMemberId; });
-    showToast('✅ Activity submitted for approval for '+(targetMember?targetMember.last+', '+targetMember.first:'member')+'.');
-    return;
-  }
-  if (!Array.isArray(state.losapActivities)) state.losapActivities = [];
-  var _sa_act = {
-    id: 'act_'+Date.now(),
+  // All "Log Past LOSAP Activity" submissions route through officer approval
+  // before any points are awarded — whether logged for yourself or another member.
+  if (!Array.isArray(state.losapPending)) state.losapPending = [];
+  state.losapPending.unshift({
+    id: 'pact_'+Date.now(),
     memberId: selectedMemberId,
+    submittedBy: uid,
+    submittedAt: new Date().toISOString(),
     date: date,
     category: cat,
     desc: desc,
     pts: pts,
     hours: hours,
     notes: notes,
-    cert: certFileData,
-    certName: certFileName,
-    certMime: certFileMime
-  };
-  state.losapActivities.unshift(_sa_act);
+    status: 'pending'
+  });
   save();
-  try { _notifyLosapPoints(_sa_act); } catch(e){}
   clearActivityForm();
-  updateStats();
-  renderLOSAP();
-  showToast('✅ Activity saved — +'+pts+' pts');
+  updateApprovalsBadge();
+  if (isForOther) {
+    var targetMember = (state.roster||[]).find(function(m){ return m.id===selectedMemberId; });
+    showToast('✅ Activity submitted for approval for '+(targetMember?targetMember.last+', '+targetMember.first:'member')+'.');
+  } else {
+    showToast('✅ Submitted for officer approval.');
+    try { showSubmitConfirmation('Your activity has been submitted and is pending officer approval. Points are added once an officer approves it.', '📥'); } catch(e){}
+  }
 }
 
 function clearActivityForm() {
@@ -3967,6 +3957,10 @@ function initTrainingTab() {
   renderTrainingClasses();
   // Drill history summary (inline on this tab for officers)
   if (isOfficer) { try { renderDrillHistory(); } catch(e){} }
+  // Training & Drill History (now embedded at the bottom of this page)
+  try { renderTrainingReview(); } catch(e){}
+  var _embDrillHist = document.getElementById('drillHistoryCard');
+  if (_embDrillHist) _embDrillHist.style.display = isOfficer ? 'block' : 'none';
 }
 
 function renderTrainingReview() {
@@ -12423,12 +12417,10 @@ function showEventsSheet() {
     if (canManage) {
       if (mgCard) mgCard.style.display = 'block';
       if (mbCard) mbCard.style.display = 'none';
-      var seB = document.getElementById('specialEventsManagerBody'); if (seB) seB.style.display = 'block';
       renderSpecialEventAdmin();
     } else {
       if (mgCard) mgCard.style.display = 'none';
       if (mbCard) mbCard.style.display = 'block';
-      var seMB = document.getElementById('specialEventsMemberBody'); if (seMB) seMB.style.display = 'block';
       renderSpecialEvents('specialEventsContainer');
     }
   } catch(e){}
@@ -12444,7 +12436,6 @@ function showMeetingsOnlySheet() {
   var mbCard = document.getElementById('specialEventsMemberCard');
   if (mgCard) mgCard.style.display = 'none';
   if (mbCard) mbCard.style.display = 'none';
-  var mtgB = document.getElementById('meetingsManagerBody'); if (mtgB) mtgB.style.display = 'block';
   // Meetings card (role-aware) + form
   try { initMeetingsCard(); } catch(e){}
   try { initMeetingForm(); }  catch(e){}
@@ -20541,8 +20532,9 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
         <!-- ═══ SPECIAL EVENTS MANAGER (officers/admin) ═══ -->
         <div class="card" id="specialEventsManagerCard" style="display:none;">
-          <div class="card-header" style="user-select:none;">
+          <div class="card-header" onclick="toggleStaffCard('specialEventsManagerBody','specialEventsManagerChevron')" style="cursor:pointer;user-select:none;">
             <div class="icon">&#127920;</div><h2>Special Events</h2>
+            <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
           </div>
           <div id="specialEventsManagerBody">
             <!-- Create New Event form — always in HTML for reliability -->
@@ -20616,9 +20608,10 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
         <!-- ═══ SPECIAL EVENTS MEMBER VIEW (everyone) ═══ -->
         <div class="card" id="specialEventsMemberCard" style="display:none;">
-          <div class="card-header" style="user-select:none;">
+          <div class="card-header" onclick="toggleStaffCard('specialEventsMemberBody','specialEventsMemberChevron')" style="cursor:pointer;user-select:none;">
             <div class="icon">&#127914;</div>
             <h2>Special Events</h2>
+            <span id="specialEventsMemberChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">&#9660;</span>
           </div>
           <div id="specialEventsMemberBody">
             <div id="specialEventsContainer"></div>
@@ -20626,8 +20619,9 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         </div>
 
         <div class="card" id="meetingsManagerCard" style="display:none;">
-        <div class="card-header" style="user-select:none;">
+        <div class="card-header" onclick="toggleStaffCard('meetingsManagerBody','meetingsManagerChevron')" style="cursor:pointer;user-select:none;">
           <div class="icon">&#128203;</div><h2>Meetings</h2>
+          <span id="meetingsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
         </div>
         <div id="meetingsManagerBody">
           <div id="mtgCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
@@ -20781,6 +20775,19 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
             <select id="clockActivity" onchange="onClockActivityChange()" data-onchange="onClockActivityChange()" style="width:100%;background:#1A1A1A;border:1px solid #2A2A2A;color:#F0F0F0;border-radius:10px;padding:12px 14px;font-size:15px;font-family:'Barlow Condensed',sans-serif;letter-spacing:1px;appearance:none;-webkit-appearance:none;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%228%22 viewBox=%220 0 12 8%22><path d=%22M1 1l5 5 5-5%22 stroke=%22%23555%22 stroke-width=%221.5%22 fill=%22none%22/></svg>');background-repeat:no-repeat;background-position:right 14px center;">
               <option value="collateral">Collateral Duty</option>
             </select>
+
+            <!-- Collateral Duty explainer -->
+            <details class="collateral-duty-info" style="margin-top:10px;background:#141414;border:1px solid #2A2A2A;border-radius:10px;overflow:hidden;">
+              <summary style="cursor:pointer;list-style:none;padding:11px 14px;display:flex;align-items:center;justify-content:space-between;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:600;letter-spacing:1px;color:#7EC8E3;">
+                <span>ℹ️ What is Collateral Duty?</span>
+                <span style="color:#555;font-size:11px;letter-spacing:1px;">tap to expand</span>
+              </summary>
+              <div style="padding:0 14px 14px;font-size:12.5px;color:#AAA;line-height:1.6;">
+                <strong style="color:#DDD;">Collateral Duty</strong> is non-emergency time you spend supporting the company — for example: station and apparatus maintenance, gear and equipment checks, standby or sleep-in coverage, fundraiser and special-event setup, and administrative or committee work.
+                <div style="margin-top:8px;">Clock in when you begin and clock out when you finish so your time is recorded accurately.</div>
+                <div style="margin-top:8px;color:#888;font-size:11.5px;">LOSAP credit: <strong style="color:#AAA;">1 point per 4 hours</strong> of collateral duty, up to <strong style="color:#AAA;">20 points per year</strong> (AACVFA §3c).</div>
+              </div>
+            </details>
           </div>
 
           <!-- Description (required for meeting / collateral) -->
@@ -20796,12 +20803,12 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
           <!-- Circular Clock In button -->
           <div style="display:flex;justify-content:center;">
-            <button id="clockInBtn" onclick="clockIn()" style="width:200px;height:200px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#1A3A1A,#0A1A0A);border:2.5px solid #27AE60;color:#2ECC71;font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;box-shadow:0 0 40px rgba(46,204,113,0.15),0 0 80px rgba(46,204,113,0.05),inset 0 1px 0 rgba(255,255,255,0.04);touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:all .2s;">
-              <span style="font-size:22px;line-height:1;">🟢</span>
+            <button id="clockInBtn" onclick="clockIn()" style="width:240px;height:240px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#1A3A1A,#0A1A0A);border:3px solid #27AE60;color:#2ECC71;font-family:'Bebas Neue',sans-serif;font-size:34px;letter-spacing:5px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;box-shadow:0 0 40px rgba(46,204,113,0.15),0 0 80px rgba(46,204,113,0.05),inset 0 1px 0 rgba(255,255,255,0.04);touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:all .2s;">
+              <span style="font-size:28px;line-height:1;">🟢</span>
               <span>CLOCK IN</span>
             </button>
-            <button id="clockOutBtn" onclick="clockOut()" style="width:200px;height:200px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#2A0A0A,#150505);border:2.5px solid #C8102E;color:#E74C3C;font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:4px;cursor:pointer;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;box-shadow:0 0 40px rgba(200,16,46,0.2),0 0 80px rgba(200,16,46,0.08),inset 0 1px 0 rgba(255,255,255,0.04);touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:all .2s;">
-              <span style="font-size:22px;line-height:1;">🟥</span>
+            <button id="clockOutBtn" onclick="clockOut()" style="width:240px;height:240px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#2A0A0A,#150505);border:3px solid #C8102E;color:#E74C3C;font-family:'Bebas Neue',sans-serif;font-size:34px;letter-spacing:5px;cursor:pointer;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;box-shadow:0 0 40px rgba(200,16,46,0.2),0 0 80px rgba(200,16,46,0.08),inset 0 1px 0 rgba(255,255,255,0.04);touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:all .2s;">
+              <span style="font-size:28px;line-height:1;">🟥</span>
               <span>CLOCK OUT</span>
             </button>
           </div>
@@ -20943,7 +20950,11 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
       <!-- Log Activity Form -->
       <div class="card" id="logActivityCard">
-        <div class="card-header"><div class="icon">➕</div><h2>Log Activity</h2></div>
+        <div class="card-header"><div class="icon">➕</div><h2>Log Past LOSAP Activity</h2></div>
+
+        <div class="alert" style="background:#1A2A1A;border-color:#27AE60;font-size:12px;line-height:1.5;margin-bottom:14px;">
+          ℹ️ Use this to record <strong>past activity</strong> you didn't clock in for. Every entry is <strong>submitted for officer approval</strong> — LOSAP points are added only after an officer approves it.
+        </div>
 
         <!-- Member selector -->
         <div class="form-group">
@@ -21098,7 +21109,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
           <textarea id="entryNotes" rows="2" placeholder="Optional notes…" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
         </div>
 
-        <button class="btn btn-primary btn-full" onclick="saveActivity()">💾 Save Activity</button>
+        <button class="btn btn-primary btn-full" onclick="saveActivity()">📤 Submit for Approval</button>
       </div><!-- end logActivityCard -->
 
       <!-- Hours Log -->
@@ -21610,9 +21621,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       </div>
 
 
-    </div><!-- end section-training -->
-
-    <div id="section-history" class="section">
+      <!-- ── Training & Drill History (moved here from the More menu) ── -->
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:22px 0 10px 4px;">Training &amp; Drill History</div>
 
       <!-- Training History -->
       <div class="card">
@@ -21630,7 +21640,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         </div>
       </div>
 
-    </div><!-- end section-history -->
+    </div><!-- end section-training -->
 
     <!-- ══════════════ PAST ALERTS TAB (More menu) ══════════════ -->
     <div id="section-past-alerts" class="section">
@@ -22396,16 +22406,15 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
       <!-- ── Section: Pages ────────────────────────────── -->
       <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:4px 0 10px 4px;">Pages</div>
-      <button class="btn btn-secondary btn-full" onclick="showTab('emergency');closeMoreMenu()">🚒 Emergency Response</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('training');closeMoreMenu()">📚 Training</button>
+      <button class="btn btn-secondary btn-full" onclick="showTab('training');closeMoreMenu()">📚 Training</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showEventsSheet();closeMoreMenu()">🎪 Special Events</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsOnlySheet();closeMoreMenu()">📋 Meetings</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('past-alerts');closeMoreMenu()">📜 Past Alerts</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('emergency');closeMoreMenu()">🚒 Emergency Response</button>
 
       <!-- ── Section: Activity ─────────────────────────── -->
       <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:18px 0 10px 4px;">Activity</div>
-      <button class="btn btn-secondary btn-full" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Activity</button>
+      <button class="btn btn-secondary btn-full" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Past LOSAP Activity</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreManualEntryBtn" onclick="showTab('manual-entry');closeMoreMenu()">✏️ Manual Activity Entry</button>
 
       <!-- ── Section: LOSAP ────────────────────────────── -->
