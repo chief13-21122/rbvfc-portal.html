@@ -1405,10 +1405,32 @@ function showPushNotificationBanner(payload) {
   setTimeout(function(){ if(el) el.style.display='none'; }, 8000);
 }
 
-function sendPushToMembers(targetMemberIds, title, body, alertId) {
+// ── Per-user notification preferences ─────────────────────────────────────
+// Members can opt out of portal-triggered push categories from My Settings.
+// Categories: 'staffing' (officer broadcasts), 'reminders' (shift/duty/clock-out),
+// 'losap' (approval requests — officers only). Absent prefs => all enabled, so
+// existing members keep current behavior until they explicitly opt out.
+var NOTIF_CATEGORIES = ['staffing', 'reminders', 'losap'];
+function _wantsNotif(member, category) {
+  if (!member) return true;          // unknown member — don't suppress
+  if (!category) return true;        // untagged push — always send
+  var p = member.notifPrefs;
+  if (!p || typeof p !== 'object') return true;  // no prefs set — all on
+  return p[category] !== false;      // only an explicit false opts out
+}
+
+function sendPushToMembers(targetMemberIds, title, body, alertId, category) {
   // Relay through Google Apps Script which uses FCM HTTP v1 API with its own OAuth token
   var url = state.cadScriptUrl;  // same Apps Script handles CAD + push
   if (!url) return;
+  // Honor each member's notification preference for this category
+  if (category) {
+    targetMemberIds = (targetMemberIds||[]).filter(function(uid){
+      var mm = (state.roster||[]).find(function(x){ return x.id===uid; });
+      return _wantsNotif(mm, category);
+    });
+    if (!targetMemberIds.length) return;
+  }
   // Build deduped token array, preserving order so we can map results back
   var tokens = [];
   var seen = {};
@@ -1920,12 +1942,37 @@ function openMySettings() {
     var _isOfficer = _me && (_me.appRole==='officer'||_me.appRole==='admin');
     adminBtnSection.style.display = _isOfficer ? 'block' : 'none';
   }
+  try { initNotifPrefsUI(); } catch(e){}
   modal.style.display = 'flex';
 }
 
 function closeMySettings() {
   var modal = document.getElementById('mySettingsModal');
   if (modal) modal.style.display = 'none';
+}
+
+// ── Notification preference UI (My Settings) ──────────────────────────────
+function initNotifPrefsUI() {
+  var me = (state.roster||[]).find(function(x){ return x.id===state.currentUserId; });
+  var prefs = (me && me.notifPrefs && typeof me.notifPrefs==='object') ? me.notifPrefs : {};
+  NOTIF_CATEGORIES.forEach(function(cat){
+    var cb = document.getElementById('notifPref_' + cat);
+    if (cb) cb.checked = (prefs[cat] !== false);   // default ON
+  });
+  // LOSAP-approval pings only go to officers/admins — hide that row for members
+  var isOfficer = me && (me.appRole==='officer' || me.appRole==='admin');
+  var losapRow = document.getElementById('notifPrefRow_losap');
+  if (losapRow) losapRow.style.display = isOfficer ? 'flex' : 'none';
+}
+
+function toggleNotifPref(category, checkbox) {
+  if (NOTIF_CATEGORIES.indexOf(category) < 0) return;
+  var me = (state.roster||[]).find(function(x){ return x.id===state.currentUserId; });
+  if (!me) return;
+  if (!me.notifPrefs || typeof me.notifPrefs!=='object') me.notifPrefs = {};
+  me.notifPrefs[category] = !!(checkbox && checkbox.checked);
+  save();
+  try { sheetSyncDebounce(); } catch(e){}
 }
 
 function showMoreMenu() {
@@ -3053,7 +3100,7 @@ function submitAttendanceLosap(sourceType, sourceId, date, memberId, desc) {
       clears: []
     });
     save();
-    sendPushToMembers([mic], '\uD83C\uDFC5 LOSAP Approval Needed', memName + ' — ' + desc, 'losap_approval_' + memberId + '_' + localDateStr());
+    sendPushToMembers([mic], '\uD83C\uDFC5 LOSAP Approval Needed', memName + ' — ' + desc, 'losap_approval_' + memberId + '_' + localDateStr(), 'losap');
   }
   var recipient = (state.roster||[]).find(function(x){ return x.id===memberId; });
   showToast('\u23f3 Submitted for approval — ' + (recipient ? recipient.last+', '+recipient.first : 'member'));
@@ -9233,7 +9280,8 @@ function _performAutoClockOut(sess, record) {
     sendPushToMembers([uid],
       '🔴 You were auto clocked out',
       summary,
-      _alertId
+      _alertId,
+      'reminders'
     );
   } catch(e) {}
 
@@ -9338,7 +9386,7 @@ function _firePreStartReminder(record, kindLabel, displayName, startD) {
       '\u23F0 ' + kindLabel + ' starts in 30 min',
       displayName + ' \u00b7 ' + startStr + '. Tap to open the portal.',
       'preshift_' + (record.id || record.mtgId || record.eventId || displayName) + '_' + startD.toISOString().slice(0,10)
-    );
+    , 'reminders');
   } catch(e) {}
 }
 
@@ -9373,7 +9421,7 @@ function _showEndOfActivityModal(sess, record, displayName, kindLabel, scheduled
         '\u23F1\uFE0F ' + kindLabel + ' ended \u2014 still on duty?',
         displayName + ' ended at ' + _endStrPush + '. Auto clock-out in ' + AUTO_CLOCKOUT_GRACE_MINS + ' min if no response.',
         'endact_' + (record.id || record.mtgId || record.eventId || sess.id) + '_' + scheduledEnd.toISOString().slice(0,16)
-      );
+      , 'reminders');
       record._pushSent = true;
       save();
     } catch(e) {}
@@ -9665,7 +9713,7 @@ function checkClockedInReminders() {
           'You\'ve been clocked in for ' + hrs.toFixed(1) + ' hrs. ' +
             'Confirm within ' + AUTO_CLOCKOUT_GRACE_MINS + ' min or you will be auto clocked out.',
           _warnId
-        );
+        , 'reminders');
       }
     } catch(e) {}
   }
@@ -9815,7 +9863,7 @@ function _autoClockOutSession(sess, reason) {
         '🔴 You were auto clocked out',
         'No response to the 30-min check-in reminder. Portal clocked you out.',
         'auto_clockout_' + _uid_acs + '_' + new Date().toISOString().slice(0,13)
-      );
+      , 'reminders');
     }
   } catch(e) {}
   showToast('🔴 Auto clocked out after ' + AUTO_CLOCKOUT_GRACE_MINS + '-min reminder — ' + formatDuration(sess.duration));
@@ -9907,7 +9955,7 @@ function adminClockOutAll() {
       '\uD83D\uDD34 Clocked Out by Admin',
       'An officer has ended all active duty sessions. Please confirm your clock-out in the portal.',
       'admin_clockout_' + localDateStr()
-    );
+    , 'reminders');
   } catch(e){}
 
   // Refresh UI
@@ -11361,7 +11409,7 @@ function _showDutyOverTimeWarning(session, warnHrs, autoOutMins) {
         '⏰ Still on duty?',
         'You have been clocked in for ' + warnHrs + '+ hours. Open the portal to confirm or clock out.',
         _alertId
-      );
+      , 'reminders');
     }
   } catch(e){}
 }
@@ -11400,7 +11448,7 @@ function _autoClockOutDuty(session, reason) {
         '🔴 You were auto clocked out',
         'No response to the 30-min check-in reminder. Portal clocked you out.',
         'auto_clockout_' + _uid_acd + '_' + new Date().toISOString().slice(0,13)
-      );
+      , 'reminders');
     }
   } catch(e) {}
   showToast('⏹ Auto clocked out — no response to reminder after 30 min.');
@@ -11761,7 +11809,7 @@ function sendStaffingAlert() {
   var el = document.getElementById('staffingAlertMsg'); if(el) el.value='';
   var sdr=(state.roster||[]).find(function(m){return m.id===state.currentUserId;});
   var sdrName=sdr?sdr.last+', '+sdr.first:'Officer';
-  sendPushToMembers(targets,'📢 RBVFC Staffing Alert',msg+' — '+sdrName,alertId);
+  sendPushToMembers(targets,'📢 RBVFC Staffing Alert',msg+' — '+sdrName,alertId,'staffing');
   showToast('📢 Alert sent to '+groupLabel+' ('+targets.length+' members.');
 }
 
@@ -12362,10 +12410,17 @@ function nextMeetingOccurrence(mtg) {
 }
 
 
-function showMeetingsSheet() {
+// Special Events and Meetings are now two separate MORE pages. Both reuse the
+// same #meetingsSheet container, each showing only its own card(s) and title.
+function showEventsSheet() {
   var sheet = document.getElementById('meetingsSheet');
   if (!sheet) return;
   sheet.style.display = 'block';
+  var t = document.getElementById('meetingsSheetTitle');
+  if (t) t.innerHTML = '🎪 SPECIAL EVENTS';
+  // Hide the Meetings card on the Special Events page
+  var mtgCard = document.getElementById('meetingsManagerCard');
+  if (mtgCard) mtgCard.style.display = 'none';
   // Special Events: show correct panel based on role (officer vs member)
   try {
     var canManage = canManageSpecialEvents();
@@ -12382,9 +12437,24 @@ function showMeetingsSheet() {
       renderSpecialEvents('specialEventsContainer');
     }
   } catch(e){}
+}
+function showMeetingsOnlySheet() {
+  var sheet = document.getElementById('meetingsSheet');
+  if (!sheet) return;
+  sheet.style.display = 'block';
+  var t = document.getElementById('meetingsSheetTitle');
+  if (t) t.innerHTML = '📋 MEETINGS';
+  // Hide the Special Events cards on the Meetings page
+  var mgCard = document.getElementById('specialEventsManagerCard');
+  var mbCard = document.getElementById('specialEventsMemberCard');
+  if (mgCard) mgCard.style.display = 'none';
+  if (mbCard) mbCard.style.display = 'none';
+  // Meetings card (role-aware) + form
   try { initMeetingsCard(); } catch(e){}
   try { initMeetingForm(); }  catch(e){}
 }
+// Back-compat: any legacy caller opens the Special Events page.
+function showMeetingsSheet() { showEventsSheet(); }
 function closeMeetingsSheet() {
   var sheet = document.getElementById('meetingsSheet');
   if (sheet) sheet.style.display = 'none';
@@ -20411,6 +20481,24 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         📳 Test My Notifications
       </button>
 
+      <!-- Notification Types — per-user opt-out of portal-triggered pushes -->
+      <div style="margin-top:14px;background:#141414;border:1px solid #2A2A2A;border-radius:12px;padding:14px 16px;">
+        <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:4px;">Notification Types</div>
+        <div style="font-size:11px;color:#555;margin-bottom:12px;">Choose which alerts this app sends you. Turning one off applies to all your devices.</div>
+        <label style="display:flex;align-items:center;gap:12px;padding:8px 0;cursor:pointer;">
+          <input type="checkbox" id="notifPref_staffing" onchange="toggleNotifPref('staffing', this)" style="width:18px;height:18px;accent-color:#C8102E;flex-shrink:0;cursor:pointer;">
+          <span style="flex:1;"><span style="font-size:14px;color:#F0F0F0;">📢 Staffing alerts</span><br><span style="font-size:11px;color:#666;">Officer broadcasts asking members to staff a unit</span></span>
+        </label>
+        <label style="display:flex;align-items:center;gap:12px;padding:8px 0;cursor:pointer;border-top:1px solid #222;">
+          <input type="checkbox" id="notifPref_reminders" onchange="toggleNotifPref('reminders', this)" style="width:18px;height:18px;accent-color:#C8102E;flex-shrink:0;cursor:pointer;">
+          <span style="flex:1;"><span style="font-size:14px;color:#F0F0F0;">⏰ Shift &amp; duty reminders</span><br><span style="font-size:11px;color:#666;">Pre-shift reminders, end-of-duty prompts, auto clock-out notices</span></span>
+        </label>
+        <label id="notifPrefRow_losap" style="display:flex;align-items:center;gap:12px;padding:8px 0;cursor:pointer;border-top:1px solid #222;">
+          <input type="checkbox" id="notifPref_losap" onchange="toggleNotifPref('losap', this)" style="width:18px;height:18px;accent-color:#C8102E;flex-shrink:0;cursor:pointer;">
+          <span style="flex:1;"><span style="font-size:14px;color:#F0F0F0;">🏅 LOSAP approval requests</span><br><span style="font-size:11px;color:#666;">When a member needs your approval (officers only)</span></span>
+        </label>
+      </div>
+
       <!-- Public View Link — visible to all -->
       <div style="margin-top:16px;border-top:1px solid #2A2A2A;padding-top:16px;">
         <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Public View Link</div>
@@ -20448,7 +20536,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <div style="position:absolute;bottom:0;left:0;right:0;max-height:90vh;overflow-y:auto;background:#111;border-radius:20px 20px 0 0;padding:20px;box-sizing:border-box;">
         <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 16px;"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-          <span style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;letter-spacing:2px;color:#F0F0F0;">🎪 EVENTS &amp; MEETINGS</span>
+          <span id="meetingsSheetTitle" style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;letter-spacing:2px;color:#F0F0F0;">🎪 EVENTS &amp; MEETINGS</span>
           <button onclick="closeMeetingsSheet()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:0;">×</button>
         </div>
 
@@ -22314,7 +22402,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:4px 0 10px 4px;">Pages</div>
       <button class="btn btn-secondary btn-full" onclick="showTab('emergency');closeMoreMenu()">🚒 Emergency Response</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('training');closeMoreMenu()">📚 Training</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsSheet();closeMoreMenu()">🎪 Events &amp; Meetings</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showEventsSheet();closeMoreMenu()">🎪 Special Events</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsOnlySheet();closeMoreMenu()">📋 Meetings</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('history');closeMoreMenu()">📋 Training &amp; Drill History</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('past-alerts');closeMoreMenu()">📜 Past Alerts</button>
 
