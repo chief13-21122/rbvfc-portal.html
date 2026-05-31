@@ -12429,7 +12429,6 @@ function showEventsSheet() {
     if (canManage) {
       if (mgCard) mgCard.style.display = 'block';
       if (mbCard) mbCard.style.display = 'none';
-      renderSpecialEvents('specialEventsManagerContainer');
       renderSpecialEventAdmin();
     } else {
       if (mgCard) mgCard.style.display = 'none';
@@ -13414,7 +13413,10 @@ function renderMeetingsList() {
       + '</div></div>';
   }
   container.innerHTML=h;
-  if(container)container.addEventListener('click',function(e){var b=e.target.closest('._mtgAlertBtn');if(b)openMtgAlert(b.dataset.mid,b.dataset.mdate);});
+  if(container && !container._mtgAlertBound){
+    container._mtgAlertBound = true;
+    container.addEventListener('click',function(e){var b=e.target.closest('._mtgAlertBtn');if(b)openMtgAlert(b.dataset.mid,b.dataset.mdate);});
+  }
 }
 
 
@@ -13563,7 +13565,7 @@ function renderSpecialEventAdmin() {
       +'</div></div>';
   }
   var upcomingHtml = upcoming.length
-    ? upcoming.map(_seAdminCard).join('')
+    ? upcoming.map(function(ev){ try { return _seAdminCard(ev); } catch(e){ console.warn('[RBVFC] event card render error', e); return ''; } }).join('')
     : '<p style="font-size:11px;color:#555;padding:8px 4px;">No upcoming events.</p>';
   var pastSection = '';
   if (past.length) {
@@ -13573,7 +13575,7 @@ function renderSpecialEventAdmin() {
       + '<span class="_pmChev" style="font-size:10px;color:#444;margin-left:auto;">&#9658;</span>'
       + '</div>'
       + '<div class="_pmBody" style="display:none;">'
-      + past.map(_seAdminCard).join('')
+      + past.map(function(ev){ try { return _seAdminCard(ev); } catch(e){ console.warn('[RBVFC] event card render error', e); return ''; } }).join('')
       + '</div></div>';
   }
   container.innerHTML = upcomingHtml + pastSection;
