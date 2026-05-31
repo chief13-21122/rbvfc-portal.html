@@ -7564,6 +7564,35 @@ function renderStaffingBoard() {
   if (!date) date = _ld;
   if (dateEl && !dateEl.value) dateEl.value = date;
 
+  // Previous calendar day — used to surface "carry-in" coverage from a tour
+  // that started yesterday and runs past 0700 into today's tour. Stored shifts
+  // are filed under their START date, so a long overnight (e.g. 8 PM + 20h →
+  // 4 PM next day) would otherwise be invisible on the next day's board.
+  var _prevDate = (function(){
+    var d = new Date(date + 'T12:00:00');
+    d.setDate(d.getDate() - 1);
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  })();
+
+  // Returns previous-day shifts for a unit+position whose hours run past 0700
+  // of the viewed day, with each window expressed in the same 0700-anchored
+  // minute space (420 = 0700 today … 1860 = 0700 tomorrow) the board uses.
+  function getCarryInWindows(uId, posIdx) {
+    return (state.staffingShifts||[]).filter(function(s){
+      return s.date===_prevDate && s.unitId===uId && s.positionIndex===posIdx
+        && s.memberId && !s.clockedOutAt;
+    }).map(function(s){
+      var st  = s.shiftStart||s.start||'0700';
+      var sH  = parseInt(st.slice(0,2)), sM = parseInt(st.slice(2,4)||'0');
+      var startMin = sH*60 + sM;                                   // from prev-day midnight
+      var endMin   = startMin + Math.round(parseFloat(s.shiftHours||s.hours||24)*60);
+      // Shift one day back into the viewed tour's coordinate space.
+      var winStart = Math.max(420, startMin - 1440);
+      var winEnd   = Math.min(1860, endMin - 1440);
+      return { shift:s, winStart:winStart, winEnd:winEnd };
+    }).filter(function(w){ return w.winEnd > 420 && w.winEnd > w.winStart; });
+  }
+
   var uid      = state.currentUserId;
   var member   = (state.roster||[]).find(function(m){ return m.id===uid; });
   var isOfficer= member && (member.appRole==='officer'||member.appRole==='admin');
@@ -7581,7 +7610,12 @@ function renderStaffingBoard() {
     return;
   }
 
-  var html = '<div style="text-align:center;font-weight:700;font-size:16px;letter-spacing:2px;color:#C8102E;margin-bottom:16px;">\uD83D\uDCC5 '+formatDateLong(date)+'</div>';
+  var _tourNext = (function(){ var d=new Date(date+'T12:00:00'); d.setDate(d.getDate()+1); return d; })();
+  var _tnShort  = (_tourNext.getMonth()+1)+'/'+_tourNext.getDate();
+  var html = '<div style="text-align:center;margin-bottom:14px;">'
+    + '<div style="font-weight:700;font-size:16px;letter-spacing:1px;color:#C8102E;">\uD83D\uDE92 '+formatDateLong(date)+'</div>'
+    + '<div style="font-size:11px;color:#888;letter-spacing:1px;margin-top:3px;">24-HOUR TOUR \u00B7 7:00 AM \u2192 7:00 AM ('+_tnShort+')</div>'
+    + '</div>';
 
   // Track rendered units so linked partners aren't drawn twice
   var _rendered = {};
@@ -7603,7 +7637,8 @@ function renderStaffingBoard() {
       var positions  = UNIT_POSITIONS[uId] || [];
       var uShifts    = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.unitId===uId; });
       var minStaff   = UNIT_MIN_STAFF[uId] || 1;
-      var filled     = positions.filter(function(p,i){ return uShifts.some(function(s){ return s.positionIndex===i && s.memberId; }); }).length;
+      var filled     = positions.filter(function(p,i){ return uShifts.some(function(s){ return s.positionIndex===i && s.memberId; })
+                                                          || getCarryInWindows(uId, i).length > 0; }).length;
       return { positions:positions, shifts:uShifts, minStaff:minStaff, filled:filled,
                isMin:filled>=minStaff, isFull:filled>=positions.length };
     }
@@ -7651,6 +7686,9 @@ function renderStaffingBoard() {
         var posShifts = uShifts.filter(function(s){ return s.positionIndex === posIdx && s.memberId; })
           .sort(function(a,b){ return (a.shiftStart||a.start||'0700').localeCompare(b.shiftStart||b.start||'0700'); });
 
+        // Holdover coverage carried in from the previous day's tour.
+        var carryWins = getCarryInWindows(uId, posIdx);
+
         // ── Coverage gap calculator ────────────────────────────────────────
         // Builds a list of uncovered minute-windows in the 0700→0700 (1440-min) day
         function coveredMinutes() {
@@ -7663,7 +7701,34 @@ function renderStaffingBoard() {
             var endMin   = startMin + Math.round(hrs*60);
             covered.push([startMin, endMin]);
           });
+          // Add holdover windows from the prior tour (already in this tour's coords)
+          carryWins.forEach(function(w){ covered.push([w.winStart, w.winEnd]); });
           return covered;
+        }
+
+        // ── At-a-glance coverage bar (7a → 7a) ─────────────────────────────
+        // Green = covered, hatched = open. Lets a member see the whole tour
+        // without reading times.
+        function coverageBarHtml() {
+          var cv = coveredMinutes().map(function(r){ return [Math.max(420,r[0]), Math.min(1860,r[1])]; })
+                                   .filter(function(r){ return r[1] > r[0]; })
+                                   .sort(function(a,b){ return a[0]-b[0]; });
+          var merged = [];
+          cv.forEach(function(r){
+            if (merged.length && r[0] <= merged[merged.length-1][1]) {
+              merged[merged.length-1][1] = Math.max(merged[merged.length-1][1], r[1]);
+            } else merged.push([r[0], r[1]]);
+          });
+          function pct(mins){ return (mins/1440*100); }
+          var segs = '', cursor = 420;
+          merged.forEach(function(r){
+            if (r[0] > cursor) segs += '<div style="position:absolute;left:'+pct(cursor-420)+'%;width:'+pct(r[0]-cursor)+'%;top:0;bottom:0;background:repeating-linear-gradient(45deg,#101820,#101820 4px,#15242c 4px,#15242c 8px);"></div>';
+            segs += '<div style="position:absolute;left:'+pct(r[0]-420)+'%;width:'+pct(r[1]-r[0])+'%;top:0;bottom:0;background:#27AE60;"></div>';
+            cursor = Math.max(cursor, r[1]);
+          });
+          if (cursor < 1860) segs += '<div style="position:absolute;left:'+pct(cursor-420)+'%;width:'+pct(1860-cursor)+'%;top:0;bottom:0;background:repeating-linear-gradient(45deg,#101820,#101820 4px,#15242c 4px,#15242c 8px);"></div>';
+          return '<div style="position:relative;height:8px;border-radius:4px;overflow:hidden;background:#101820;border:1px solid #1E1E1E;margin:2px 0 3px;">'+segs+'</div>'
+               + '<div style="display:flex;justify-content:space-between;font-size:8px;color:#555;letter-spacing:0.5px;margin-bottom:6px;"><span>7a</span><span>1p</span><span>7p</span><span>1a</span><span>7a</span></div>';
         }
 
         function totalCoveredMins() {
@@ -7696,9 +7761,10 @@ function renderStaffingBoard() {
           return (h%12||12)+':'+(m<10?'0':'')+m+' '+(h>=12?'PM':'AM');
         }
 
+        var _hasAnyCoverage = posShifts.length > 0 || carryWins.length > 0;
         var isFullyCovered  = totalCoveredMins() >= 1440;
-        var isPartial       = posShifts.length > 0 && !isFullyCovered;
-        var isOpen          = posShifts.length === 0;
+        var isPartial       = _hasAnyCoverage && !isFullyCovered;
+        var isOpen          = !_hasAnyCoverage;
         var alreadyHaveSlot = posShifts.some(function(s){ return s.memberId === uid; });
 
         // ── Eligibility checks ─────────────────────────────────────────────
@@ -7742,11 +7808,30 @@ function renderStaffingBoard() {
         else                 html += '<span style="font-size:9px;font-weight:700;color:#27AE60;background:#0A1F0A;border:1px solid #1A4A1A;border-radius:4px;padding:1px 6px;letter-spacing:1px;">&#11044; OPEN &mdash; 24h</span>';
         html += '</div>';
 
+        // At-a-glance tour coverage strip (skip when fully open — the badge says it all)
+        if (!isOpen) html += coverageBarHtml();
+
         html += '<div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">';
 
-        // ── Show all assigned members ──────────────────────────────────────
-        if (posShifts.length) {
+        // ── Show all assigned members (carry-in holdovers first, then today) ──
+        if (posShifts.length || carryWins.length) {
           html += '<div style="flex:1;min-width:160px;">';
+          // Holdover crew carried in from yesterday's tour
+          carryWins.forEach(function(w){
+            var _m    = (state.roster||[]).find(function(x){ return x.id===w.shift.memberId; });
+            var _name = _m ? _m.last+', '+_m.first : 'Unknown';
+            var _isMe = w.shift.memberId === uid;
+            var _uH = Math.floor(w.winEnd/60)%24, _uM = w.winEnd%60;
+            var _until = w.winEnd>=1860 ? '7:00 AM' : (_uH%12||12)+':'+(_uM<10?'0':'')+_uM+' '+(_uH>=12?'PM':'AM');
+            html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;'
+                  + 'background:#0E1622;border-left:3px solid #3498DB;border-radius:0 6px 6px 0;padding:6px 10px;">';
+            html += '<div style="flex:1;min-width:0;">';
+            html += '<div style="font-size:13px;font-weight:700;color:'+(_isMe?'#27AE60':'#9CC3E0')+';">'+_name+(_isMe?' (You)':'')+'</div>';
+            html += '<div style="font-size:11px;color:#5A7A99;margin-top:1px;">&#8627; Holdover from previous tour &mdash; covers until '+_until+'</div>';
+            html += '</div>';
+            html += '<span style="font-size:9px;font-weight:700;color:#3498DB;letter-spacing:1px;">PREV</span>';
+            html += '</div>';
+          });
           posShifts.forEach(function(s){
             var _m     = (state.roster||[]).find(function(x){ return x.id===s.memberId; });
             var _name  = _m ? _m.last+', '+_m.first : 'Unknown';
@@ -7803,7 +7888,6 @@ function renderStaffingBoard() {
           html += '</div>';
           html += '</div>';
         } else if (isPartial && !alreadyHaveSlot) {
-        } else if (isPartial && !alreadyHaveSlot) {
           // Compute and show ALL open windows for this position
           html += '<div style="display:flex;flex-direction:column;gap:5px;flex-wrap:wrap;flex-shrink:0;">';
           (function(){
@@ -7826,7 +7910,6 @@ function renderStaffingBoard() {
             });
           })();
           html += '</div>';
-          html += '<div style="font-size:11px;color:#666;font-style:italic;padding:4px 0;">You have a window on this position.</div>';
         }
 
         // ── Sign Up button ────────────────────────────────────────────────
