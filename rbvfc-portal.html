@@ -1777,7 +1777,7 @@ function showTab(id) {
   var btn = document.getElementById('bnav-'+id);
   if (btn) btn.classList.add('active');
   // Tabs that live under the More menu — light up the More button instead
-  else if (['emergency','training','history','past-alerts','approvals','log-entry','manual-entry','admin'].indexOf(id) !== -1) {
+  else if (['emergency','training','history','past-alerts','approvals','log-entry','special-events','meetings','admin'].indexOf(id) !== -1) {
     var moreBtn = document.getElementById('bnav-more');
     if (moreBtn) moreBtn.classList.add('active');
   }
@@ -1803,16 +1803,8 @@ function showTab(id) {
   if (id === 'hours') renderHoursLog();
   if (id === 'emergency') initEmergencyTab();
   if (id === 'log-entry') initLogEntryTab();
-  if (id === 'manual-entry') {
-    // Officers/admin only — show the card or the lock-out
-    var _meMe = (state.roster||[]).find(function(x){ return x.id===state.currentUserId; });
-    var _meIsOfficer = _meMe && (_meMe.appRole==='officer'||_meMe.appRole==='admin');
-    var _meCard = document.getElementById('manualActivityCard');
-    var _meDeny = document.getElementById('manualEntryDenyCard');
-    if (_meCard) _meCard.style.display = _meIsOfficer ? '' : 'none';
-    if (_meDeny) _meDeny.style.display = _meIsOfficer ? 'none' : '';
-    if (_meIsOfficer) { try { initManualActivityCard(); } catch(e){} }
-  }
+  if (id === 'special-events') initSpecialEventsPage();
+  if (id === 'meetings') initMeetingsPage();
   if (id === 'approvals') initApprovalsTab();
   if (id === 'history') initHistoryTab();
   if (id === 'past-alerts') initPastAlertsTab();
@@ -7406,7 +7398,7 @@ function initStaffingTab() {
   // Show/hide Create Class button
   var tcBtn = document.getElementById('trainingClassesOfficerBtn');
   if (tcBtn) tcBtn.style.display = isOfficer ? 'block' : 'none';
-  // Init meeting form (manual entry card moved to section-manual-entry, inits on showTab)
+  // Init meeting form (meetings now on section-meetings tab, inits on showTab)
   try { initMeetingForm(); }          catch(e){}
   // Clock Out Everyone — admin only
   var coeWrap = document.getElementById('clockOutEveryoneWrap');
@@ -12398,18 +12390,17 @@ function nextMeetingOccurrence(mtg) {
 }
 
 
-// Special Events and Meetings are now two separate MORE pages. Both reuse the
-// same #meetingsSheet container, each showing only its own card(s) and title.
-function showEventsSheet() {
-  var sheet = document.getElementById('meetingsSheet');
-  if (!sheet) return;
-  sheet.style.display = 'block';
-  var t = document.getElementById('meetingsSheetTitle');
-  if (t) t.innerHTML = '🎪 SPECIAL EVENTS';
-  // Hide the Meetings card on the Special Events page
-  var mtgCard = document.getElementById('meetingsManagerCard');
-  if (mtgCard) mtgCard.style.display = 'none';
-  // Special Events: show correct panel based on role (officer vs member)
+// Special Events and Meetings are now two full-page tabs (section-special-events
+// and section-meetings), opened via showTab(). These init functions populate the
+// role-aware cards each time the page is shown.
+function _expandCard(bodyId, chevId) {
+  var body = document.getElementById(bodyId);
+  if (body) body.style.display = 'block';
+  var chev = document.getElementById(chevId);
+  if (chev) chev.style.transform = 'rotate(0deg)';
+}
+function initSpecialEventsPage() {
+  // Show correct panel based on role (officer vs member)
   try {
     var canManage = canManageSpecialEvents();
     var mgCard = document.getElementById('specialEventsManagerCard');
@@ -12417,35 +12408,27 @@ function showEventsSheet() {
     if (canManage) {
       if (mgCard) mgCard.style.display = 'block';
       if (mbCard) mbCard.style.display = 'none';
+      _expandCard('specialEventsManagerBody', 'specialEventsManagerChevron');
       renderSpecialEventAdmin();
     } else {
       if (mgCard) mgCard.style.display = 'none';
       if (mbCard) mbCard.style.display = 'block';
+      _expandCard('specialEventsMemberBody', 'specialEventsMemberChevron');
       renderSpecialEvents('specialEventsContainer');
     }
   } catch(e){}
 }
-function showMeetingsOnlySheet() {
-  var sheet = document.getElementById('meetingsSheet');
-  if (!sheet) return;
-  sheet.style.display = 'block';
-  var t = document.getElementById('meetingsSheetTitle');
-  if (t) t.innerHTML = '📋 MEETINGS';
-  // Hide the Special Events cards on the Meetings page
-  var mgCard = document.getElementById('specialEventsManagerCard');
-  var mbCard = document.getElementById('specialEventsMemberCard');
-  if (mgCard) mgCard.style.display = 'none';
-  if (mbCard) mbCard.style.display = 'none';
+function initMeetingsPage() {
   // Meetings card (role-aware) + form
   try { initMeetingsCard(); } catch(e){}
   try { initMeetingForm(); }  catch(e){}
+  _expandCard('meetingsManagerBody', 'meetingsManagerChevron');
 }
-// Back-compat: any legacy caller opens the Special Events page.
-function showMeetingsSheet() { showEventsSheet(); }
-function closeMeetingsSheet() {
-  var sheet = document.getElementById('meetingsSheet');
-  if (sheet) sheet.style.display = 'none';
-}
+// Back-compat wrappers — legacy callers now route to the full-page tabs.
+function showEventsSheet()      { showTab('special-events'); }
+function showMeetingsOnlySheet(){ showTab('meetings'); }
+function showMeetingsSheet()    { showTab('special-events'); }
+function closeMeetingsSheet()   { showTab('clock'); }
 function initMeetingsCard() {
   var canManage = canManageSpecialEvents();
   var card = document.getElementById('meetingsManagerCard');
@@ -20447,8 +20430,6 @@ function applyBulkEdit() {
 try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) {}
 </script>
 
-    <!-- Meetings Sheet (accessed from More menu) -->
-    <div 
   <!-- My Settings Modal (member gear icon) -->
   <div id="mySettingsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:3000;align-items:flex-end;justify-content:center;">
     <div style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:24px;width:100%;max-width:480px;box-sizing:border-box;">
@@ -20522,153 +20503,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
     </div>
   </div>
 
-<div id="meetingsSheet" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.7);" onclick="if(event.target===this)closeMeetingsSheet()">
-      <div style="position:absolute;bottom:0;left:0;right:0;max-height:90vh;overflow-y:auto;background:#111;border-radius:20px 20px 0 0;padding:20px;box-sizing:border-box;">
-        <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 16px;"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-          <span id="meetingsSheetTitle" style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;letter-spacing:2px;color:#F0F0F0;">🎪 EVENTS &amp; MEETINGS</span>
-          <button onclick="closeMeetingsSheet()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:0;">×</button>
-        </div>
-
-        <!-- ═══ SPECIAL EVENTS MANAGER (officers/admin) ═══ -->
-        <div class="card" id="specialEventsManagerCard" style="display:none;">
-          <div class="card-header" onclick="toggleStaffCard('specialEventsManagerBody','specialEventsManagerChevron')" style="cursor:pointer;user-select:none;">
-            <div class="icon">&#127920;</div><h2>Special Events</h2>
-            <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
-          </div>
-          <div id="specialEventsManagerBody">
-            <!-- Create New Event form — always in HTML for reliability -->
-            <div id="seCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
-              <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">&#127920; Create New Event</div>
-              <!-- Created By / In Charge row -->
-              <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
-                <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:8px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:8px 12px;">
-                  <span style="font-size:16px;">&#128274;</span>
-                  <div>
-                    <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Created By</div>
-                    <div id="seCreatedByDisplay" style="font-size:13px;font-weight:700;color:#27AE60;"></div>
-                  </div>
-                </div>
-                <div style="flex:1;min-width:180px;">
-                  <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">&#128100; Person in Charge</label>
-                  <select id="seInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;">
-                    <option value="">&#8212; Select member &#8212;</option>
-                  </select>
-                </div>
-              </div>
-              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>
-              <input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>
-                <input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>
-                <input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time *</label>
-                <input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time *</label>
-                <input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              </div>
-              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location <span style="color:#555;font-size:10px;">(optional)</span></label>
-              <input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>
-              <textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Total Members Needed <span style="color:#555;">(for staffing bar)</span></label>
-                <input id="seTotalNeeded" type="number" min="0" max="999" placeholder="e.g. 10" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
-                <div style="display:flex;flex-direction:column;justify-content:flex-end;">
-                <div style="font-size:10px;color:#555;line-height:1.5;padding-bottom:8px;">Staffing progress bar shows when set. Position slot counts also count toward this total.</div></div>
-              </div>
-              <div style="margin-bottom:12px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                  <label style="font-size:11px;color:#888;">Positions / Roles Needed</label>
-                  <button onclick="addEventPosition()" style="background:#1A3A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">+ Add Position</button>
-                </div>
-                <div style="font-size:10px;color:#555;margin-bottom:6px;">Each position can have a slot count.</div>
-                <div id="sePositionsContainer"></div>
-              </div>
-              <div style="margin-bottom:12px;">
-                <label style="font-size:11px;color:#888;display:block;margin-bottom:6px;">Invite Members <span style="color:#555;">(checked members will see this in their MY SHIFTS &amp; EVENTS with an "I'll be there" button)</span></label>
-                <div style="display:flex;gap:8px;margin-bottom:8px;">
-                  <button type="button" class="btn btn-sm btn-secondary" onclick="seSelectAllMembers()">Select All</button>
-                  <button type="button" class="btn btn-sm btn-secondary" onclick="seClearAllMembers()">Clear All</button>
-                </div>
-                <div id="seMemberList" style="max-height:180px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#141414;"></div>
-              </div>
-              <input type="hidden" id="seEditId" value="">
-              <div style="display:flex;gap:8px;">
-                <button class="btn btn-primary" id="seSubmitBtn" onclick="saveSpecialEvent()" style="flex:1;">&#10003; Create Event</button>
-                <button class="btn btn-secondary" id="seCancelEditBtn" onclick="cancelEditSpecialEvent()" style="display:none;">Cancel</button>
-              </div>
-            </div>
-            <div id="specialEventsManagerContainer"></div>
-          </div>
-        </div>
-
-        <!-- ═══ SPECIAL EVENTS MEMBER VIEW (everyone) ═══ -->
-        <div class="card" id="specialEventsMemberCard" style="display:none;">
-          <div class="card-header" onclick="toggleStaffCard('specialEventsMemberBody','specialEventsMemberChevron')" style="cursor:pointer;user-select:none;">
-            <div class="icon">&#127914;</div>
-            <h2>Special Events</h2>
-            <span id="specialEventsMemberChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">&#9660;</span>
-          </div>
-          <div id="specialEventsMemberBody">
-            <div id="specialEventsContainer"></div>
-          </div>
-        </div>
-
-        <div class="card" id="meetingsManagerCard" style="display:none;">
-        <div class="card-header" onclick="toggleStaffCard('meetingsManagerBody','meetingsManagerChevron')" style="cursor:pointer;user-select:none;">
-          <div class="icon">&#128203;</div><h2>Meetings</h2>
-          <span id="meetingsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
-        </div>
-        <div id="meetingsManagerBody">
-          <div id="mtgCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
-            <div style="font-size:12px;font-weight:700;color:#27AE60;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">&#128203; Schedule Meeting</div>
-            <div class="form-group"><label>Title *</label><input type="text" id="mtgTitle" placeholder="e.g. Monthly Company Meeting"></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              <div class="form-group"><label>Date *</label><input type="date" id="mtgDate"></div>
-              <div class="form-group"><label>Time *</label><input type="time" id="mtgTime"></div>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              <div class="form-group"><label>Duration (min)</label><input type="number" id="mtgDuration" value="60" min="15" max="480" step="15"></div>
-              <div class="form-group"><label>Repeats</label><select id="mtgRecurrence" onchange="toggleMtgRecurrenceOpts()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;"><option value="">No repeat</option><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></div>
-            </div>
-            <div id="mtgRecurrenceOpts" style="display:none;margin-bottom:8px;"><div class="form-group"><label>Repeat until (optional)</label><input type="date" id="mtgUntil"></div></div>
-            <div class="form-group"><label>Location</label><input type="text" id="mtgLocation" placeholder="e.g. Station 13 &#8212; Bay Floor"></div>
-            <div class="form-group"><label>Agenda / Notes</label><textarea id="mtgDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              <div class="form-group">
-                <label>Member In Charge *</label>
-                <select id="mtgInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
-                  <option value="">— Select Member In Charge —</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Scheduled By</label>
-                <div id="mtgCreatedByDisplay" style="background:#141414;border:1px solid #2A2A2A;border-radius:8px;padding:10px;font-size:13px;color:#888;height:42px;display:flex;align-items:center;"></div>
-              </div>
-            </div>
-            <div class="form-group" style="margin-top:8px;">
-              <label>Expected Members</label>
-              <div style="display:flex;gap:8px;margin-bottom:8px;">
-                <button type="button" class="btn btn-sm btn-secondary" onclick="mtgSelectAllMembers()">Select All</button>
-                <button type="button" class="btn btn-sm btn-secondary" onclick="mtgClearAllMembers()">Clear All</button>
-              </div>
-              <div id="mtgMemberList" style="max-height:200px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#181818;"></div>
-            </div>
-            <input type="hidden" id="mtgEditId" value="">
-            <div style="display:flex;gap:8px;">
-              <button class="btn btn-primary" id="mtgSubmitBtn" onclick="saveMeeting()" style="flex:1;">&#10003; Schedule</button>
-              <button class="btn btn-secondary" id="mtgCancelBtn" onclick="cancelEditMeeting()" style="display:none;">Cancel</button>
-            </div>
-          </div>
-          <div id="meetingsListContainer"></div>
-        </div>
-      </div>
-      </div>
-    </div>
 
 <!-- ═══ VIEW-AS BANNER ═══ -->
 <div id="viewAsBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#F5A623;color:#111;font-size:12px;font-weight:700;text-align:center;padding:8px 60px;box-sizing:border-box;">
@@ -21387,7 +21221,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
       <!-- Daily Staffing Board -->
 
-      <!-- Manual Activity Entry moved to MORE menu (section-manual-entry) -->
+      <!-- Manual Activity Entry page removed from MORE menu -->
 
       <!-- Special Events member view moved to Events & Meetings sheet (more menu) -->
     </div><!-- end section-staffing -->
@@ -21722,79 +21556,148 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
     </div><!-- end section-approvals -->
 
-    <!-- ══════════════ MANUAL ENTRY TAB (More menu) ══════════════ -->
-    <div id="section-manual-entry" class="section">
-
-      <!-- Lock-out card for non-officers -->
-      <div class="card" id="manualEntryDenyCard" style="display:none;">
-        <div class="card-header"><div class="icon">🔒</div><h2>Officers &amp; Admin Only</h2></div>
-        <div style="padding:8px 4px 4px;">
-          <p style="font-size:13px;color:#AAA;line-height:1.6;margin:0 0 10px;">
-            Manual Activity Entry is restricted to officers and administrators. It is used to record meetings, drills, training, standby, fundraisers, and other activities for any member when they cannot log it themselves.
-          </p>
-          <p style="font-size:12px;color:#888;line-height:1.5;margin:0;">
-            If you need an activity recorded on your behalf, please ask an officer.
-          </p>
+    <!-- ══════ SPECIAL EVENTS TAB (More menu) ══════ -->
+    <div id="section-special-events" class="section">
+        <div class="card" id="specialEventsManagerCard" style="display:none;">
+          <div class="card-header" onclick="toggleStaffCard('specialEventsManagerBody','specialEventsManagerChevron')" style="cursor:pointer;user-select:none;">
+            <div class="icon">&#127920;</div><h2>Special Events</h2>
+            <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
+          </div>
+          <div id="specialEventsManagerBody">
+            <!-- Create New Event form — always in HTML for reliability -->
+            <div id="seCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+              <div style="font-size:12px;font-weight:700;color:#F5A623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">&#127920; Create New Event</div>
+              <!-- Created By / In Charge row -->
+              <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:8px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:8px 12px;">
+                  <span style="font-size:16px;">&#128274;</span>
+                  <div>
+                    <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Created By</div>
+                    <div id="seCreatedByDisplay" style="font-size:13px;font-weight:700;color:#27AE60;"></div>
+                  </div>
+                </div>
+                <div style="flex:1;min-width:180px;">
+                  <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">&#128100; Person in Charge</label>
+                  <select id="seInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;">
+                    <option value="">&#8212; Select member &#8212;</option>
+                  </select>
+                </div>
+              </div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Event Title *</label>
+              <input id="seTitle" type="text" placeholder="e.g. Annual Crab Feast..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Date *</label>
+                <input id="seStartDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Date (multi-day)</label>
+                <input id="seEndDate" type="date" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Start Time *</label>
+                <input id="seStartTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">End Time *</label>
+                <input id="seEndTime" type="time" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              </div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Location <span style="color:#555;font-size:10px;">(optional)</span></label>
+              <input id="seLocation" type="text" placeholder="e.g. Station 13 Parking Lot..." style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Description / Notes</label>
+              <textarea id="seDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">Total Members Needed <span style="color:#555;">(for staffing bar)</span></label>
+                <input id="seTotalNeeded" type="number" min="0" max="999" placeholder="e.g. 10" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:6px;padding:7px 10px;color:#F0F0F0;font-size:13px;box-sizing:border-box;"></div>
+                <div style="display:flex;flex-direction:column;justify-content:flex-end;">
+                <div style="font-size:10px;color:#555;line-height:1.5;padding-bottom:8px;">Staffing progress bar shows when set. Position slot counts also count toward this total.</div></div>
+              </div>
+              <div style="margin-bottom:12px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                  <label style="font-size:11px;color:#888;">Positions / Roles Needed</label>
+                  <button onclick="addEventPosition()" style="background:#1A3A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">+ Add Position</button>
+                </div>
+                <div style="font-size:10px;color:#555;margin-bottom:6px;">Each position can have a slot count.</div>
+                <div id="sePositionsContainer"></div>
+              </div>
+              <div style="margin-bottom:12px;">
+                <label style="font-size:11px;color:#888;display:block;margin-bottom:6px;">Invite Members <span style="color:#555;">(checked members will see this in their MY SHIFTS &amp; EVENTS with an "I'll be there" button)</span></label>
+                <div style="display:flex;gap:8px;margin-bottom:8px;">
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="seSelectAllMembers()">Select All</button>
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="seClearAllMembers()">Clear All</button>
+                </div>
+                <div id="seMemberList" style="max-height:180px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#141414;"></div>
+              </div>
+              <input type="hidden" id="seEditId" value="">
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-primary" id="seSubmitBtn" onclick="saveSpecialEvent()" style="flex:1;">&#10003; Create Event</button>
+                <button class="btn btn-secondary" id="seCancelEditBtn" onclick="cancelEditSpecialEvent()" style="display:none;">Cancel</button>
+              </div>
+            </div>
+            <div id="specialEventsManagerContainer"></div>
+          </div>
         </div>
-      </div>
 
-      <!-- Officer Manual Activity Entry -->
-      <div class="card" id="manualActivityCard" style="display:none;">
-        <div class="card-header" onclick="toggleAdminCardById('manualActivityBody')" style="cursor:pointer;user-select:none;">
-          <div class="icon">✏️</div>
-          <h2>Manual Activity Entry</h2>
-          <span style="font-size:11px;color:#555;margin-left:8px;">Officers &amp; Admin</span>
-          <span id="manualActivityChevron" style="margin-left:auto;font-size:13px;color:#555;transition:transform .2s;display:inline-block;">&#9660;</span>
+        <div class="card" id="specialEventsMemberCard" style="display:none;">
+          <div class="card-header" onclick="toggleStaffCard('specialEventsMemberBody','specialEventsMemberChevron')" style="cursor:pointer;user-select:none;">
+            <div class="icon">&#127914;</div>
+            <h2>Special Events</h2>
+            <span id="specialEventsMemberChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">&#9660;</span>
+          </div>
+          <div id="specialEventsMemberBody">
+            <div id="specialEventsContainer"></div>
+          </div>
         </div>
-        <div id="manualActivityBody">
-          <!-- Logged By Banner -->
-          <div style="display:flex;align-items:center;gap:10px;background:#0A1A0A;border:1px solid #1A4A1A;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
-            <span style="font-size:18px;">🔒</span>
-            <div>
-              <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1.5px;">Entry Recorded By</div>
-              <div id="manualEntryByName" style="font-size:14px;font-weight:700;color:#27AE60;"></div>
+    </div><!-- end section-special-events -->
+
+    <!-- ══════ MEETINGS TAB (More menu) ══════ -->
+    <div id="section-meetings" class="section">
+        <div class="card" id="meetingsManagerCard" style="display:none;">
+        <div class="card-header" onclick="toggleStaffCard('meetingsManagerBody','meetingsManagerChevron')" style="cursor:pointer;user-select:none;">
+          <div class="icon">&#128203;</div><h2>Meetings</h2>
+          <span id="meetingsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
+        </div>
+        <div id="meetingsManagerBody">
+          <div id="mtgCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+            <div style="font-size:12px;font-weight:700;color:#27AE60;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">&#128203; Schedule Meeting</div>
+            <div class="form-group"><label>Title *</label><input type="text" id="mtgTitle" placeholder="e.g. Monthly Company Meeting"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div class="form-group"><label>Date *</label><input type="date" id="mtgDate"></div>
+              <div class="form-group"><label>Time *</label><input type="time" id="mtgTime"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div class="form-group"><label>Duration (min)</label><input type="number" id="mtgDuration" value="60" min="15" max="480" step="15"></div>
+              <div class="form-group"><label>Repeats</label><select id="mtgRecurrence" onchange="toggleMtgRecurrenceOpts()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;"><option value="">No repeat</option><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></div>
+            </div>
+            <div id="mtgRecurrenceOpts" style="display:none;margin-bottom:8px;"><div class="form-group"><label>Repeat until (optional)</label><input type="date" id="mtgUntil"></div></div>
+            <div class="form-group"><label>Location</label><input type="text" id="mtgLocation" placeholder="e.g. Station 13 &#8212; Bay Floor"></div>
+            <div class="form-group"><label>Agenda / Notes</label><textarea id="mtgDesc" rows="2" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div class="form-group">
+                <label>Member In Charge *</label>
+                <select id="mtgInCharge" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
+                  <option value="">— Select Member In Charge —</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Scheduled By</label>
+                <div id="mtgCreatedByDisplay" style="background:#141414;border:1px solid #2A2A2A;border-radius:8px;padding:10px;font-size:13px;color:#888;height:42px;display:flex;align-items:center;"></div>
+              </div>
+            </div>
+            <div class="form-group" style="margin-top:8px;">
+              <label>Expected Members</label>
+              <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <button type="button" class="btn btn-sm btn-secondary" onclick="mtgSelectAllMembers()">Select All</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="mtgClearAllMembers()">Clear All</button>
+              </div>
+              <div id="mtgMemberList" style="max-height:200px;overflow-y:auto;border:1px solid #333;border-radius:8px;padding:8px;background:#181818;"></div>
+            </div>
+            <input type="hidden" id="mtgEditId" value="">
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-primary" id="mtgSubmitBtn" onclick="saveMeeting()" style="flex:1;">&#10003; Schedule</button>
+              <button class="btn btn-secondary" id="mtgCancelBtn" onclick="cancelEditMeeting()" style="display:none;">Cancel</button>
             </div>
           </div>
-          <div class="form-grid">
-            <div class="form-group" style="grid-column:1/-1;">
-              <label>Member *</label>
-              <select id="manualMemberId" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
-                <option value="">— Select member —</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Activity Type *</label>
-              <select id="manualCategory" onchange="manualCategoryChanged()" style="width:100%;background:#1E1E1E;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:13px;">
-                <option value="">— Select type —</option>
-                <option value="meeting">Company Meeting</option>
-                <option value="boardmeeting">Board Meeting</option>
-                <option value="duties">Standby / Collateral Duty</option>
-                <option value="training">Training</option>
-                <option value="drill">Drill / In-House Training</option>
-                <option value="fundraiser">Fundraiser / Special Event</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Date *</label>
-              <input type="date" id="manualDate">
-            </div>
-            <div class="form-group" id="manualHoursGroup">
-              <label>Hours <span id="manualHoursHint" style="color:#666;font-size:10px;"></span></label>
-              <input type="number" id="manualHours" min="0.5" step="0.5" placeholder="e.g. 2">
-            </div>
-            <div class="form-group" style="grid-column:1/-1;">
-              <label>Description / Notes *</label>
-              <input type="text" id="manualDesc" placeholder="e.g. Monthly Company Meeting, Station coverage 1800-0600…">
-            </div>
-          </div>
-          <button class="btn btn-primary btn-full" onclick="saveManualActivity()" style="margin-top:4px;">✅ Record Activity</button>
-          <!-- Recent manual entries -->
-          <div id="manualRecentEntries" style="margin-top:14px;"></div>
+          <div id="meetingsListContainer"></div>
         </div>
       </div>
+    </div><!-- end section-meetings -->
 
-    </div><!-- end section-manual-entry -->
 
     <!-- ══════════════ ADMIN TAB ══════════════ -->
     <div id="section-admin" class="section">
@@ -22407,15 +22310,14 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <!-- ── Section: Pages ────────────────────────────── -->
       <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:4px 0 10px 4px;">Pages</div>
       <button class="btn btn-secondary btn-full" onclick="showTab('training');closeMoreMenu()">📚 Training</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showEventsSheet();closeMoreMenu()">🎪 Special Events</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showMeetingsOnlySheet();closeMoreMenu()">📋 Meetings</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('special-events');closeMoreMenu()">🎪 Special Events</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('meetings');closeMoreMenu()">📋 Meetings</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('past-alerts');closeMoreMenu()">📜 Past Alerts</button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="showTab('emergency');closeMoreMenu()">🚒 Emergency Response</button>
 
       <!-- ── Section: Activity ─────────────────────────── -->
       <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:18px 0 10px 4px;">Activity</div>
       <button class="btn btn-secondary btn-full" onclick="showTab('log-entry');closeMoreMenu()">➕ Log Past LOSAP Activity</button>
-      <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreManualEntryBtn" onclick="showTab('manual-entry');closeMoreMenu()">✏️ Manual Activity Entry</button>
 
       <!-- ── Section: LOSAP ────────────────────────────── -->
       <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:18px 0 10px 4px;">LOSAP</div>
