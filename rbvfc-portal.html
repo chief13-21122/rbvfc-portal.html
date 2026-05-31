@@ -502,9 +502,6 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
   body.public-view #tabBar { display:none !important; }
 }
 /* ─── All collapsible card windows closed by default ─── */
-#specialEventsManagerBody,
-#specialEventsMemberBody,
-#meetingsManagerBody,
 #myClassesTodayBody,
 #clockTabMyShiftsBody,
 #recentSessionsBody,
@@ -527,9 +524,6 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
   display: none;
 }
 /* Chevrons pointing right (closed state) by default */
-#specialEventsManagerChevron,
-#specialEventsMemberChevron,
-#meetingsManagerChevron,
 #myClassesTodayChevron,
 #clockTabMyShiftsChevron,
 #recentSessionsChev,
@@ -12429,10 +12423,12 @@ function showEventsSheet() {
     if (canManage) {
       if (mgCard) mgCard.style.display = 'block';
       if (mbCard) mbCard.style.display = 'none';
+      var seB = document.getElementById('specialEventsManagerBody'); if (seB) seB.style.display = 'block';
       renderSpecialEventAdmin();
     } else {
       if (mgCard) mgCard.style.display = 'none';
       if (mbCard) mbCard.style.display = 'block';
+      var seMB = document.getElementById('specialEventsMemberBody'); if (seMB) seMB.style.display = 'block';
       renderSpecialEvents('specialEventsContainer');
     }
   } catch(e){}
@@ -12448,6 +12444,7 @@ function showMeetingsOnlySheet() {
   var mbCard = document.getElementById('specialEventsMemberCard');
   if (mgCard) mgCard.style.display = 'none';
   if (mbCard) mbCard.style.display = 'none';
+  var mtgB = document.getElementById('meetingsManagerBody'); if (mtgB) mtgB.style.display = 'block';
   // Meetings card (role-aware) + form
   try { initMeetingsCard(); } catch(e){}
   try { initMeetingForm(); }  catch(e){}
@@ -20544,9 +20541,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
         <!-- ═══ SPECIAL EVENTS MANAGER (officers/admin) ═══ -->
         <div class="card" id="specialEventsManagerCard" style="display:none;">
-          <div class="card-header" onclick="toggleStaffCard('specialEventsManagerBody','specialEventsManagerChevron')" style="cursor:pointer;user-select:none;">
+          <div class="card-header" style="user-select:none;">
             <div class="icon">&#127920;</div><h2>Special Events</h2>
-            <span id="specialEventsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
           </div>
           <div id="specialEventsManagerBody">
             <!-- Create New Event form — always in HTML for reliability -->
@@ -20620,10 +20616,9 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
 
         <!-- ═══ SPECIAL EVENTS MEMBER VIEW (everyone) ═══ -->
         <div class="card" id="specialEventsMemberCard" style="display:none;">
-          <div class="card-header" onclick="toggleStaffCard('specialEventsMemberBody','specialEventsMemberChevron')" style="cursor:pointer;user-select:none;">
+          <div class="card-header" style="user-select:none;">
             <div class="icon">&#127914;</div>
             <h2>Special Events</h2>
-            <span id="specialEventsMemberChevron" style="margin-left:auto;color:#555;font-size:13px;display:inline-block;transition:transform .2s;">&#9660;</span>
           </div>
           <div id="specialEventsMemberBody">
             <div id="specialEventsContainer"></div>
@@ -20631,9 +20626,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         </div>
 
         <div class="card" id="meetingsManagerCard" style="display:none;">
-        <div class="card-header" onclick="toggleStaffCard('meetingsManagerBody','meetingsManagerChevron')" style="cursor:pointer;user-select:none;">
+        <div class="card-header" style="user-select:none;">
           <div class="icon">&#128203;</div><h2>Meetings</h2>
-          <span id="meetingsManagerChevron" style="margin-left:auto;color:#555;font-size:13px;transition:transform .2s;display:inline-block;">&#9660;</span>
         </div>
         <div id="meetingsManagerBody">
           <div id="mtgCreateForm" style="background:#1A1A1A;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
