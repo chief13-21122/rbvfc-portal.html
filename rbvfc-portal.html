@@ -928,15 +928,22 @@ function _mergeAndRender(remote) {
   _fbInitialLoadDone = true;
   _fbRecordGoodCounts(state);
   try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
-  // Keep the login "Select your name" dropdown current — a member added on
-  // another device (or before this device has logged in) arrives via this
-  // snapshot, and without this re-render the list stays stale until reload.
-  try { renderLoginMemberList(); } catch(e){}
-  // Keep the admin Member Management table current if it's on screen.
+  // Only refresh roster-dependent UI when the roster ACTUALLY changed. Snapshots
+  // fire constantly (CAD sync, shift edits, any device's save); rebuilding the
+  // login dropdown on every one of them resets the user's in-progress selection
+  // before they can log in. Compare a signature and skip when unchanged.
   try {
-    var _admSec = document.getElementById('section-admin');
-    if (_admSec && (_admSec.classList.contains('active') || _admSec.style.display !== 'none')) {
-      renderAdminRoster();
+    var _rosterSig = (state.roster||[]).map(function(m){
+      return m.id+':'+(m.last||'')+','+(m.first||'')+':'+(m.memberId||'')+':'+(m.active!==false?'1':'0');
+    }).join('|');
+    if (_rosterSig !== window._lastRosterSig) {
+      window._lastRosterSig = _rosterSig;
+      try { renderLoginMemberList(); } catch(e){}
+      // Keep the admin Member Management table current if it's on screen.
+      var _admSec = document.getElementById('section-admin');
+      if (_admSec && (_admSec.classList.contains('active') || _admSec.style.display !== 'none')) {
+        try { renderAdminRoster(); } catch(e){}
+      }
     }
   } catch(e){}
   try { renderMyShifts(); }     catch(e){}
@@ -14844,6 +14851,7 @@ function boot() {
 function renderLoginMemberList() {
   var sel = document.getElementById('loginMember');
   if (!sel) return;
+  var _prev = sel.value;  // preserve any in-progress selection across the rebuild
   sel.innerHTML = '<option value="">— Select your name —</option>';
   var members = (state.roster||[]).filter(function(m){ return m.active !== false; })
     .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); });
@@ -14853,6 +14861,8 @@ function renderLoginMemberList() {
     opt.textContent = m.last + ', ' + m.first + (m.memberId?' (50-'+m.memberId+')':'');
     sel.appendChild(opt);
   });
+  // Restore prior selection if that member still exists
+  if (_prev && members.some(function(m){ return m.id === _prev; })) sel.value = _prev;
   // Show/hide first-time setup link
   var ftSetup = document.getElementById('firstTimeSetup');
   if (ftSetup) ftSetup.style.display = members.length === 0 ? 'block' : 'none';
