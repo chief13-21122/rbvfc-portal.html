@@ -928,6 +928,17 @@ function _mergeAndRender(remote) {
   _fbInitialLoadDone = true;
   _fbRecordGoodCounts(state);
   try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
+  // Keep the login "Select your name" dropdown current — a member added on
+  // another device (or before this device has logged in) arrives via this
+  // snapshot, and without this re-render the list stays stale until reload.
+  try { renderLoginMemberList(); } catch(e){}
+  // Keep the admin Member Management table current if it's on screen.
+  try {
+    var _admSec = document.getElementById('section-admin');
+    if (_admSec && (_admSec.classList.contains('active') || _admSec.style.display !== 'none')) {
+      renderAdminRoster();
+    }
+  } catch(e){}
   try { renderMyShifts(); }     catch(e){}
   try { renderStaffingBoard(); } catch(e){}
   try { renderLOSAP(); }        catch(e){}
