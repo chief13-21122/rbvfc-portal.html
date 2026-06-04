@@ -7578,9 +7578,9 @@ function _buildOfficerAssignHtml(uId, date, uPos) {
   h += '</select></div>';
   h += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">';
   h += '<label style="font-size:11px;color:#666;">Start:</label>';
-  h += '<input type="time" id="assignStart_'+uId+'" value="07:00" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:100px;">';
+  h += '<input type="time" id="assignStart_'+uId+'" value="07:00" onchange="updateAssignMemberDropdown(\''+uId+'\',\''+date+'\')" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:100px;">';
   h += '<label style="font-size:11px;color:#666;">Hours:</label>';
-  h += '<input type="number" id="assignHours_'+uId+'" value="24" min="1" max="72" step="0.5" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:70px;">';
+  h += '<input type="number" id="assignHours_'+uId+'" value="24" min="1" max="72" step="0.5" onchange="updateAssignMemberDropdown(\''+uId+'\',\''+date+'\')" style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:4px 8px;font-size:12px;width:70px;">';
   h += '<button class="btn btn-sm btn-primary" onclick="officerAssign(\''+date+'\',\''+uId+'\')" style="flex-shrink:0;">Assign</button>';
   h += '</div></div>';
   return h;
@@ -7740,17 +7740,28 @@ function renderStaffingBoard() {
         var EMS_IDS = ['a139','Mu13'];
         var uIdIsEMS = EMS_IDS.indexOf(uId) >= 0;
         var myShiftsOnDate = (state.staffingShifts||[]).filter(function(s){ return s.date===date && s.memberId===uid; });
+        // Window this Sign Up would create (matches the Sign Up button's data-start/data-hours)
+        var _propStart = posShifts.length > 0 ? (nextOpenStart() || '0700') : '0700';
+        var _propHours = posShifts.length > 0 ? remainingHours() : 24;
         var hasConflict = myShiftsOnDate.some(function(s){
-          if (s.unitId===uId) return false;
+          if (s.unitId===uId) {
+            // Same unit: only a conflict if it overlaps the window we'd fill on a
+            // DIFFERENT position (a member can't occupy two seats at once). A
+            // non-overlapping window on the same unit is allowed; the same position
+            // is handled by alreadyHaveSlot / the open-window logic.
+            if (s.positionIndex !== posIdx &&
+                _shiftsOverlap(s.shiftStart||s.start||'0700', s.shiftHours||s.hours||24, _propStart, _propHours)) {
+              return true;
+            }
+            return false;
+          }
           if (areUnitsLinked(uId, s.unitId, date)) return false;
           var shiftIsEMS = EMS_IDS.indexOf(s.unitId) >= 0;
           if (uIdIsEMS !== shiftIsEMS) return false;
           // If clocked in for an overlapping shift, hard-block regardless of unit
           if (s.clockedIn && !s.clockedOutAt) {
             // Check time overlap with the proposed new shift
-            var _ps = posShifts.length > 0 ? (_nextStart||'0700') : '0700';
-            var _ph = posShifts.length > 0 ? (_remHours||24) : 24;
-            if (_shiftsOverlap(s.shiftStart||s.start||'0700', s.shiftHours||s.hours||24, _ps, _ph)) return true;
+            if (_shiftsOverlap(s.shiftStart||s.start||'0700', s.shiftHours||s.hours||24, _propStart, _propHours)) return true;
           }
           return true;
         });
@@ -8556,6 +8567,10 @@ function confirmSignUp() {
       // Only block cross-unit conflicts — multiple positions on same unit now allowed
       showToast('\u26a0\ufe0f Conflict: already signed up for ' + _oUnit + ' during that time.');
       return;
+    } else if (_overlapSh.positionIndex !== posIdx) {
+      // Same unit, different position, overlapping time — can't hold two seats at once
+      showToast('\u26a0\ufe0f Conflict: already on ' + _oUnit + ' (' + (_overlapSh.position||'another position') + ') during that time.');
+      return;
     }
   }
   if (!Array.isArray(state.staffingShifts)) state.staffingShifts = [];
@@ -8662,6 +8677,7 @@ function updateAssignMemberDropdown(unitId, date) {
   var memSel  = document.getElementById('assignMember_' + unitId);
   if (!posSel || !memSel) return;
 
+  var _prevSel = memSel.value;  // preserve in-progress selection across rebuilds (e.g. Start/Hours edits)
   var posVal = posSel.value;
   var positions = getUnitPositions(unitId);
   var posName = posVal === '999' ? 'Student'
@@ -8710,6 +8726,11 @@ function updateAssignMemberDropdown(unitId, date) {
     opts += '<option value="" disabled>No eligible members</option>';
   }
   memSel.innerHTML = opts;
+  // Re-select the previously chosen member if they're still eligible for the new window
+  if (_prevSel) {
+    var _stillEligible = Array.prototype.some.call(memSel.options, function(o){ return o.value === _prevSel; });
+    if (_stillEligible) memSel.value = _prevSel;
+  }
 }
 
 
@@ -8718,6 +8739,9 @@ function fillAvailableWindow(unitId, startTime, hours) {
   var hoursEl = document.getElementById('assignHours_'+unitId);
   if (startEl) startEl.value = startTime;
   if (hoursEl) hoursEl.value = hours;
+  // Refresh eligible-member list for the new window so overlapping members drop off
+  var _dEl = document.getElementById('staffingDate');
+  try { updateAssignMemberDropdown(unitId, _dEl ? _dEl.value : ''); } catch(e){}
   showToast('\u2139\ufe0f Start and hours set to fill available window. Select position and member.');
 }
 
@@ -20919,25 +20943,29 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         <!-- Controls area -->
         <div style="padding:0 20px 24px;background:#111;">
 
-          <!-- Duty type selector -->
+          <!-- Collateral Duty (only clock-in type — no dropdown needed) -->
           <div style="margin-bottom:16px;">
-            <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#666;text-align:center;margin-bottom:8px;">DUTY TYPE</div>
-            <select id="clockActivity" onchange="onClockActivityChange()" data-onchange="onClockActivityChange()" style="width:100%;background:#1A1A1A;border:1px solid #2A2A2A;color:#F0F0F0;border-radius:10px;padding:12px 14px;font-size:15px;font-family:'Barlow Condensed',sans-serif;letter-spacing:1px;appearance:none;-webkit-appearance:none;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%228%22 viewBox=%220 0 12 8%22><path d=%22M1 1l5 5 5-5%22 stroke=%22%23555%22 stroke-width=%221.5%22 fill=%22none%22/></svg>');background-repeat:no-repeat;background-position:right 14px center;">
-              <option value="collateral">Collateral Duty</option>
-            </select>
-
-            <!-- Collateral Duty explainer -->
-            <details class="collateral-duty-info" style="margin-top:10px;background:#141414;border:1px solid #2A2A2A;border-radius:10px;overflow:hidden;">
-              <summary style="cursor:pointer;list-style:none;padding:11px 14px;display:flex;align-items:center;justify-content:space-between;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:600;letter-spacing:1px;color:#7EC8E3;">
-                <span>ℹ️ What is Collateral Duty?</span>
-                <span style="color:#555;font-size:11px;letter-spacing:1px;">tap to expand</span>
-              </summary>
-              <div style="padding:0 14px 14px;font-size:12.5px;color:#AAA;line-height:1.6;">
-                <strong style="color:#DDD;">Collateral Duty</strong> is non-emergency time you spend supporting the company — for example: station and apparatus maintenance, gear and equipment checks, standby or sleep-in coverage, fundraiser and special-event setup, and administrative or committee work.
-                <div style="margin-top:8px;">Clock in when you begin and clock out when you finish so your time is recorded accurately.</div>
-                <div style="margin-top:8px;color:#888;font-size:11.5px;">LOSAP credit: <strong style="color:#AAA;">1 point per 4 hours</strong> of collateral duty, up to <strong style="color:#AAA;">20 points per year</strong> (AACVFA §3c).</div>
+            <div style="background:#141414;border:1px solid #2A2A2A;border-radius:10px;overflow:hidden;">
+              <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #222;">
+                <span style="font-size:20px;line-height:1;">🛠️</span>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#666;">Clocking In For</div>
+                  <div style="font-family:'Bebas Neue',sans-serif;font-size:21px;letter-spacing:2px;color:#F0F0F0;line-height:1.1;">COLLATERAL DUTY</div>
+                </div>
               </div>
-            </details>
+              <!-- Collateral Duty explainer -->
+              <details class="collateral-duty-info">
+                <summary style="cursor:pointer;list-style:none;padding:11px 14px;display:flex;align-items:center;justify-content:space-between;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:600;letter-spacing:1px;color:#7EC8E3;">
+                  <span>ℹ️ What is Collateral Duty?</span>
+                  <span style="color:#555;font-size:11px;letter-spacing:1px;">tap to expand</span>
+                </summary>
+                <div style="padding:0 14px 14px;font-size:12.5px;color:#AAA;line-height:1.6;">
+                  <strong style="color:#DDD;">Collateral Duty</strong> is non-emergency time you spend supporting the company — for example: station and apparatus maintenance, gear and equipment checks, standby or sleep-in coverage, fundraiser and special-event setup, and administrative or committee work.
+                  <div style="margin-top:8px;">Clock in when you begin and clock out when you finish so your time is recorded accurately.</div>
+                  <div style="margin-top:8px;color:#888;font-size:11.5px;">LOSAP credit: <strong style="color:#AAA;">1 point per 4 hours</strong> of collateral duty, up to <strong style="color:#AAA;">20 points per year</strong> (AACVFA §3c).</div>
+                </div>
+              </details>
+            </div>
           </div>
 
           <!-- Description (required for meeting / collateral) -->
