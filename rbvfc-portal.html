@@ -8980,7 +8980,7 @@ function notifyUnderstaffedDay(date) {
 var _clockedInReminderInterval = null;
 var REMINDER_THRESHOLD_HRS  = 3.5;  // fatigue warning: 30 min before the 4-hour mark
 var AUTO_CLOCKOUT_GRACE_MINS = 5;   // auto-close if no ack within 5 minutes
-var PRESHIFT_REMINDER_MINS   = 30;  // fire pre-start reminder 30 min before scheduled start
+var PRESHIFT_REMINDER_MINS   = 2;   // fire clock-in reminder 2 min before scheduled start
 
 function startClockedInReminderPoller() {
   if (_clockedInReminderInterval) clearInterval(_clockedInReminderInterval);
@@ -9384,13 +9384,27 @@ function _firePreStartReminder(record, kindLabel, displayName, startD) {
   save();
   var uid = state.currentUserId;
   var startStr = startD.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+  var mins = PRESHIFT_REMINDER_MINS;
+  var minLbl = mins + ' MIN';
+  // Drills have no live clock-in path (members RSVP only), so use a
+  // "starting soon" nudge for drills and a "clock in" reminder for the
+  // shift/meeting/event types that do have a clock-in.
+  var isDrill = (kindLabel === 'DRILL');
+  var bannerTitle = '\u23F0 ' + kindLabel + ' STARTS IN ' + minLbl;
+  var bannerSub   = (isDrill ? '' : 'Clock in now \u00b7 ') + displayName + ' \u00b7 ' + startStr;
+  var pushTitle   = isDrill
+    ? ('\u23F0 ' + kindLabel + ' starts in ' + mins + ' min')
+    : ('\u23F0 Clock in \u2014 ' + kindLabel + ' starts in ' + mins + ' min');
+  var pushBody    = isDrill
+    ? (displayName + ' \u00b7 ' + startStr + '. Tap to open the portal.')
+    : (displayName + ' \u00b7 ' + startStr + '. Tap to clock in.');
   // Banner
   try {
     if (typeof _showTopBanner === 'function') {
       _showTopBanner(
         'staffingReminderBanner', '#1A1200', '#F5A623', '\u23F0',
-        '\u23F0 ' + kindLabel + ' STARTS IN 30 MIN',
-        displayName + ' \u00b7 ' + startStr,
+        bannerTitle,
+        bannerSub,
         [{ label: 'Got it', fn: 'dismissReminder()', bg: 'transparent', color: '#F5A623', border: '#F5A623' }]
       );
     }
@@ -9398,8 +9412,8 @@ function _firePreStartReminder(record, kindLabel, displayName, startD) {
   // Push notification
   try {
     sendPushToMembers([uid],
-      '\u23F0 ' + kindLabel + ' starts in 30 min',
-      displayName + ' \u00b7 ' + startStr + '. Tap to open the portal.',
+      pushTitle,
+      pushBody,
       'preshift_' + (record.id || record.mtgId || record.eventId || displayName) + '_' + startD.toISOString().slice(0,10)
     , 'reminders');
   } catch(e) {}
@@ -9585,6 +9599,31 @@ function checkUpcomingReminders() {
       mySignup._preReminded30 = true;
       save();
       _firePreStartReminder(mySignup, 'EVENT', ev.title || 'Special Event', win.start);
+    }
+  });
+
+  // Scheduled drills I'm invited to or have RSVP'd for.
+  // Drills have no live clock-in (RSVP only), so this is a "starting soon"
+  // nudge. Fires once per drill via a _preReminded30 flag.
+  (state.scheduledDrills||[]).forEach(function(dr) {
+    if (!dr.date || dr.date < today) return;
+    // Invited (member listed) OR open-to-all OR already RSVP'd
+    var invited = !(dr.members && dr.members.length) || (dr.members.indexOf(uid) >= 0);
+    var confirmed = (dr.confirmedMembers||[]).indexOf(uid) >= 0;
+    if (!invited && !confirmed) return;
+    if (dr._preReminded30) return;
+    var t = dr.time || '19:00';
+    var tp = String(t).split(':');
+    var sH = parseInt(tp[0]||'19');
+    var sM = parseInt(tp[1]||'0');
+    var startD = new Date(dr.date + 'T' + (sH<10?'0':'') + sH + ':' + (sM<10?'0':'') + sM + ':00');
+    if (isNaN(startD.getTime())) return;
+    var msUntil = startD.getTime() - nowMs;
+    if (msUntil > 0 && msUntil <= preWindowMs) {
+      dr._preReminded30 = true;
+      save();
+      var drLbl = (dr.drillCode ? dr.drillCode + ' \u2014 ' : '') + (dr.drillName || 'Drill');
+      _firePreStartReminder({ id: dr.id, _preReminded30: true }, 'DRILL', drLbl, startD);
     }
   });
 
@@ -12263,7 +12302,20 @@ function clockInSpecialEvent(elOrId) {
   var ev = (state.specialEvents||[]).find(function(e){ return e.id===evId; });
   if (!ev) return;
   var signup = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
-  if (!signup) { showToast('\u26a0\ufe0f Sign up first.'); return; }
+  if (!signup) {
+    // Walk-in: not signed up. Offer to join if the event is active now,
+    // otherwise fall back to the original "sign up first" guidance.
+    var _wNow = new Date();
+    var _wT = ev.startTime || ev.time || '00:00';
+    var _wStart = new Date(ev.date + 'T' + _wT + ':00');
+    var _wEnd = ev.endTime ? new Date(ev.date + 'T' + ev.endTime + ':00') : new Date(_wStart.getTime() + 7200000);
+    if (!isNaN(_wStart.getTime()) && _wNow >= new Date(_wStart.getTime() - 3600000) && _wNow <= _wEnd) {
+      _promptWalkIn({ type:'event', id:ev.id, title:(ev.title||'Special Event'), inCharge:ev.inCharge });
+    } else {
+      showToast('\u26a0\ufe0f Sign up first.');
+    }
+    return;
+  }
   // Time window: 1 hour before start until end
   var now = new Date();
   var timeStr = ev.startTime || ev.time || '00:00';
@@ -13073,6 +13125,13 @@ function clockInMeeting(mtgId, occurrenceDate) {
   }
   att.clockedInAt = now.toISOString();
   att.clockedOutAt = null;
+  // Walk-in: member clocked into a meeting they weren't invited to. Flag it
+  // and notify the person in charge (once per attendance record).
+  if (mtg.members && mtg.members.length && mtg.members.indexOf(uid) < 0 && !att._walkInNotified) {
+    att.walkIn = true;
+    att._walkInNotified = true;
+    _notifyInCharge(mtg.inCharge, uid, 'walked in to ' + (mtg.title||'meeting'));
+  }
   if (!state.currentSession || state.currentSession.userId !== uid) {
     state.currentSession = { id:'sess_mtg_'+Date.now(), userId:uid, start:now.toISOString(),
       activity:'meeting', desc:mtg.title, mtgId:mtgId, mtgDate:occurrenceDate, end:null, duration:null };
@@ -16857,7 +16916,185 @@ function onClockActivityChange() {
   if (lbl) lbl.textContent = 'REQUIRED';
 }
 
-function clockIn() {
+// ═══════════════════════════════════════════════════
+//  WALK-IN DETECTION (clock-in during an active meeting/event/drill
+//  when the member isn't already on the attendee list)
+// ═══════════════════════════════════════════════════
+// Returns active meeting/event/drill targets where `uid` is NOT yet an
+// attendee/signup/confirmed member and the activity is happening now.
+function _findWalkInTargets(uid, now) {
+  var out = [];
+  if (!uid) return out;
+  now = now || new Date();
+  var nowMs = now.getTime();
+
+  // Meetings: clock-in window is 1hr before start through end.
+  (state.meetings||[]).forEach(function(mtg){
+    var occ = (typeof nextMeetingOccurrence==='function') ? nextMeetingOccurrence(mtg) : mtg.date;
+    if (!occ) return;
+    var win = (typeof _meetingScheduleWindow==='function') ? _meetingScheduleWindow(mtg, occ) : null;
+    if (!win) return;
+    if (nowMs < (win.start.getTime() - 3600000) || nowMs > win.end.getTime()) return;
+    var att = (state.meetingAttendance||[]).find(function(a){
+      return a.mtgId===mtg.id && a.date===occ && a.memberId===uid;
+    });
+    if (att && att.clockedInAt) return; // already clocked in
+    out.push({ type:'meeting', id:mtg.id, occDate:occ, title:(mtg.title||'Meeting'), inCharge:mtg.inCharge });
+  });
+
+  // Special events: clock-in window is 1hr before start through end.
+  (state.specialEvents||[]).forEach(function(ev){
+    if (!ev.date) return;
+    var win = (typeof _eventScheduleWindow==='function') ? _eventScheduleWindow(ev) : null;
+    if (!win) return;
+    if (nowMs < (win.start.getTime() - 3600000) || nowMs > win.end.getTime()) return;
+    var sg = (ev.signups||[]).find(function(s){ return s.memberId===uid; });
+    if (sg && sg.clockedIn) return; // already clocked in
+    out.push({ type:'event', id:ev.id, title:(ev.title||'Special Event'), inCharge:ev.inCharge });
+  });
+
+  // Scheduled drills: no live clock-in; active window is start through
+  // start + planned hours. Walk-in = add to confirmedMembers.
+  (state.scheduledDrills||[]).forEach(function(dr){
+    if (!dr.date) return;
+    var t = dr.time || '19:00';
+    var tp = String(t).split(':');
+    var sH = parseInt(tp[0]||'19'), sM = parseInt(tp[1]||'0');
+    var startD = new Date(dr.date + 'T' + (sH<10?'0':'')+sH + ':' + (sM<10?'0':'')+sM + ':00');
+    if (isNaN(startD.getTime())) return;
+    var endMs = startD.getTime() + ((parseFloat(dr.hours)||2.5) * 3600000);
+    if (nowMs < startD.getTime() || nowMs > endMs) return;
+    if ((dr.confirmedMembers||[]).indexOf(uid) >= 0) return; // already on roster
+    out.push({ type:'drill', id:dr.id,
+      title:((dr.drillCode?dr.drillCode+' \u2014 ':'')+(dr.drillName||'Drill')),
+      inCharge:dr.createdBy });
+  });
+
+  return out;
+}
+
+// Notify the person in charge that a member walked in.
+function _notifyInCharge(micId, memberId, action) {
+  if (!micId || micId === state.currentUserId) return;
+  var mem = (state.roster||[]).find(function(x){ return x.id===memberId; });
+  var memName = mem ? mem.last + ', ' + mem.first : 'A member';
+  if (!Array.isArray(state.staffingAlerts)) state.staffingAlerts = [];
+  state.staffingAlerts.push({
+    id: 'alert_mic_' + Date.now(),
+    msg: memName + ' ' + action,
+    sentBy: state.currentUserId,
+    sentAt: new Date().toISOString(),
+    group: 'individual',
+    targetMembers: [micId],
+    clears: []
+  });
+  save();
+  try {
+    sendPushToMembers([micId], '\uD83D\uDC4B Walk-in',
+      memName + ' ' + action,
+      'walkin_' + memberId + '_' + (typeof localDateStr==='function'?localDateStr():new Date().toISOString().slice(0,10)),
+      'staffing');
+  } catch(e) {}
+}
+
+function _closeWalkInModal() {
+  var m = document.getElementById('_walkInModal');
+  if (m && m.parentNode) m.parentNode.removeChild(m);
+}
+
+// Confirm modal asking whether the member is clocking in for `target`.
+// target may carry an optional _onNo() callback (used by general clock-in
+// to fall through to a normal collateral clock-in).
+function _promptWalkIn(target) {
+  if (!target) return;
+  if (document.getElementById('_walkInModal')) return;
+  var typeLabel = target.type==='meeting' ? 'meeting' : (target.type==='drill' ? 'drill' : 'event');
+  var safeTitle = (typeof _escapeHtml==='function') ? _escapeHtml(target.title||'') : (target.title||'');
+  var ov = document.createElement('div');
+  ov.id = '_walkInModal';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;padding:24px;';
+  ov.innerHTML =
+    '<div style="background:#141414;border:1px solid #C8102E;border-radius:14px;max-width:380px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,0.6);">'
+    + '<div style="font-size:30px;text-align:center;margin-bottom:8px;">\uD83D\uDC4B</div>'
+    + '<div style="font-size:17px;font-weight:700;color:#FFF;text-align:center;margin-bottom:6px;">Clocking in for this ' + typeLabel + '?</div>'
+    + '<div style="font-size:14px;color:#BBB;text-align:center;line-height:1.5;margin-bottom:18px;">'
+      + '<strong style="color:#FFF;">' + safeTitle + '</strong> is happening now. Add you to the attendee list?</div>'
+    + '<div style="display:flex;flex-direction:column;gap:10px;">'
+      + '<button id="_walkInYes" class="btn btn-success" style="width:100%;">\u2705 Yes, add me</button>'
+      + '<button id="_walkInNo" class="btn btn-secondary" style="width:100%;">No, not for this</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+  document.getElementById('_walkInYes').onclick = function(){ _closeWalkInModal(); _joinWalkIn(target); };
+  document.getElementById('_walkInNo').onclick  = function(){ _closeWalkInModal(); if (typeof target._onNo==='function') target._onNo(); };
+}
+
+// Add the member to the target's attendee list (+ clock in for meeting/event)
+// and notify the person in charge.
+function _joinWalkIn(target) {
+  var uid = state.currentUserId;
+  if (!uid || !target) return;
+  var now = new Date();
+
+  if (target.type==='meeting') {
+    var mtg = (state.meetings||[]).find(function(m){ return m.id===target.id; });
+    if (!mtg) return;
+    var occ = target.occDate || mtg.date;
+    if (!Array.isArray(state.meetingAttendance)) state.meetingAttendance = [];
+    var att = state.meetingAttendance.find(function(a){ return a.mtgId===mtg.id && a.date===occ && a.memberId===uid; });
+    if (!att) {
+      att = { id:'ma_'+Date.now(), mtgId:mtg.id, date:occ, memberId:uid,
+        signedUpAt:now.toISOString(), clockedInAt:null, clockedOutAt:null, walkIn:true };
+      state.meetingAttendance.push(att);
+    }
+    att.clockedInAt = now.toISOString();
+    att.clockedOutAt = null;
+    if (!state.currentSession || state.currentSession.userId !== uid) {
+      state.currentSession = { id:'sess_mtg_'+Date.now(), userId:uid, start:now.toISOString(),
+        activity:'meeting', desc:mtg.title, mtgId:mtg.id, mtgDate:occ, end:null, duration:null };
+      if (typeof _clockTimerInterval!=='undefined') {
+        if (_clockTimerInterval) clearInterval(_clockTimerInterval);
+        _clockTimerInterval = setInterval(tickClockTimer, 1000);
+      }
+      try{updateClockUI(true);}catch(e){} try{updateClockStats();}catch(e){}
+    }
+    save();
+    try { renderMyShifts(); } catch(e){}
+    _notifyInCharge(mtg.inCharge, uid, 'walked in to ' + (mtg.title||'meeting'));
+    showToast('\u2705 Added & clocked in to ' + (mtg.title||'meeting') + '.');
+
+  } else if (target.type==='event') {
+    var ev = (state.specialEvents||[]).find(function(e){ return e.id===target.id; });
+    if (!ev) return;
+    if (!Array.isArray(ev.signups)) ev.signups = [];
+    var sg = ev.signups.find(function(s){ return s.memberId===uid; });
+    if (!sg) {
+      sg = { memberId:uid, position:null, signedUpAt:now.toISOString(),
+        clockedIn:false, clockedInAt:null, clockedOutAt:null, walkIn:true };
+      ev.signups.push(sg);
+    }
+    sg.clockedIn = true;
+    sg.clockedInAt = now.toISOString();
+    sg.clockedOutAt = null;
+    save();
+    try { renderBothSpecialEventViews(); } catch(e){}
+    _notifyInCharge(ev.inCharge, uid, 'walked in to ' + (ev.title||'event'));
+    showToast('\u2705 Added & clocked in to ' + (ev.title||'event') + '.');
+
+  } else if (target.type==='drill') {
+    var dr = (state.scheduledDrills||[]).find(function(x){ return x.id===target.id; });
+    if (!dr) return;
+    if (!Array.isArray(dr.confirmedMembers)) dr.confirmedMembers = [];
+    if (dr.confirmedMembers.indexOf(uid) < 0) dr.confirmedMembers.push(uid);
+    dr.updatedAt = now.toISOString();
+    save();
+    try { renderScheduledDrills(); } catch(e){}
+    try { renderMyShifts(); } catch(e){}
+    _notifyInCharge(dr.createdBy, uid, 'walked in to ' + (dr.drillName||'drill'));
+    showToast('\u2705 Added to ' + (dr.drillName||'drill') + ' roster.');
+  }
+}
+
+function clockIn(_skipWalkIn) {
   if (!state.currentUserId) {
     showToast('⚠️ Please log in first.');
     var st = document.getElementById('clockStatus');
@@ -16874,6 +17111,16 @@ function clockIn() {
     state.currentSession = null; save();
   }
   if (state.currentSession) { showToast('Already clocked in.'); return; }
+  // Walk-in detection: if a meeting/event/drill is active now and the member
+  // isn't on its attendee list, offer to add them before logging collateral.
+  if (!_skipWalkIn) {
+    var _wt = _findWalkInTargets(state.currentUserId, new Date());
+    if (_wt && _wt.length) {
+      _wt[0]._onNo = function(){ clockIn(true); };
+      _promptWalkIn(_wt[0]);
+      return;
+    }
+  }
   // Note: general clock-in (meetings, duties, collateral) has no time restriction
   var activity = 'collateral';  // Only Collateral Duty available
   var desc     = ((document.getElementById('clockDesc')||{}).value||'').trim();
