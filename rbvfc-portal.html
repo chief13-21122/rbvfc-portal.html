@@ -557,7 +557,28 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 <!-- Firebase SDKs loaded dynamically by initFirebase() when config is saved -->
 <script>
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
+// Simple full-bleed red "13" badge used for the home-screen (apple-touch) icon.
+function makeSimpleBadge(size) {
+  size = size || 180;
+  var c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  var cx = c.getContext('2d');
+  cx.fillStyle = '#C8102E';
+  cx.fillRect(0, 0, size, size);
+  cx.fillStyle = '#FFFFFF';
+  cx.font = 'bold ' + Math.round(size * 0.52) + 'px Arial, Helvetica, sans-serif';
+  cx.textAlign = 'center';
+  cx.textBaseline = 'middle';
+  cx.fillText('13', size / 2, size / 2 + size * 0.02);
+  return c.toDataURL('image/png');
+}
+
 function updateFaviconFromLogo(logoDataUrl) {
+  // Home-screen icon: always the simple "13" badge, never the company logo.
+  try {
+    var apple = document.getElementById('appleTouchIcon');
+    if (apple) apple.href = makeSimpleBadge(180);
+  } catch(e) {}
   if (!logoDataUrl) return;
   try {
     var canvas = document.createElement('canvas');
@@ -573,8 +594,6 @@ function updateFaviconFromLogo(logoDataUrl) {
       var dataUrl = canvas.toDataURL('image/png');
       var fav = document.getElementById('dynamicFavicon');
       if (fav) fav.href = dataUrl;
-      var apple = document.getElementById('appleTouchIcon');
-      if (apple) apple.href = dataUrl;
     };
     img.src = logoDataUrl;
   } catch(e) {}
@@ -594,7 +613,7 @@ function initFavicon() {
     cx.fillText('13',32,32);
     var url = c.toDataURL('image/png');
     var fav = document.getElementById('dynamicFavicon'); if(fav) fav.href=url;
-    var apl = document.getElementById('appleTouchIcon'); if(apl) apl.href=url;
+    var apl = document.getElementById('appleTouchIcon'); if(apl) apl.href=makeSimpleBadge(180);
   } catch(e) {}
 }
 
