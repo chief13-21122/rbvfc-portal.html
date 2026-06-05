@@ -557,28 +557,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 <!-- Firebase SDKs loaded dynamically by initFirebase() when config is saved -->
 <script>
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
-// Simple full-bleed red "13" badge used for the home-screen (apple-touch) icon.
-function makeSimpleBadge(size) {
-  size = size || 180;
-  var c = document.createElement('canvas');
-  c.width = size; c.height = size;
-  var cx = c.getContext('2d');
-  cx.fillStyle = '#C8102E';
-  cx.fillRect(0, 0, size, size);
-  cx.fillStyle = '#FFFFFF';
-  cx.font = 'bold ' + Math.round(size * 0.52) + 'px Arial, Helvetica, sans-serif';
-  cx.textAlign = 'center';
-  cx.textBaseline = 'middle';
-  cx.fillText('13', size / 2, size / 2 + size * 0.02);
-  return c.toDataURL('image/png');
-}
-
 function updateFaviconFromLogo(logoDataUrl) {
-  // Home-screen icon: always the simple "13" badge, never the company logo.
-  try {
-    var apple = document.getElementById('appleTouchIcon');
-    if (apple) apple.href = makeSimpleBadge(180);
-  } catch(e) {}
   if (!logoDataUrl) return;
   try {
     var canvas = document.createElement('canvas');
@@ -594,6 +573,8 @@ function updateFaviconFromLogo(logoDataUrl) {
       var dataUrl = canvas.toDataURL('image/png');
       var fav = document.getElementById('dynamicFavicon');
       if (fav) fav.href = dataUrl;
+      var apple = document.getElementById('appleTouchIcon');
+      if (apple) apple.href = dataUrl;
     };
     img.src = logoDataUrl;
   } catch(e) {}
@@ -613,7 +594,7 @@ function initFavicon() {
     cx.fillText('13',32,32);
     var url = c.toDataURL('image/png');
     var fav = document.getElementById('dynamicFavicon'); if(fav) fav.href=url;
-    var apl = document.getElementById('appleTouchIcon'); if(apl) apl.href=makeSimpleBadge(180);
+    var apl = document.getElementById('appleTouchIcon'); if(apl) apl.href=url;
   } catch(e) {}
 }
 
@@ -1449,9 +1430,17 @@ function showPushNotificationBanner(payload) {
 // Categories: 'staffing' (officer broadcasts), 'reminders' (shift/duty/clock-out),
 // 'losap' (approval requests — officers only). Absent prefs => all enabled, so
 // existing members keep current behavior until they explicitly opt out.
+// ── CAREER PERSON role ────────────────────────────────────────────────────
+// View-only role: sees ONLY a read-only Staffing board, no notifications,
+// no clock/sign-up functionality. Single source of truth for the role check.
+function isCareerRole(member) {
+  return !!(member && member.appRole === 'career');
+}
+
 var NOTIF_CATEGORIES = ['staffing', 'reminders', 'losap'];
 function _wantsNotif(member, category) {
   if (!member) return true;          // unknown member — don't suppress
+  if (isCareerRole(member)) return false;  // CAREER PERSON never gets notifications
   if (!category) return true;        // untagged push — always send
   var p = member.notifPrefs;
   if (!p || typeof p !== 'object') return true;  // no prefs set — all on
@@ -1802,6 +1791,12 @@ function updateClock() {
 //  NAVIGATION
 // ═══════════════════════════════════════════════════
 function showTab(id) {
+  // CAREER PERSON is view-only and may only see the Staffing tab. Redirect any
+  // other target (stray onclick, deep link, default) to staffing.
+  try {
+    var _stMe = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+    if (isCareerRole(_stMe) && id !== 'staffing') id = 'staffing';
+  } catch(_e){}
   if (id === 'drill') id = 'training'; // drill merged into training
   setTimeout(_adjustAppTopPad, 50);
   document.querySelectorAll('.section').forEach(function(s){ s.classList.remove('active'); });
@@ -1940,6 +1935,13 @@ function openMySettings() {
   var denied  = perm === 'denied';
   var enableBtn = document.getElementById('mySettingsEnableNotifBtn');
   var testBtn   = document.getElementById('mySettingsTestNotifBtn');
+  var _msCareer = isCareerRole(m2);  // CAREER PERSON gets no notifications — hide all notif controls
+  var _notifPanel = document.getElementById('notifPrefsPanel');
+  if (_notifPanel) _notifPanel.style.display = _msCareer ? 'none' : '';
+  if (_msCareer) {
+    if (enableBtn) enableBtn.style.display = 'none';
+    if (testBtn)   testBtn.style.display   = 'none';
+  } else {
   if (enableBtn) {
     enableBtn.textContent = denied ? '⚠️ Fix Notification Settings' : '🔔 Enable Notifications on This Device';
     enableBtn.style.color = denied ? '#F5A623' : '';
@@ -1947,6 +1949,7 @@ function openMySettings() {
     enableBtn.style.display = enabled ? 'none' : '';
   }
   if (testBtn) testBtn.style.display = enabled ? '' : 'none';
+  }
   // Update gcal section
   var gcalSection = document.getElementById('mySettingsGcalSection');
   if (gcalSection) gcalSection.style.display = state.gcalClientId ? '' : 'none';
@@ -7393,6 +7396,7 @@ function initStaffingTab() {
   var member = (state.roster||[]).find(function(m){ return m.id===uid; });
   var isOfficer = member && (member.appRole==='officer'||member.appRole==='admin');
   var isAdmin   = member && member.appRole==='admin';
+  var isCareer  = isCareerRole(member);  // view-only: hide alerts + my-shifts, read-only board
   var _auCard  = document.getElementById('staffingActiveUnitsCard');
   var _udfCard = document.getElementById('staffingUnitFilterCard');
   if (_auCard)  _auCard.style.display  = isAdmin ? '' : 'none';
@@ -7416,7 +7420,10 @@ function initStaffingTab() {
   var oc = document.getElementById('staffingOfficerControls');
   if (oc) oc.style.display = isOfficer ? 'block' : 'none';
   var ac = document.getElementById('staffingAlertCard');
-  if (ac) ac.style.display = 'block'; // All members see active alerts
+  if (ac) ac.style.display = isCareer ? 'none' : 'block'; // members see active alerts; CAREER PERSON does not
+  // CAREER PERSON has no participation — hide the "My Shifts & Events" card entirely
+  var _msCard = document.getElementById('staffingMyShiftsCard');
+  if (_msCard) _msCard.style.display = isCareer ? 'none' : '';
   var mc = document.getElementById('staffingMonthCard');
   if (mc) mc.style.display = isOfficer ? 'block' : 'none';
 
@@ -7622,6 +7629,7 @@ function renderStaffingBoard() {
   var uid      = state.currentUserId;
   var member   = (state.roster||[]).find(function(m){ return m.id===uid; });
   var isOfficer= member && (member.appRole==='officer'||member.appRole==='admin');
+  var viewOnly = isCareerRole(member);  // CAREER PERSON: read-only board, no action buttons
   var _se      = state.staffingEnabled || null;
   // If never configured, treat all units as enabled
   var enabledUnits = UNITS.filter(function(u){ return _se === null || _se[u] !== false; });
@@ -7793,6 +7801,7 @@ function renderStaffingBoard() {
         var _elig = member ? checkStaffingEligibility(member, uId, posName) : { eligible:false, code:'NO_MEMBER', reason:'' };
         // Same-unit rule: member may not hold multiple positions on the same unit simultaneously
         var canSignUp = !hasConflict && !adminRestricted && !isPastDate && !isPastTime && _elig.eligible && !alreadyHaveSlot && !isFullyCovered;
+        if (viewOnly) canSignUp = false;  // CAREER PERSON: read-only board
 
         // Pre-fill values for the Sign Up modal
         var _nextStart = nextOpenStart() || '0700';
@@ -7902,7 +7911,7 @@ function renderStaffingBoard() {
                + ' style="background:#0D2200;border:2px solid #27AE60;color:#27AE60;border-radius:8px;'
                + 'padding:7px 18px;cursor:pointer;font-weight:700;font-size:14px;white-space:nowrap;'
                + 'letter-spacing:0.5px;flex-shrink:0;">'+_btnLabel+'</button>';
-        } else if (!canSignUp && !isFullyCovered && !alreadyHaveSlot) {
+        } else if (!canSignUp && !isFullyCovered && !alreadyHaveSlot && !viewOnly) {
           // Show why blocked
           var _bIco = {'BANNED_RANK':'\u26d4','RIDE_REPORT':'\ud83d\udecb','MIN_RANK':'\ud83c\udfc5','REQ_CERT':'\ud83d\udcc4'}[_elig.code]||'\u26a0\ufe0f';
           if (!_elig.eligible) {
@@ -14121,6 +14130,7 @@ function renderMemberAlertBanner() {
   var uid = state.currentUserId;
   var me = (state.roster||[]).find(function(m){ return m.id===uid; });
   if (isAdminMember(me)) { _hideTopBanner('staffingAlertTopBanner'); return; }
+  if (isCareerRole(me)) { _hideTopBanner('staffingAlertTopBanner'); return; } // CAREER PERSON: no alerts
   // Find most recent uncleared alert within 12 hrs targeting this member
   // (12h was 24h — tightened to reduce return-visit overload; older alerts auto-ack on login)
   var latest = (state.staffingAlerts||[]).find(function(a) {
@@ -15537,6 +15547,7 @@ function launchApp(member) {
   // Show admin/officer buttons
   var isAdmin   = member.appRole === 'admin';
   var isOfficer = member.appRole === 'officer' || isAdmin;
+  var isCareer  = isCareerRole(member);  // view-only: Staffing tab only, no notifications
   var adminBtn  = document.getElementById('adminHeaderBtn');
   var switchBtn = document.getElementById('switchUserBtn');
   var moreAdminBtn = document.getElementById('moreAdminBtn');
@@ -15570,8 +15581,21 @@ function launchApp(member) {
   var moreOfficerHeader = document.getElementById('moreOfficerHeader');
   if (moreOfficerHeader) moreOfficerHeader.style.display = isOfficer ? '' : 'none';
 
-  // Show clock as default tab
-  showTab('clock');
+  // ── CAREER PERSON: lock the bottom nav down to Staffing only ──────────────
+  // They keep the header gear (My Settings + public view link) but lose Clock,
+  // LOSAP, Company and More. The showTab() guard also redirects any stray
+  // navigation back to Staffing.
+  if (isCareer) {
+    ['bnav-clock','bnav-losap','bnav-company','bnav-more'].forEach(function(bid){
+      var b = document.getElementById(bid);
+      if (b) b.style.display = 'none';
+    });
+    var _stBtn = document.getElementById('bnav-staffing');
+    if (_stBtn) _stBtn.style.display = '';
+  }
+
+  // Default tab — Staffing for career persons, Clock for everyone else
+  showTab(isCareer ? 'staffing' : 'clock');
   renderLOSAPStats();
   updateApprovalsBadge();
 
@@ -15580,9 +15604,12 @@ function launchApp(member) {
   // Check if currently clocked in
   restoreClockState();
   try { renderMyClassesToday(); } catch(e){}
-  // Start notification systems on login — don't wait for Staffing tab to open
-  try { startStaffingReminders(); } catch(e){}
-  try { startClockedInReminderPoller(); } catch(e){}
+  // Start notification systems on login — don't wait for Staffing tab to open.
+  // CAREER PERSON gets no notifications, so skip the reminder pollers entirely.
+  if (!isCareer) {
+    try { startStaffingReminders(); } catch(e){}
+    try { startClockedInReminderPoller(); } catch(e){}
+  }
   try { renderMemberAlertBanner(); } catch(e){}
   try { updateApprovalsBadge(); } catch(e){}
 }
@@ -21034,7 +21061,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       </button>
 
       <!-- Notification Types — per-user opt-out of portal-triggered pushes -->
-      <div style="margin-top:14px;background:#141414;border:1px solid #2A2A2A;border-radius:12px;padding:14px 16px;">
+      <div id="notifPrefsPanel" style="margin-top:14px;background:#141414;border:1px solid #2A2A2A;border-radius:12px;padding:14px 16px;">
         <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:4px;">Notification Types</div>
         <div style="font-size:11px;color:#555;margin-bottom:12px;">Choose which alerts this app sends you. Turning one off applies to all your devices.</div>
         <label style="display:flex;align-items:center;gap:12px;padding:8px 0;cursor:pointer;">
@@ -21681,7 +21708,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       </div>
 
       <!-- My Upcoming Shifts -->
-      <div class="card">
+      <div class="card" id="staffingMyShiftsCard">
         <div class="card-header"><div class="icon">📋</div><h2>My Shifts &amp; Events</h2></div>
         <div id="myShiftsContainer"><p style="color:#666;font-size:13px;text-align:center;padding:20px;">No upcoming shifts or events.</p></div>
       </div>
