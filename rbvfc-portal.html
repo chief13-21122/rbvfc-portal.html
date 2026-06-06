@@ -832,6 +832,10 @@ function _fbSplitState() {
 // let any save shrink a populated array back to empty — the classic boot-race
 // wipe (a save firing with empty/stale state before the remote load lands).
 var _fbLastGoodCounts = {};
+// True from the moment a local edit schedules a Firestore push until that push
+// resolves. While true, incoming snapshots must NOT clobber locally-pending
+// edits — see _mergeAndRender's reconciliation block.
+var _fbSavePending = false;
 var _FB_PROTECTED = {
   main:  ['roster','meetings','specialEvents','staffingShifts','meetingAttendance','scheduledDrills','trainingClasses'],
   acts:  ['losapActivities'],
@@ -873,6 +877,9 @@ function _fbSave() {
     console.log('[RBVFC] Save suppressed — initial Firestore load not yet complete.');
     return;
   }
+  // A local edit is now queued for Firestore. Mark pending so any snapshot that
+  // arrives before this write lands won't revert the change (see _mergeAndRender).
+  _fbSavePending = true;
   clearTimeout(_fbSaveTimer);
   _fbSaveTimer = setTimeout(function() {
     var parts = _fbSplitState();
@@ -881,10 +888,10 @@ function _fbSave() {
     if (_fbDocSafeToWrite('main',  parts.main))  saves.push(fbDb.doc(_fbDocMain()).set(parts.main,  {merge:true}));
     if (_fbDocSafeToWrite('acts',  parts.acts))  saves.push(fbDb.doc(_fbDocActs()).set(parts.acts,  {merge:true}));
     if (_fbDocSafeToWrite('train', parts.train)) saves.push(fbDb.doc(_fbDocTrain()).set(parts.train, {merge:true}));
-    if (!saves.length) { console.warn('[RBVFC] Firestore save: all docs blocked by anti-wipe guard.'); return; }
+    if (!saves.length) { _fbSavePending = false; console.warn('[RBVFC] Firestore save: all docs blocked by anti-wipe guard.'); return; }
     Promise.all(saves)
-      .then(function(){ console.log('[RBVFC] Firestore saved (' + saves.length + ' doc(s)).'); })
-      .catch(function(e){ console.error('[RBVFC] Firestore save error:', e.message); });
+      .then(function(){ _fbSavePending = false; console.log('[RBVFC] Firestore saved (' + saves.length + ' doc(s)).'); })
+      .catch(function(e){ _fbSavePending = false; console.error('[RBVFC] Firestore save error:', e.message); });
   }, 800);
 }
 
@@ -893,9 +900,90 @@ var _fbSyncUnsubMain  = null;
 var _fbSyncUnsubActs  = null;
 var _fbSyncUnsubTrain = null;
 
+// ── Snapshot reconciliation (protects locally-pending edits) ─────────────────
+// A local edit writes to localStorage instantly but its Firestore push is
+// debounced (see _fbSave). If a snapshot from another device or the CAD relay
+// lands inside that window, a naive Object.assign reverts our just-made change,
+// and the pending debounced save then persists the reverted state — silently
+// losing new members, RSVPs, drill/event sign-ups, etc. While a local save is
+// pending we UNION the protected collections by id so additions from BOTH the
+// local device and the server survive instead of one clobbering the other.
+function _fbUnionScalar(a, b) {
+  var out = [], seen = {};
+  [a, b].forEach(function(arr){
+    if (!Array.isArray(arr)) return;
+    arr.forEach(function(v){ var k = String(v); if (!seen[k]) { seen[k] = 1; out.push(v); } });
+  });
+  return out;
+}
+function _fbUnionById(localArr, remoteArr, idKey, mergeDup) {
+  localArr  = Array.isArray(localArr)  ? localArr  : [];
+  remoteArr = Array.isArray(remoteArr) ? remoteArr : [];
+  var out = [], idx = {};
+  function upsert(item, isLocal) {
+    var k = (item && item[idKey] != null) ? String(item[idKey]) : null;
+    if (k == null) { out.push(item); return; }   // no id — keep both copies as-is
+    if (idx[k] === undefined) { idx[k] = out.length; out.push(item); }
+    else {
+      var cur = out[idx[k]];
+      out[idx[k]] = mergeDup ? mergeDup(cur, item) : (isLocal ? item : cur);
+    }
+  }
+  // Remote first (baseline + order), then local so local scalar edits win on dupes.
+  remoteArr.forEach(function(it){ upsert(it, false); });
+  localArr.forEach(function(it){ upsert(it, true); });
+  return out;
+}
+// Duplicate-event merge: local scalar fields win, but signups (by memberId) and
+// declined (by id) are unioned so an "I'll be there" on either side survives.
+function _fbMergeEvent(remoteEv, localEv) {
+  var merged = Object.assign({}, remoteEv, localEv);
+  merged.signups  = _fbUnionById(localEv && localEv.signups, remoteEv && remoteEv.signups, 'memberId');
+  merged.declined = _fbUnionScalar(remoteEv && remoteEv.declined, localEv && localEv.declined);
+  return merged;
+}
+// Duplicate-drill merge: union confirmedMembers (uid scalars) and declined.
+function _fbMergeDrill(remoteD, localD) {
+  var merged = Object.assign({}, remoteD, localD);
+  merged.confirmedMembers = _fbUnionScalar(remoteD && remoteD.confirmedMembers, localD && localD.confirmedMembers);
+  merged.declined         = _fbUnionScalar(remoteD && remoteD.declined, localD && localD.declined);
+  return merged;
+}
+// Duplicate-meeting merge: union declined ids (signups live in meetingAttendance).
+function _fbMergeMeeting(remoteM, localM) {
+  var merged = Object.assign({}, remoteM, localM);
+  merged.declined = _fbUnionScalar(remoteM && remoteM.declined, localM && localM.declined);
+  return merged;
+}
+// Reconcile the protected collections, preserving additions on both sides.
+// `localSnapshot` is a copy of the protected arrays captured BEFORE the remote
+// Object.assign overwrote them.
+function _fbReconcileProtected(localSnapshot) {
+  state.roster           = _fbUnionById(localSnapshot.roster,           state.roster,           'id');
+  state.staffingShifts   = _fbUnionById(localSnapshot.staffingShifts,   state.staffingShifts,   'id');
+  state.meetingAttendance= _fbUnionById(localSnapshot.meetingAttendance,state.meetingAttendance,'id');
+  state.trainingClasses  = _fbUnionById(localSnapshot.trainingClasses,  state.trainingClasses,  'id');
+  state.meetings         = _fbUnionById(localSnapshot.meetings,         state.meetings,         'id', _fbMergeMeeting);
+  state.specialEvents    = _fbUnionById(localSnapshot.specialEvents,    state.specialEvents,    'id', _fbMergeEvent);
+  state.scheduledDrills  = _fbUnionById(localSnapshot.scheduledDrills,  state.scheduledDrills,  'id', _fbMergeDrill);
+}
+
 function _mergeAndRender(remote) {
   if (!remote) return;
-  // Preserve local fb config so incognito doesn't lose baked-in values
+  // If a local edit is still queued for Firestore, snapshot it before the remote
+  // overwrite so we can union our pending additions back in afterward.
+  var _pendingLocal = null;
+  if (_fbSavePending) {
+    _pendingLocal = {
+      roster:            (state.roster||[]).slice(),
+      meetings:          (state.meetings||[]).slice(),
+      specialEvents:     (state.specialEvents||[]).slice(),
+      staffingShifts:    (state.staffingShifts||[]).slice(),
+      meetingAttendance: (state.meetingAttendance||[]).slice(),
+      scheduledDrills:   (state.scheduledDrills||[]).slice(),
+      trainingClasses:   (state.trainingClasses||[]).slice()
+    };
+  }
   // Note: state.logo (compressed) is allowed to pass through — it syncs the logo to all devices
   if (remote.main) delete remote.main.companyLogo;
   delete remote.companyLogo;
@@ -926,6 +1014,15 @@ function _mergeAndRender(remote) {
   // A live snapshot is itself a successful remote read — open the write gate and
   // baseline the anti-wipe guard from this confirmed-good data.
   _fbInitialLoadDone = true;
+  // Re-apply any locally-pending edits the remote snapshot would otherwise have
+  // reverted (new members, RSVPs, sign-ups). Union keeps both sides' additions;
+  // re-flush so our merged truth reaches Firestore.
+  if (_pendingLocal) {
+    try {
+      _fbReconcileProtected(_pendingLocal);
+      _fbSave();
+    } catch (e) { console.warn('[RBVFC] Pending-edit reconcile failed:', e && e.message); }
+  }
   _fbRecordGoodCounts(state);
   try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
   // Only refresh roster-dependent UI when the roster ACTUALLY changed. Snapshots
@@ -1437,19 +1534,6 @@ function isCareerRole(member) {
   return !!(member && member.appRole === 'career');
 }
 
-// ── OUTSIDE STAFFING role ─────────────────────────────────────────────────
-// AACVFA / AACFD members who staff our apparatus but are not RBVFC members.
-// They use a personal Gmail (no @RBVFC13.com workspace account). Nav is locked
-// to Staffing (home) + a read-only LOSAP view. They CAN sign up for Meetings,
-// Special Events and Drills via cards embedded in the Staffing tab, receive
-// staffing alerts + shift/duty reminders, and accrue LOSAP (the company is
-// accountable for tracking/reporting it). Single source of truth for the check.
-function isOutsideStaffing(member) {
-  return !!(member && member.appRole === 'outside_staffing');
-}
-// Tabs an Outside Staffing user is allowed to open directly.
-var OUTSIDE_STAFFING_TABS = ['staffing', 'losap'];
-
 var NOTIF_CATEGORIES = ['staffing', 'reminders', 'losap'];
 function _wantsNotif(member, category) {
   if (!member) return true;          // unknown member — don't suppress
@@ -1809,8 +1893,6 @@ function showTab(id) {
   try {
     var _stMe = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
     if (isCareerRole(_stMe) && id !== 'staffing') id = 'staffing';
-    // Outside Staffing: allow only Staffing + (read-only) LOSAP; redirect anything else home.
-    if (isOutsideStaffing(_stMe) && OUTSIDE_STAFFING_TABS.indexOf(id) === -1) id = 'staffing';
   } catch(_e){}
   if (id === 'drill') id = 'training'; // drill merged into training
   setTimeout(_adjustAppTopPad, 50);
@@ -1839,12 +1921,6 @@ function showTab(id) {
   if (id === 'training') initTrainingTab();
   if (id === 'losap') {
     renderLOSAP();
-    // Outside Staffing: surface a download-report button here (they have no More menu).
-    try {
-      var _losMe = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
-      var _dlCard = document.getElementById('losapOsDownloadCard');
-      if (_dlCard) _dlCard.style.display = isOutsideStaffing(_losMe) ? 'block' : 'none';
-    } catch(e){}
     // Show banner for first unread LOSAP notification
     try {
       var _losapUid = state.currentUserId;
@@ -4975,7 +5051,7 @@ function editMemberAdmin(id) {
     umFirst:  m.first||'',
     umLast:   m.last||'',
     umMemberId: (m.memberId||'').replace(/^50-/,''),
-    umEmail:  (m.appRole==='outside_staffing') ? (m.email||'') : (m.email||'').replace(/@rbvfc13\.com$/i,'').replace(/@RBVFC13\.com$/i,''),
+    umEmail:  (m.email||'').replace(/@rbvfc13\.com$/i,'').replace(/@RBVFC13\.com$/i,''),
     umDriveFolderUrl: m.driveFolderUrl||'',
     umPhone: m.phone||'',
     umRole:   m.appRole||'member',
@@ -4992,8 +5068,6 @@ function editMemberAdmin(id) {
     var el=document.getElementById(fid);
     if (el) el.value=fields[fid];
   });
-  // Sync the @RBVFC13.com / personal-email UI to the loaded role
-  try { _umRoleChanged(); } catch(e){}
   // Trigger drive folder validation hint if a URL is set
   var _dfEl = document.getElementById('umDriveFolderUrl');
   if (_dfEl && _dfEl.value) validateUmDriveFolder(_dfEl);
@@ -5124,9 +5198,6 @@ function renderClockedInPanel() {
 function autoSuggestEmail() {
   var emailEl = document.getElementById('umEmail');
   if (!emailEl) return;
-  // Outside Staffing uses a personal email — don't auto-fill an RBVFC prefix.
-  var roleEl = document.getElementById('umRole');
-  if (roleEl && roleEl.value === 'outside_staffing') return;
   // Only auto-fill if field is empty or matches the previous auto-suggestion
   var first = ((document.getElementById('umFirst')||{}).value||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
   var last  = ((document.getElementById('umLast') ||{}).value||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
@@ -7416,63 +7487,6 @@ function renderManualRecentEntries() {
 }
 
 
-// ── Outside Staffing embedded sign-ups (Drills / Special Events / Meetings) ──
-// Renders member-facing sign-up lists into the Staffing-tab card so an Outside
-// Staffing user can join without leaving the Staffing tab.
-function renderOutsideStaffingSignups() {
-  var uid = state.currentUserId;
-  // Drills (active training classes)
-  var dc = document.getElementById('osDrillsContainer');
-  if (dc) {
-    var classes = (state.trainingClasses||[]).filter(function(c){ return c.active!==false; })
-      .sort(function(a,b){ return (a.startDate||'').localeCompare(b.startDate||''); });
-    if (!classes.length) {
-      dc.innerHTML = '<p style="color:#555;font-size:13px;padding:4px 0;">No drills scheduled.</p>';
-    } else {
-      dc.innerHTML = classes.map(function(cls){
-        var mine = (cls.members||[]).indexOf(uid) >= 0;
-        var when = (cls.startDate||'') + (cls.endDate&&cls.endDate!==cls.startDate?' \u2013 '+cls.endDate:'') + (cls.startTime?' \u00b7 '+cls.startTime:'');
-        var btn = mine
-          ? '<span style="font-size:12px;color:#7EC8E3;">\u2713 Signed up</span>'
-          : '<button class="btn btn-sm" style="background:#0D2200;border:1px solid #27AE60;color:#27AE60;border-radius:8px;padding:6px 14px;font-weight:700;font-size:13px;" onclick="osEnrollDrill(\''+cls.id+'\')">\u270B Sign Up</button>';
-        return '<div style="background:#181818;border:1px solid #2A2A2A;border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">'
-          + '<div style="flex:1;min-width:160px;"><div style="font-size:14px;font-weight:700;color:#F0F0F0;">'+(cls.name||'Drill')+'</div>'
-          + '<div style="font-size:11px;color:#888;margin-top:2px;">'+when+'</div>'
-          + (cls.instructor?'<div style="font-size:11px;color:#666;">Instructor: '+cls.instructor+'</div>':'')+'</div>'
-          + '<div>'+btn+'</div></div>';
-      }).join('');
-    }
-  }
-  // Special events — reuse the member-safe renderer
-  try { renderSpecialEvents('osEventsContainer'); } catch(e){}
-  // Meetings (upcoming only, sign-up)
-  var mc = document.getElementById('osMeetingsContainer');
-  if (mc) {
-    var mtgs = (state.meetings||[]).filter(function(m){ return !!nextMeetingOccurrence(m); })
-      .sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
-    if (!mtgs.length) {
-      mc.innerHTML = '<p style="color:#555;font-size:13px;padding:4px 0;">No upcoming meetings.</p>';
-    } else {
-      mc.innerHTML = mtgs.map(function(mtg){
-        var sd = nextMeetingOccurrence(mtg) || mtg.date;
-        var signed = (state.meetingAttendance||[]).some(function(a){ return a.mtgId===mtg.id&&a.date===sd&&a.memberId===uid; });
-        var d = new Date(sd+'T12:00:00');
-        var ds = d.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric',year:'numeric'});
-        var ts = mtg.time?(function(){ var p=mtg.time.split(':'); var h=parseInt(p[0]); return (h%12||12)+':'+p[1]+' '+(h>=12?'PM':'AM'); })():'';
-        var btn = signed
-          ? '<span style="font-size:12px;color:#7EC8E3;">\u2713 Signed up</span>'
-          : '<button class="btn btn-sm" style="background:#0D2200;border:1px solid #27AE60;color:#27AE60;border-radius:8px;padding:6px 14px;font-weight:700;font-size:13px;" onclick="osSignUpMeeting(\''+mtg.id+'\',\''+sd+'\')">\u270B Sign Up</button>';
-        return '<div style="background:#181818;border:1px solid #2A2A2A;border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">'
-          + '<div style="flex:1;min-width:160px;"><div style="font-size:14px;font-weight:700;color:#F0F0F0;">'+(mtg.title||'Meeting')+'</div>'
-          + '<div style="font-size:11px;color:#888;margin-top:2px;">'+ds+(ts?' \u00b7 '+ts:'')+(mtg.location?' \u00b7 '+mtg.location:'')+'</div></div>'
-          + '<div>'+btn+'</div></div>';
-      }).join('');
-    }
-  }
-}
-function osEnrollDrill(id){ try{ enrollInClass(id); }catch(e){} renderOutsideStaffingSignups(); }
-function osSignUpMeeting(id,date){ try{ signUpForMeeting(id,date); }catch(e){} renderOutsideStaffingSignups(); }
-
 function initStaffingTab() {
   renderMemberAlertBanner();
   var uid = state.currentUserId;
@@ -7480,11 +7494,6 @@ function initStaffingTab() {
   var isOfficer = member && (member.appRole==='officer'||member.appRole==='admin');
   var isAdmin   = member && member.appRole==='admin';
   var isCareer  = isCareerRole(member);  // view-only: hide alerts + my-shifts, read-only board
-  var isOutside = isOutsideStaffing(member);  // staffing-only role with embedded sign-ups
-  // Outside Staffing: show the embedded Drills/Events/Meetings sign-up card
-  var _osCard = document.getElementById('outsideStaffingSignupCard');
-  if (_osCard) _osCard.style.display = isOutside ? 'block' : 'none';
-  if (isOutside) { try { renderOutsideStaffingSignups(); } catch(e){} }
   var _auCard  = document.getElementById('staffingActiveUnitsCard');
   var _udfCard = document.getElementById('staffingUnitFilterCard');
   if (_auCard)  _auCard.style.display  = isAdmin ? '' : 'none';
@@ -14046,10 +14055,6 @@ function renderBothSpecialEventViews() {
   }
   // Always refresh My Upcoming Shifts so event signups appear there too
   renderMyShifts();
-  // Keep the Outside Staffing embedded events list in sync if present
-  if (document.getElementById('osEventsContainer')) {
-    try { renderSpecialEvents('osEventsContainer'); } catch(e){}
-  }
 }
 
 function canManageSpecialEvents() {
@@ -15686,22 +15691,8 @@ function launchApp(member) {
     if (_stBtn) _stBtn.style.display = '';
   }
 
-  // ── OUTSIDE STAFFING: lock nav to Staffing (home) + read-only LOSAP ───────
-  // Hide Clock, Company and More. They keep LOSAP (read-only) and the header
-  // gear (My Settings). Meeting/Event/Drill sign-ups live inside Staffing.
-  if (isOutsideStaffing(member)) {
-    ['bnav-clock','bnav-company','bnav-more'].forEach(function(bid){
-      var b = document.getElementById(bid);
-      if (b) b.style.display = 'none';
-    });
-    ['bnav-staffing','bnav-losap'].forEach(function(bid){
-      var b = document.getElementById(bid);
-      if (b) b.style.display = '';
-    });
-  }
-
-  // Default tab — Staffing for career persons & outside staffing, Clock for everyone else
-  showTab((isCareer || isOutsideStaffing(member)) ? 'staffing' : 'clock');
+  // Default tab — Staffing for career persons, Clock for everyone else
+  showTab(isCareer ? 'staffing' : 'clock');
   renderLOSAPStats();
   updateApprovalsBadge();
 
@@ -20507,44 +20498,8 @@ function renderUmCerts() {
 
 // Helper: get full email from umEmail input + hard domain
 function getUmEmail() {
-  // Outside Staffing uses a personal email (no @RBVFC13.com workspace account).
-  var roleEl = document.getElementById('umRole');
-  if (roleEl && roleEl.value === 'outside_staffing') {
-    return ((document.getElementById('umEmail')||{}).value||'').trim();
-  }
   var local = ((document.getElementById('umEmail')||{}).value||'').trim().replace(/@.*/g,'');
   return local ? local + '@RBVFC13.com' : '';
-}
-
-// Email input handler — strip the domain for workspace accounts, but allow a
-// full personal address for Outside Staffing.
-function _umEmailInput(el) {
-  if (!el) return;
-  var roleEl = document.getElementById('umRole');
-  if (roleEl && roleEl.value === 'outside_staffing') return; // keep full address as typed
-  el.value = el.value.replace(/@.*/g, '');
-}
-
-// Role change in the member editor — toggle the @RBVFC13.com suffix UI.
-function _umRoleChanged() {
-  var roleEl = document.getElementById('umRole');
-  var suffix = document.getElementById('umEmailSuffix');
-  var emailEl = document.getElementById('umEmail');
-  var isOutside = roleEl && roleEl.value === 'outside_staffing';
-  if (suffix) suffix.style.display = isOutside ? 'none' : '';
-  if (emailEl) {
-    if (isOutside) {
-      emailEl.placeholder = 'name@gmail.com';
-      emailEl.style.borderRadius = '8px';
-      emailEl.style.borderRight = '';
-    } else {
-      emailEl.placeholder = 'first.last';
-      emailEl.style.borderRadius = '8px 0 0 8px';
-      emailEl.style.borderRight = 'none';
-      // Drop any domain that may have been entered while in personal mode
-      emailEl.value = (emailEl.value||'').replace(/@.*/g, '');
-    }
-  }
 }
 
 document.addEventListener('DOMContentLoaded', boot);
@@ -21466,11 +21421,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
     <!-- ══════════════ LOSAP TAB ══════════════ -->
     <div id="section-losap" class="section">
 
-      <!-- Download report — Outside Staffing only (no More menu) -->
-      <div class="card" id="losapOsDownloadCard" style="display:none;margin-bottom:12px;">
-        <button class="btn btn-secondary btn-full" onclick="downloadLosapReport()">📄 Download My LOSAP Report</button>
-      </div>
-
       <div id="losapBanner" class="qual-banner fail">
         <div class="qual-icon" id="losapQualIcon"></div>
         <div class="qual-text">
@@ -21881,24 +21831,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       </div>
         </div>
       </div><!-- end apparatusStaffingSection -->
-
-      <!-- ═══ OUTSIDE STAFFING SIGN-UPS (outside_staffing role only) ═══ -->
-      <div class="card" id="outsideStaffingSignupCard" style="display:none;margin-top:14px;">
-        <div class="card-header">
-          <div class="icon">✋</div>
-          <h2 style="font-family:'Barlow Condensed',sans-serif;letter-spacing:2px;text-transform:uppercase;">Sign Up</h2>
-        </div>
-        <p style="font-size:12px;color:#888;margin:0 0 12px;">Sign up for upcoming meetings, special events and drills. Your participation counts toward LOSAP.</p>
-
-        <div style="font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#C8102E;margin:6px 0 8px;">🔧 Drills</div>
-        <div id="osDrillsContainer"></div>
-
-        <div style="font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#C8102E;margin:18px 0 8px;">🎪 Special Events</div>
-        <div id="osEventsContainer"></div>
-
-        <div style="font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#C8102E;margin:18px 0 8px;">📋 Meetings</div>
-        <div id="osMeetingsContainer"></div>
-      </div>
 
 
       <!-- Officer Controls (officers/admin only) -->
@@ -22510,8 +22442,8 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
               <div style="display:flex;align-items:center;gap:0;">
                 <input type="text" id="umEmail" placeholder="first.last" autocomplete="off"
                   style="border-radius:8px 0 0 8px;border-right:none;flex:1;"
-                  oninput="_umEmailInput(this);">
-                <span id="umEmailSuffix" style="background:#2A2A2A;border:1px solid #333;border-left:none;border-radius:0 8px 8px 0;padding:8px 12px;color:#888;font-weight:600;font-size:13px;white-space:nowrap;">@RBVFC13.com</span>
+                  oninput="this.value=this.value.replace(/@.*/g,'');">
+                <span style="background:#2A2A2A;border:1px solid #333;border-left:none;border-radius:0 8px 8px 0;padding:8px 12px;color:#888;font-weight:600;font-size:13px;white-space:nowrap;">@RBVFC13.com</span>
               </div>
             </div>
             
@@ -22553,12 +22485,11 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
             </div>
             <div class="form-group">
               <label>App Role</label>
-              <select id="umRole" onchange="_umRoleChanged()">
+              <select id="umRole">
                 <option value="member">Member - In Good Standing</option>
                 <option value="member_not_good">Member - Not in Good Standing</option>
                 <option value="probationary">PROBATIONARY</option>
                 <option value="career">CAREER PERSON</option>
-                <option value="outside_staffing">OUTSIDE STAFFING (AACVFA/AACFD)</option>
                 <option value="officer">Officer</option>
                 <option value="admin">Admin</option>
               </select>
@@ -22685,7 +22616,6 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
             <option value="member_not_good">Member - Not in Good Standing</option>
             <option value="probationary">PROBATIONARY</option>
             <option value="career">CAREER PERSON</option>
-            <option value="outside_staffing">OUTSIDE STAFFING</option>
           </select>
           <button class="btn btn-sm btn-secondary" id="bulkEditBtn" onclick="openBulkEditModal()" style="display:none;background:#1A2A3A;border-color:#2A5A8A;color:#7BBFFF;">✏️ Bulk Edit Selected</button>
           <button class="btn btn-sm btn-danger" id="bulkDeleteBtn" onclick="bulkDeleteMembers()" style="display:none;">🗑️ Delete Selected</button>
