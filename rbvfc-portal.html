@@ -560,7 +560,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 7, 2026 \u00B7 build 2 \u2014 attendance clocking';   // ← update on every deploy
+var PORTAL_BUILD = 'June 7, 2026 \u00B7 build 3 \u2014 view-as nav fix';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -11156,25 +11156,6 @@ function clockInMyClass(btn) {
   if (!uid) { showToast('\u26a0\ufe0f Please log in first.'); return; }
   var today = localDateStr();
   if (sessionDate !== today) { showToast('\u26a0\ufe0f This class is not today.'); return; }
-  // 30-min pre-clock-in limit: members can't clock in more than 30 min early
-  if (cls.startTime) {
-    var _cNow = new Date();
-    var _cp = String(cls.startTime).split(':');
-    var _cStart = new Date(today + 'T' + ('0' + (parseInt(_cp[0], 10) || 0)).slice(-2) + ':' + ('0' + (parseInt(_cp[1], 10) || 0)).slice(-2) + ':00');
-    if (!isNaN(_cStart.getTime()) && _cNow < new Date(_cStart.getTime() - 1800000)) {
-      var _cMin = Math.round((_cStart - _cNow) / 60000);
-      showToast('\u26a0\ufe0f Clock-in opens 30 min before the class (' + _cMin + ' min away).');
-      return;
-    }
-  }
-  // If already clocked in as Collateral Duty, offer to switch to this class
-  if (state.currentSession && state.currentSession.userId === uid && !state.currentSession.end && _isCollateralSession(state.currentSession)) {
-    _askSwitchFromCollateral(cls.name || 'this class', function(){
-      _endCollateralSessionForSwitch();
-      clockInMyClass(btn);
-    });
-    return;
-  }
   if (!Array.isArray(state.classAttendance)) state.classAttendance = [];
   var hasOpen = state.classAttendance.some(function(a){
     return a.classId===classId && a.memberId===uid && a.sessionDate===today && !a.clockedOutAt;
@@ -12763,34 +12744,26 @@ function clockInSpecialEvent(elOrId) {
     var _wT = ev.startTime || ev.time || '00:00';
     var _wStart = new Date(ev.date + 'T' + _wT + ':00');
     var _wEnd = ev.endTime ? new Date(ev.date + 'T' + ev.endTime + ':00') : new Date(_wStart.getTime() + 7200000);
-    if (!isNaN(_wStart.getTime()) && _wNow >= new Date(_wStart.getTime() - 1800000) && _wNow <= _wEnd) {
+    if (!isNaN(_wStart.getTime()) && _wNow >= new Date(_wStart.getTime() - 3600000) && _wNow <= _wEnd) {
       _promptWalkIn({ type:'event', id:ev.id, title:(ev.title||'Special Event'), inCharge:ev.inCharge });
     } else {
       showToast('\u26a0\ufe0f Sign up first.');
     }
     return;
   }
-  // Time window: 30 min before start until end
+  // Time window: 1 hour before start until end
   var now = new Date();
   var timeStr = ev.startTime || ev.time || '00:00';
   var evStart = new Date(ev.date + 'T' + timeStr + ':00');
   var evEnd   = ev.endTime ? new Date(ev.date + 'T' + ev.endTime + ':00') : new Date(evStart.getTime() + 7200000);
-  if (now < new Date(evStart.getTime() - 1800000)) {
+  if (now < new Date(evStart.getTime() - 3600000)) {
     var mins = Math.round((evStart - now) / 60000);
-    showToast('\u26a0\ufe0f Clock-in opens 30 min before the event (' + mins + ' min away).');
+    showToast('\u26a0\ufe0f Clock-in opens 1 hour before the event (' + mins + ' min away).');
     return;
   }
   if (now > evEnd) { showToast('\u26a0\ufe0f This event has already ended.'); return; }
-  // Block if already clocked into another session — but if it's Collateral
-  // Duty, offer to switch into this event instead of hard-blocking.
+  // Block if already clocked into another session
   if (state.currentSession && state.currentSession.userId === uid && !state.currentSession.end) {
-    if (_isCollateralSession(state.currentSession)) {
-      _askSwitchFromCollateral(ev.title || 'this event', function(){
-        _endCollateralSessionForSwitch();
-        clockInSpecialEvent(elOrId);
-      });
-      return;
-    }
     showToast('\u26a0\ufe0f You are already clocked in. Clock out first.');
     return;
   }
@@ -13566,23 +13539,15 @@ function clockInMeeting(mtgId, occurrenceDate) {
   var now = new Date();
   var startDt = new Date(occurrenceDate + 'T' + mtg.time + ':00');
   var endDt   = new Date(startDt.getTime() + (mtg.duration||60)*60000);
-  var openAt  = new Date(startDt.getTime() - 1800000);
+  var openAt  = new Date(startDt.getTime() - 3600000);
   if (now < openAt) {
     var mins = Math.round((startDt - now) / 60000);
-    showToast('\u26a0\ufe0f Clock-in opens 30 min before (' + mins + ' min away).');
+    showToast('\u26a0\ufe0f Clock-in opens 1 hour before (' + mins + ' min away).');
     return;
   }
   if (now > endDt) { showToast('\u26a0\ufe0f This meeting has already ended.'); return; }
-  // Block if already clocked into another session — but if it's Collateral
-  // Duty, offer to switch into this meeting instead of hard-blocking.
+  // Block if already clocked into another session
   if (state.currentSession && state.currentSession.userId === uid && !state.currentSession.end) {
-    if (_isCollateralSession(state.currentSession)) {
-      _askSwitchFromCollateral(mtg.title || 'this meeting', function(){
-        _endCollateralSessionForSwitch();
-        clockInMeeting(mtgId, occurrenceDate);
-      });
-      return;
-    }
     showToast('\u26a0\ufe0f You are already clocked in. Clock out first.');
     return;
   }
@@ -13811,19 +13776,10 @@ function clockInDrill(drillId){
   var startDt=new Date((d.date||'')+'T'+(d.time||'00:00')+':00');
   var endDt=new Date(startDt.getTime()+((d.hours||2)*3600000));
   if(!isNaN(startDt.getTime())){
-    if(now < new Date(startDt.getTime()-1800000)){ var mins=Math.round((startDt-now)/60000); showToast('\u26a0\ufe0f Clock-in opens 30 min before ('+mins+' min away).'); return; }
+    if(now < new Date(startDt.getTime()-3600000)){ var mins=Math.round((startDt-now)/60000); showToast('\u26a0\ufe0f Clock-in opens 1 hour before ('+mins+' min away).'); return; }
     if(now > endDt){ showToast('\u26a0\ufe0f This drill has already ended.'); return; }
   }
-  if(state.currentSession && state.currentSession.userId===uid && !state.currentSession.end){
-    if(_isCollateralSession(state.currentSession)){
-      _askSwitchFromCollateral(d.drillName || 'this drill', function(){
-        _endCollateralSessionForSwitch();
-        clockInDrill(drillId);
-      });
-      return;
-    }
-    showToast('\u26a0\ufe0f You are already clocked in. Clock out first.'); return;
-  }
+  if(state.currentSession && state.currentSession.userId===uid && !state.currentSession.end){ showToast('\u26a0\ufe0f You are already clocked in. Clock out first.'); return; }
   if(!Array.isArray(d.attendance)) d.attendance=[];
   var att=d.attendance.find(function(a){ return a.memberId===uid; });
   if(!att){ att={ memberId:uid, clockedInAt:null, clockedOutAt:null }; d.attendance.push(att); }
@@ -13921,74 +13877,6 @@ function clockAllOutDrill(drillId){
   showToast(n ? ('\u23f9 Clocked out '+n+' member'+(n===1?'':'s')+'. LOSAP awarded.') : '\u2139\ufe0f No one clocked in.');
 }
 
-
-// Returns true when a live session is Collateral Duty (vs. a scheduled
-// Class / Meeting / Special Event / Drill). Used so that an active collateral
-// session can be switched into a scheduled activity instead of blocking.
-function _isCollateralSession(sess) {
-  if (!sess) return false;
-  var a = (sess.activity || '').toLowerCase();
-  return a === 'collateral' || a === 'duty' || a === 'duties' || a === 'standby';
-}
-
-// Closes the current Collateral Duty session cleanly — mirrors the bookkeeping
-// in clockOut() (push to state.sessions, stop the timer, refresh UI) but without
-// the "Clocked out" toast, so the caller can immediately clock the member into a
-// scheduled activity. Collateral LOSAP is preserved because the ended session is
-// pushed into state.sessions exactly as a normal clock-out would.
-function _endCollateralSessionForSwitch() {
-  var sess = state.currentSession;
-  if (!sess) return;
-  var now = new Date();
-  sess.end = now.toISOString();
-  sess.duration = Math.floor((now - new Date(sess.start)) / 1000);
-  if (!Array.isArray(state.sessions)) state.sessions = [];
-  state.sessions.push(sess);
-  state.currentSession = null;
-  if (typeof _clockTimerInterval !== 'undefined' && _clockTimerInterval) {
-    clearInterval(_clockTimerInterval); _clockTimerInterval = null;
-  }
-  try { updateClockUI(false); } catch(e){}
-  try { updateClockStats(); } catch(e){}
-  try { renderRecentSessions(); } catch(e){}
-  save();
-}
-
-// Prompts a member who is already clocked in as Collateral Duty before a
-// scheduled Class / Meeting / Special Event / Drill: do they want to switch?
-// onConfirm() runs only if they choose to switch.
-function _askSwitchFromCollateral(entityTitle, onConfirm) {
-  if (document.getElementById('_switchCollateralModal')) return;
-  var sess = state.currentSession;
-  var fromDesc = (sess && sess.desc) ? sess.desc : 'Collateral Duty';
-  var wrap = document.createElement('div');
-  wrap.id = '_switchCollateralModal';
-  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px;';
-  var inner = document.createElement('div');
-  inner.style.cssText = 'background:#1A1A1A;border:1px solid #F5A623;border-radius:16px;padding:24px;width:100%;max-width:380px;text-align:center;';
-  var icon = document.createElement('div'); icon.style.cssText = 'font-size:36px;margin-bottom:10px;'; icon.textContent = '\\ud83d\\udd04';
-  var title = document.createElement('div'); title.style.cssText = 'font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:700;color:#F5A623;margin-bottom:6px;'; title.textContent = 'Switch to Scheduled Activity?';
-  var subEl = document.createElement('div'); subEl.style.cssText = 'font-size:13px;color:#AAA;margin-bottom:20px;line-height:1.5;';
-  subEl.textContent = 'You\\u2019re currently clocked in as Collateral Duty (\\u201c' + fromDesc + '\\u201d). Switch to \\u201c' + entityTitle + '\\u201d? This clocks you out of Collateral Duty and into the scheduled activity.';
-  var btnRow = document.createElement('div'); btnRow.style.cssText = 'display:flex;gap:10px;';
-  var yesBtn = document.createElement('button');
-  yesBtn.style.cssText = 'flex:1;background:#27AE60;border:none;color:#FFF;border-radius:10px;padding:13px;cursor:pointer;font-size:15px;font-weight:700;';
-  yesBtn.textContent = '\\ud83d\\udd04 Switch';
-  yesBtn.onclick = function() {
-    var m = document.getElementById('_switchCollateralModal'); if (m) m.remove();
-    try { onConfirm(); } catch(e){}
-  };
-  var noBtn = document.createElement('button');
-  noBtn.style.cssText = 'flex:1;background:none;border:1px solid #888;color:#AAA;border-radius:10px;padding:13px;cursor:pointer;font-size:15px;font-weight:700;';
-  noBtn.textContent = 'Stay on Collateral';
-  noBtn.onclick = function() {
-    var m = document.getElementById('_switchCollateralModal'); if (m) m.remove();
-  };
-  btnRow.appendChild(yesBtn); btnRow.appendChild(noBtn);
-  [icon, title, subEl, btnRow].forEach(function(el){ inner.appendChild(el); });
-  wrap.appendChild(inner);
-  document.body.appendChild(wrap);
-}
 
 function _askStayClockIn(type, entityId, entityTitle, scheduledEnd) {
   // Don't show if modal already visible
@@ -16160,6 +16048,15 @@ function launchApp(member) {
     });
     var _stBtn = document.getElementById('bnav-staffing');
     if (_stBtn) _stBtn.style.display = '';
+  } else {
+    // Restore the full bottom nav for non-career roles. This MUST run on every
+    // launchApp() so that returning from a "View As" career-person preview (which
+    // hid these buttons) re-shows them — otherwise the admin/officer is left
+    // stranded on the Staffing-only view after exiting impersonation.
+    ['bnav-clock','bnav-losap','bnav-company','bnav-staffing','bnav-more'].forEach(function(bid){
+      var b = document.getElementById(bid);
+      if (b) b.style.display = '';
+    });
   }
 
   // Default tab — Staffing for career persons, Clock for everyone else
