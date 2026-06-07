@@ -560,7 +560,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 7, 2026 \u00B7 build 3 \u2014 view-as nav fix';   // ← update on every deploy
+var PORTAL_BUILD = 'June 7, 2026 \u00B7 build 3 \u2014 clocked-in locks out other staffing positions';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -7932,7 +7932,12 @@ function renderStaffingBoard() {
         // Window this Sign Up would create (matches the Sign Up button's data-start/data-hours)
         var _propStart = posShifts.length > 0 ? (nextOpenStart() || '0700') : '0700';
         var _propHours = posShifts.length > 0 ? remainingHours() : 24;
-        var hasConflict = myShiftsOnDate.some(function(s){
+        // HARD clocked-in rule: if the member is currently clocked in to ANY
+        // seat whose window overlaps the one we'd create here, no other
+        // staffing position is available during that time. This overrides the
+        // EMS/fire dual-staffing and linked-unit allowances below.
+        var _ciBlock = _memberClockedInConflict(uid, date, _propStart, _propHours);
+        var hasConflict = !!_ciBlock || myShiftsOnDate.some(function(s){
           if (s.unitId===uId) {
             // Same unit: only a conflict if it overlaps the window we'd fill on a
             // DIFFERENT position (a member can't occupy two seats at once). A
@@ -8743,6 +8748,15 @@ function confirmSignUp() {
   // Block sign-up for past dates
   var today = localDateStr();
   if (date < today) { showToast('\u26A0\uFE0F Cannot sign up for a past date.'); return; }
+  // HARD clocked-in rule: while actively clocked in to a seat, no other
+  // staffing position is available during that overlapping time (any unit,
+  // including the same unit — overrides EMS/fire dual-staffing).
+  var _ciSh = _memberClockedInConflict(uid, date, start, hours);
+  if (_ciSh) {
+    var _ciUnit = (UNIT_LABELS&&UNIT_LABELS[_ciSh.unitId]) || _ciSh.unitId;
+    showToast('\u26a0\ufe0f You\u2019re clocked in to ' + _ciUnit + ' (' + (_ciSh.position||'a position') + '). Clock out before taking another position.');
+    return;
+  }
   // Check if already in THIS specific position slot
   var _alreadyInPos = (state.staffingShifts||[]).find(function(s){
     return s.date===date && s.unitId===unitId && s.positionIndex===posIdx && s.memberId===uid;
@@ -8862,6 +8876,20 @@ function _memberHasOverlappingShift(memberId, date, newStart, newHours) {
   }) || null;
 }
 
+// Returns the member's currently ACTIVE staffing clock-in (clockedIn && not
+// clocked out) whose time window overlaps [start, hours], or null. This is a
+// HARD conflict that ignores the EMS/fire dual-staffing and linked-unit
+// allowances: while a member is physically clocked in to a seat, no other
+// staffing position is available to them during that overlapping time —
+// regardless of unit (same unit included). `start` is 'HHMM', `hours` numeric.
+function _memberClockedInConflict(memberId, date, start, hours) {
+  return (state.staffingShifts||[]).find(function(s){
+    if (s.date !== date || s.memberId !== memberId) return false;
+    if (!s.clockedIn || s.clockedOutAt) return false;
+    return _shiftsOverlap(s.shiftStart||s.start||'0700', s.shiftHours||s.hours||24, start||'0700', hours||24);
+  }) || null;
+}
+
 function updateAssignMemberDropdown(unitId, date) {
   var posSel  = document.getElementById('assignPos_'    + unitId);
   var memSel  = document.getElementById('assignMember_' + unitId);
@@ -8893,11 +8921,11 @@ function updateAssignMemberDropdown(unitId, date) {
     .forEach(function(m) {
       // Exclude: overlapping shift exists for this member on this date
       if (_memberHasOverlappingShift(m.id, date, propStart, propHours)) return;
-      // Exclude: currently clocked in for a shift on a different unit (hard conflict)
+      // Exclude: currently clocked in for an overlapping shift (ANY unit,
+      // same unit included — can't hold two seats while clocked in)
       var _clockedInElsewhere = (state.staffingShifts||[]).some(function(s){
         if (s.memberId !== m.id || s.date !== date) return false;
         if (!s.clockedIn || s.clockedOutAt) return false;
-        if (s.unitId === unitId) return false; // same unit is OK (different position)
         // Check time overlap
         return _shiftsOverlap(s.shiftStart||s.start||'0700', s.shiftHours||s.hours||24, propStart, propHours);
       });
@@ -10741,6 +10769,10 @@ function signUpAllForUnit(date, unitId) {
     // Find members not already signed up who meet rank requirements
     var eligible = activeMembers.filter(function(m) {
       if (!(state.staffingShifts||[]).every(function(s){ return !(s.date===date && s.unitId===unitId && s.memberId===m.id); })) return false;
+      // HARD clocked-in rule: skip anyone already clocked in to an overlapping
+      // seat (any unit, same unit included). Bulk sign-up assigns a 0700/24h
+      // window, so this overlaps any active same-day clock-in.
+      if (_memberClockedInConflict(m.id, date, '0700', 24)) return false;
       var hasConflict = (state.staffingShifts||[]).some(function(s){
         if (s.date!==date || s.memberId!==m.id) return false;
         var sIsEMS = EMS.indexOf(s.unitId) >= 0;
@@ -12684,6 +12716,18 @@ function signUpSpecialEvent(elOrId) {
   if (!ev) return;
   if (!ev.signups) ev.signups = [];
   if (ev.signups.some(function(s){ return s.memberId===uid; })) { showToast('Already signed up.'); return; }
+  // HARD clocked-in rule: can't grab an event seat that overlaps a staffing
+  // shift the member is currently clocked in to.
+  var _suT  = (ev.startTime || ev.time || '00:00');
+  var _suSD = new Date(ev.date + 'T' + _suT + ':00');
+  var _suED = ev.endTime ? new Date(ev.date + 'T' + ev.endTime + ':00') : new Date(_suSD.getTime() + 7200000);
+  var _suHrs = (!isNaN(_suSD.getTime()) && _suED > _suSD) ? (_suED - _suSD)/3600000 : 2;
+  var _suCi = _memberClockedInConflict(uid, ev.date, _suT.replace(':',''), _suHrs);
+  if (_suCi) {
+    var _suUnit = (UNIT_LABELS&&UNIT_LABELS[_suCi.unitId]) || _suCi.unitId;
+    showToast('\u26a0\ufe0f You\u2019re clocked in to ' + _suUnit + ' during this event. Clock out first.');
+    return;
+  }
   // Clear any prior decline so this event reappears on the dashboard
   if (ev.declined) ev.declined = ev.declined.filter(function(id){ return id !== uid; });
   // Capture position if event has positions
@@ -12762,6 +12806,15 @@ function clockInSpecialEvent(elOrId) {
     return;
   }
   if (now > evEnd) { showToast('\u26a0\ufe0f This event has already ended.'); return; }
+  // HARD clocked-in rule: can't clock in to an event while clocked in to a
+  // staffing seat whose window overlaps this event.
+  var _ciHrs = (evEnd > evStart) ? (evEnd - evStart)/3600000 : 2;
+  var _ciEv = _memberClockedInConflict(uid, ev.date, timeStr.replace(':',''), _ciHrs);
+  if (_ciEv) {
+    var _ciEvUnit = (UNIT_LABELS&&UNIT_LABELS[_ciEv.unitId]) || _ciEv.unitId;
+    showToast('\u26a0\ufe0f You\u2019re clocked in to ' + _ciEvUnit + '. Clock out before clocking in here.');
+    return;
+  }
   // Block if already clocked into another session
   if (state.currentSession && state.currentSession.userId === uid && !state.currentSession.end) {
     showToast('\u26a0\ufe0f You are already clocked in. Clock out first.');
