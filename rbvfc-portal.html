@@ -560,7 +560,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 6, 2026 \u00B7 build 1';   // ← update on every deploy
+var PORTAL_BUILD = 'June 7, 2026 \u00B7 build 2 \u2014 attendance clocking';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -953,6 +953,15 @@ function _fbMergeDrill(remoteD, localD) {
   var merged = Object.assign({}, remoteD, localD);
   merged.confirmedMembers = _fbUnionScalar(remoteD && remoteD.confirmedMembers, localD && localD.confirmedMembers);
   merged.declined         = _fbUnionScalar(remoteD && remoteD.declined, localD && localD.declined);
+  if ((remoteD && remoteD.attendance) || (localD && localD.attendance)) {
+    merged.attendance = _fbUnionById(localD && localD.attendance, remoteD && remoteD.attendance, 'memberId', function(cur, item){
+      // keep the most complete clock record across devices
+      var a = Object.assign({}, cur, item);
+      a.clockedInAt  = item.clockedInAt  || cur.clockedInAt  || null;
+      a.clockedOutAt = item.clockedOutAt || cur.clockedOutAt || null;
+      return a;
+    });
+  }
   return merged;
 }
 // Duplicate-meeting merge: union declined ids (signups live in meetingAttendance).
@@ -6021,6 +6030,52 @@ function renderScheduledDrills() {
       actions += '<button class="btn btn-sm" onclick="deleteScheduledDrill(\''+d.id+'\')" style="font-size:11px;background:#2A0000;color:#C8102E;border:1px solid #C8102E;">🗑 Delete</button>';
     }
 
+    // ── Attendance clocking (officer/admin/creator manage; members self-clock) ──
+    var canClockManage = isOfficer || (d.createdBy && d.createdBy===uid);
+    var attList = d.attendance || [];
+    var attHtml = '';
+    if (attList.length || canClockManage) {
+      var attRows = attList.map(function(a){
+        var mbr=(state.roster||[]).find(function(x){return x.id===a.memberId;});
+        var nm = mbr ? mbr.last+', '+mbr.first : a.memberId;
+        var inT  = a.clockedInAt ? new Date(a.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+        var outT = a.clockedOutAt ? new Date(a.clockedOutAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+        var lbl = (a.clockedInAt && a.clockedOutAt)
+          ? '<span style="color:#888;">✓ Completed</span>'
+          : (a.clockedInAt ? '<span style="color:#27AE60;">🟢 In</span>' : '<span style="color:#666;">— Not in</span>');
+        var btn = '';
+        if (canClockManage) {
+          if (!a.clockedInAt) btn = ' <button onclick="adminClockInDrill(\''+d.id+'\',\''+a.memberId+'\')" style="font-size:9px;padding:1px 6px;background:#0D2200;border:1px solid #27AE60;color:#27AE60;border-radius:3px;cursor:pointer;white-space:nowrap;">Clock In</button>';
+          else if (!a.clockedOutAt) btn = ' <button onclick="adminClockOutDrill(\''+d.id+'\',\''+a.memberId+'\')" style="font-size:9px;padding:1px 6px;background:#1A1200;border:1px solid #F5A623;color:#F5A623;border-radius:3px;cursor:pointer;white-space:nowrap;">Clock Out</button>';
+        }
+        return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:3px 0;border-bottom:1px solid #222;">'
+          +'<span style="color:#CCC;">'+nm+'</span>'
+          +'<span>'+lbl+(inT?' <span style="color:#555;">'+inT+(outT?'–'+outT:'')+'</span>':'')+btn+'</span>'
+          +'</div>';
+      }).join('');
+      attHtml = '<div style="margin-top:6px;background:#111;border-radius:6px;padding:4px 8px;">'
+        +(attRows || '<div style="font-size:11px;color:#444;padding:3px 0;">No one clocked in yet.</div>')+'</div>';
+    }
+
+    // Member self clock-in/out (invited, confirmed, or already has an attendance record)
+    var myAtt = (d.attendance||[]).find(function(a){ return a.memberId===uid; });
+    var amInvited = (d.members||[]).indexOf(uid) >= 0 || (d.confirmedMembers||[]).indexOf(uid) >= 0 || !!myAtt;
+    var selfClock = '';
+    if (amInvited && !isPast) {
+      if (myAtt && myAtt.clockedInAt && !myAtt.clockedOutAt) {
+        selfClock = '<button class="btn btn-sm" onclick="clockOutDrill(\''+d.id+'\')" style="font-size:11px;background:#1A1200;border:1px solid #F5A623;color:#F5A623;">⏹ Clock Out</button>';
+      } else if (myAtt && myAtt.clockedInAt && myAtt.clockedOutAt) {
+        selfClock = '<span style="font-size:12px;color:#27AE60;align-self:center;">✅ Completed</span>';
+      } else {
+        selfClock = '<button class="btn btn-sm" onclick="clockInDrill(\''+d.id+'\')" style="font-size:11px;background:#0D2200;border:1px solid #27AE60;color:#27AE60;">🕐 Clock In</button>';
+      }
+    }
+    var clockAll = canClockManage
+      ? '<button class="btn btn-sm" onclick="clockAllInDrill(\''+d.id+'\')" style="font-size:11px;background:#0D2200;border:1px solid #27AE60;color:#27AE60;">⏱ Clock All In</button> '
+        +'<button class="btn btn-sm" onclick="clockAllOutDrill(\''+d.id+'\')" style="font-size:11px;background:#1A1200;border:1px solid #F5A623;color:#F5A623;">⏹ Clock All Out</button>'
+      : '';
+    var bottomRow = [selfClock, clockAll, actions].filter(Boolean).join(' ');
+
     return '<div style="background:#181818;border:1px solid #2A2A2A;border-left:3px solid '+statusColor+';border-radius:10px;padding:14px;margin-bottom:10px;">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap;">'
       +   '<div style="flex:1;">'
@@ -6033,10 +6088,11 @@ function renderScheduledDrills() {
       +     (d.notes?'<div style="font-size:12px;color:#666;margin-top:3px;font-style:italic;">'+d.notes+'</div>':'')
       +     (memberNames?'<div style="font-size:11px;color:#555;margin-top:5px;">Expected: '+memberNames+'</div>':'')
       +     rsvpBadge
+      +     attHtml
       +   '</div>'
       +   '<span style="font-size:10px;font-weight:700;color:'+statusColor+';padding:3px 8px;border-radius:4px;background:'+statusColor+'22;white-space:nowrap;">'+statusLabel+'</span>'
       + '</div>'
-      + (actions?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #222;">'+actions+'</div>':'')
+      + (bottomRow?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #222;">'+bottomRow+'</div>':'')
       + '</div>';
   }).join('');
 }
@@ -13555,6 +13611,273 @@ function clockOutMeeting(mtgId, occurrenceDate) {
 }
 
 
+/* ─────────────────────────────────────────────────────────────────────────
+   ADMIN / OFFICER / IN-CHARGE ATTENDANCE CLOCKING
+   Lets officers, admins, or the person in charge clock OTHER attendees in and
+   out, plus "Clock All In / Clock All Out" for Meetings, Special Events, and
+   Drills. LOSAP credit requires BOTH a clock-in and a clock-out, so these only
+   stamp the attendance/signup record. They never touch state.currentSession or
+   the live clock timer — that belongs to the current device's own user, and a
+   member's own self-service buttons (clockInMeeting / clockInSpecialEvent /
+   clockInDrill) handle the live timer for that person.
+   ───────────────────────────────────────────────────────────────────────── */
+
+function _memberName(id){
+  var m=(state.roster||[]).find(function(x){ return x.id===id; });
+  return m ? (m.last+', '+m.first) : id;
+}
+
+// ── Meetings ───────────────────────────────────────────────────────────────
+function _canManageMeetingClock(mtg){
+  var uid=state.currentUserId; if(!uid||!mtg) return false;
+  var me=(state.roster||[]).find(function(m){ return m.id===uid; });
+  if(!me) return false;
+  return me.appRole==='officer' || me.appRole==='admin' || mtg.inCharge===uid;
+}
+function adminClockInMeeting(mtgId, occ, memberId){
+  var mtg=(state.meetings||[]).find(function(m){ return m.id===mtgId; });
+  if(!mtg||!_canManageMeetingClock(mtg)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  if(!Array.isArray(state.meetingAttendance)) state.meetingAttendance=[];
+  var now=new Date();
+  var att=state.meetingAttendance.find(function(a){ return a.mtgId===mtgId&&a.date===occ&&a.memberId===memberId; });
+  if(!att){ att={ id:'ma_'+Date.now()+'_'+String(memberId).slice(-4), mtgId:mtgId, date:occ, memberId:memberId, signedUpAt:now.toISOString(), clockedInAt:null, clockedOutAt:null }; state.meetingAttendance.push(att); }
+  if(att.clockedInAt && !att.clockedOutAt){ showToast('\u2139\ufe0f '+_memberName(memberId)+' already clocked in.'); return; }
+  att.clockedInAt=now.toISOString(); att.clockedOutAt=null;
+  save();
+  try{ renderMeetingsList(); }catch(e){}
+  showToast('\u2705 Clocked in '+_memberName(memberId)+'.');
+}
+function adminClockOutMeeting(mtgId, occ, memberId){
+  var mtg=(state.meetings||[]).find(function(m){ return m.id===mtgId; });
+  if(!mtg||!_canManageMeetingClock(mtg)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  var att=(state.meetingAttendance||[]).find(function(a){ return a.mtgId===mtgId&&a.date===occ&&a.memberId===memberId; });
+  if(!att||!att.clockedInAt){ showToast('\u26a0\ufe0f '+_memberName(memberId)+' is not clocked in.'); return; }
+  if(att.clockedOutAt){ showToast('\u2139\ufe0f '+_memberName(memberId)+' already clocked out.'); return; }
+  att.clockedOutAt=new Date().toISOString();
+  if(att.clockedInAt && att.clockedOutAt){
+    try{ _autoAwardLosap(memberId,'meeting',occ||att.date,(mtg.title||'Company Meeting')+' \u2014 attendance',mtgId); }catch(e){}
+  }
+  save();
+  try{ renderMeetingsList(); }catch(e){}
+  showToast('\u23f9 Clocked out '+_memberName(memberId)+'. LOSAP awarded.');
+}
+function clockAllInMeeting(mtgId, occ){
+  var mtg=(state.meetings||[]).find(function(m){ return m.id===mtgId; });
+  if(!mtg||!_canManageMeetingClock(mtg)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  if(!Array.isArray(state.meetingAttendance)) state.meetingAttendance=[];
+  var now=new Date().toISOString();
+  var ids={};
+  (mtg.members||[]).forEach(function(id){ ids[id]=1; });
+  (state.meetingAttendance||[]).forEach(function(a){ if(a.mtgId===mtgId&&a.date===occ) ids[a.memberId]=1; });
+  var n=0, seq=0;
+  Object.keys(ids).forEach(function(memberId){
+    var att=state.meetingAttendance.find(function(a){ return a.mtgId===mtgId&&a.date===occ&&a.memberId===memberId; });
+    if(!att){ att={ id:'ma_'+Date.now()+'_'+String(memberId).slice(-4)+'_'+(seq++), mtgId:mtgId, date:occ, memberId:memberId, signedUpAt:now, clockedInAt:null, clockedOutAt:null }; state.meetingAttendance.push(att); }
+    var active=att.clockedInAt && !att.clockedOutAt;
+    if(!active){ att.clockedInAt=now; att.clockedOutAt=null; n++; }
+  });
+  save();
+  try{ renderMeetingsList(); }catch(e){}
+  showToast(n ? ('\u2705 Clocked in '+n+' member'+(n===1?'':'s')+'.') : '\u2139\ufe0f No one to clock in.');
+}
+function clockAllOutMeeting(mtgId, occ){
+  var mtg=(state.meetings||[]).find(function(m){ return m.id===mtgId; });
+  if(!mtg||!_canManageMeetingClock(mtg)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  var now=new Date().toISOString(), n=0;
+  (state.meetingAttendance||[]).forEach(function(a){
+    if(a.mtgId===mtgId&&a.date===occ&&a.clockedInAt&&!a.clockedOutAt){
+      a.clockedOutAt=now; n++;
+      try{ _autoAwardLosap(a.memberId,'meeting',occ||a.date,(mtg.title||'Company Meeting')+' \u2014 attendance',mtgId); }catch(e){}
+    }
+  });
+  save();
+  try{ renderMeetingsList(); }catch(e){}
+  showToast(n ? ('\u23f9 Clocked out '+n+' member'+(n===1?'':'s')+'. LOSAP awarded.') : '\u2139\ufe0f No one clocked in.');
+}
+
+// ── Special Events ───────────────────────────────────────────────────────────
+function _canManageEventClock(ev){
+  var uid=state.currentUserId; if(!uid||!ev) return false;
+  if(typeof canManageSpecialEvents==='function' && canManageSpecialEvents()) return true;
+  return ev.inCharge===uid;
+}
+function adminClockInEvent(evId, memberId){
+  var ev=(state.specialEvents||[]).find(function(e){ return e.id===evId; });
+  if(!ev||!_canManageEventClock(ev)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  if(!Array.isArray(ev.signups)) ev.signups=[];
+  var s=ev.signups.find(function(x){ return x.memberId===memberId; });
+  if(!s){ s={ memberId:memberId, position:null, clockedIn:false, clockedInAt:null, clockedOutAt:null }; ev.signups.push(s); }
+  if(s.clockedInAt && !s.clockedOutAt){ showToast('\u2139\ufe0f '+_memberName(memberId)+' already clocked in.'); return; }
+  s.clockedIn=true; s.clockedInAt=new Date().toISOString(); s.clockedOutAt=null;
+  save(); try{ renderBothSpecialEventViews(); }catch(e){}
+  showToast('\u2705 Clocked in '+_memberName(memberId)+'.');
+}
+function adminClockOutEvent(evId, memberId){
+  var ev=(state.specialEvents||[]).find(function(e){ return e.id===evId; });
+  if(!ev||!_canManageEventClock(ev)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  var s=(ev.signups||[]).find(function(x){ return x.memberId===memberId; });
+  if(!s||!s.clockedInAt){ showToast('\u26a0\ufe0f '+_memberName(memberId)+' is not clocked in.'); return; }
+  if(s.clockedOutAt){ showToast('\u2139\ufe0f '+_memberName(memberId)+' already clocked out.'); return; }
+  var now=new Date(), outT=now;
+  try{ var w=(typeof _eventScheduleWindow==='function')?_eventScheduleWindow(ev):null; if(w&&now>w.end) outT=w.end; }catch(e){}
+  s.clockedIn=false; s.clockedOutAt=outT.toISOString();
+  if(s.clockedInAt && s.clockedOutAt){
+    try{ _autoAwardLosap(memberId,'fundraiser',ev.date||localDateStr(),(ev.title||'Special Event')+' \u2014 attendance',evId); }catch(e){}
+  }
+  save(); try{ renderBothSpecialEventViews(); }catch(e){}
+  try{ _checkDrillEventAutoSubmit(evId); }catch(e){}
+  showToast('\u23f9 Clocked out '+_memberName(memberId)+'. LOSAP awarded.');
+}
+function clockAllInEvent(evId){
+  var ev=(state.specialEvents||[]).find(function(e){ return e.id===evId; });
+  if(!ev||!_canManageEventClock(ev)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  if(!Array.isArray(ev.signups)) ev.signups=[];
+  var now=new Date().toISOString(), n=0;
+  ev.signups.forEach(function(s){
+    var active=s.clockedInAt && !s.clockedOutAt;
+    if(!active){ s.clockedIn=true; s.clockedInAt=now; s.clockedOutAt=null; n++; }
+  });
+  save(); try{ renderBothSpecialEventViews(); }catch(e){}
+  showToast(n ? ('\u2705 Clocked in '+n+' member'+(n===1?'':'s')+'.') : '\u2139\ufe0f No signups to clock in.');
+}
+function clockAllOutEvent(evId){
+  var ev=(state.specialEvents||[]).find(function(e){ return e.id===evId; });
+  if(!ev||!_canManageEventClock(ev)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  var now=new Date(), outT=now;
+  try{ var w=(typeof _eventScheduleWindow==='function')?_eventScheduleWindow(ev):null; if(w&&now>w.end) outT=w.end; }catch(e){}
+  var iso=outT.toISOString(), n=0;
+  (ev.signups||[]).forEach(function(s){
+    if(s.clockedInAt && !s.clockedOutAt){
+      s.clockedIn=false; s.clockedOutAt=iso; n++;
+      try{ _autoAwardLosap(s.memberId,'fundraiser',ev.date||localDateStr(),(ev.title||'Special Event')+' \u2014 attendance',evId); }catch(e){}
+    }
+  });
+  save(); try{ renderBothSpecialEventViews(); }catch(e){}
+  try{ _checkDrillEventAutoSubmit(evId); }catch(e){}
+  showToast(n ? ('\u23f9 Clocked out '+n+' member'+(n===1?'':'s')+'. LOSAP awarded.') : '\u2139\ufe0f No one clocked in.');
+}
+
+// ── Scheduled Drills ─────────────────────────────────────────────────────────
+// Scheduled drills previously had no live clock model; attendance is stored on
+// the drill record as d.attendance = [{memberId, clockedInAt, clockedOutAt}].
+// The "person in charge" for a drill is its creator (d.createdBy); officers and
+// admins can also manage clocking.
+function _canManageDrillClock(d){
+  var uid=state.currentUserId; if(!uid||!d) return false;
+  var me=(state.roster||[]).find(function(m){ return m.id===uid; });
+  if(!me) return false;
+  return me.appRole==='officer' || me.appRole==='admin' || d.createdBy===uid;
+}
+function clockInDrill(drillId){
+  var uid=state.currentUserId;
+  var d=(state.scheduledDrills||[]).find(function(x){ return x.id===drillId; });
+  if(!d) return;
+  var now=new Date();
+  var startDt=new Date((d.date||'')+'T'+(d.time||'00:00')+':00');
+  var endDt=new Date(startDt.getTime()+((d.hours||2)*3600000));
+  if(!isNaN(startDt.getTime())){
+    if(now < new Date(startDt.getTime()-3600000)){ var mins=Math.round((startDt-now)/60000); showToast('\u26a0\ufe0f Clock-in opens 1 hour before ('+mins+' min away).'); return; }
+    if(now > endDt){ showToast('\u26a0\ufe0f This drill has already ended.'); return; }
+  }
+  if(state.currentSession && state.currentSession.userId===uid && !state.currentSession.end){ showToast('\u26a0\ufe0f You are already clocked in. Clock out first.'); return; }
+  if(!Array.isArray(d.attendance)) d.attendance=[];
+  var att=d.attendance.find(function(a){ return a.memberId===uid; });
+  if(!att){ att={ memberId:uid, clockedInAt:null, clockedOutAt:null }; d.attendance.push(att); }
+  att.clockedInAt=now.toISOString(); att.clockedOutAt=null;
+  state.currentSession={ id:'sess_drill_'+Date.now(), userId:uid, start:now.toISOString(), activity:'drill', desc:d.drillName, drillId:drillId, end:null, duration:null };
+  if(typeof _clockTimerInterval!=='undefined'){ if(_clockTimerInterval) clearInterval(_clockTimerInterval); _clockTimerInterval=setInterval(tickClockTimer,1000); }
+  try{updateClockUI(true);}catch(e){} try{updateClockStats();}catch(e){}
+  d.updatedAt=now.toISOString();
+  save();
+  try{ renderScheduledDrills(); }catch(e){}
+  try{ renderMyShifts(); }catch(e){}
+  showToast('\u2705 Clocked in to '+(d.drillName||'drill')+'.');
+}
+function clockOutDrill(drillId){
+  var uid=state.currentUserId;
+  var d=(state.scheduledDrills||[]).find(function(x){ return x.id===drillId; });
+  if(!d) return;
+  var att=(d.attendance||[]).find(function(a){ return a.memberId===uid; });
+  if(!att||!att.clockedInAt){ showToast('\u26a0\ufe0f Not clocked in.'); return; }
+  att.clockedOutAt=new Date().toISOString();
+  if(state.currentSession && state.currentSession.drillId===drillId && state.currentSession.userId===uid){
+    state.currentSession.end=new Date().toISOString();
+    state.currentSession.duration=(new Date()-new Date(state.currentSession.start))/1000;
+    if(!Array.isArray(state.sessions)) state.sessions=[];
+    state.sessions.push(JSON.parse(JSON.stringify(state.currentSession)));
+    state.currentSession=null;
+    if(typeof _clockTimerInterval!=='undefined'&&_clockTimerInterval){ clearInterval(_clockTimerInterval); _clockTimerInterval=null; }
+    try{updateClockUI(false);}catch(e){} try{updateClockStats();}catch(e){}
+  }
+  if(att.clockedInAt && att.clockedOutAt){
+    try{ _autoAwardLosap(uid,'drill',d.date||localDateStr(),(d.drillName||'Drill')+' \u2014 attendance',drillId); }catch(e){}
+  }
+  d.updatedAt=new Date().toISOString();
+  save();
+  try{ renderScheduledDrills(); }catch(e){}
+  try{ renderMyShifts(); }catch(e){}
+  showToast('\u23f9 Clocked out of '+(d.drillName||'drill')+'. LOSAP point awarded!');
+}
+function adminClockInDrill(drillId, memberId){
+  var d=(state.scheduledDrills||[]).find(function(x){ return x.id===drillId; });
+  if(!d||!_canManageDrillClock(d)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  if(!Array.isArray(d.attendance)) d.attendance=[];
+  var att=d.attendance.find(function(a){ return a.memberId===memberId; });
+  if(!att){ att={ memberId:memberId, clockedInAt:null, clockedOutAt:null }; d.attendance.push(att); }
+  if(att.clockedInAt && !att.clockedOutAt){ showToast('\u2139\ufe0f '+_memberName(memberId)+' already clocked in.'); return; }
+  att.clockedInAt=new Date().toISOString(); att.clockedOutAt=null;
+  d.updatedAt=new Date().toISOString();
+  save(); try{ renderScheduledDrills(); }catch(e){}
+  showToast('\u2705 Clocked in '+_memberName(memberId)+'.');
+}
+function adminClockOutDrill(drillId, memberId){
+  var d=(state.scheduledDrills||[]).find(function(x){ return x.id===drillId; });
+  if(!d||!_canManageDrillClock(d)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  var att=(d.attendance||[]).find(function(a){ return a.memberId===memberId; });
+  if(!att||!att.clockedInAt){ showToast('\u26a0\ufe0f '+_memberName(memberId)+' is not clocked in.'); return; }
+  if(att.clockedOutAt){ showToast('\u2139\ufe0f '+_memberName(memberId)+' already clocked out.'); return; }
+  att.clockedOutAt=new Date().toISOString();
+  try{ _autoAwardLosap(memberId,'drill',d.date||localDateStr(),(d.drillName||'Drill')+' \u2014 attendance',drillId); }catch(e){}
+  d.updatedAt=new Date().toISOString();
+  save(); try{ renderScheduledDrills(); }catch(e){}
+  showToast('\u23f9 Clocked out '+_memberName(memberId)+'. LOSAP awarded.');
+}
+function clockAllInDrill(drillId){
+  var d=(state.scheduledDrills||[]).find(function(x){ return x.id===drillId; });
+  if(!d||!_canManageDrillClock(d)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  if(!Array.isArray(d.attendance)) d.attendance=[];
+  var now=new Date().toISOString();
+  var ids={};
+  (d.members||[]).forEach(function(id){ ids[id]=1; });
+  (d.confirmedMembers||[]).forEach(function(id){ ids[id]=1; });
+  (d.attendance||[]).forEach(function(a){ ids[a.memberId]=1; });
+  var n=0;
+  Object.keys(ids).forEach(function(memberId){
+    var att=d.attendance.find(function(a){ return a.memberId===memberId; });
+    if(!att){ att={ memberId:memberId, clockedInAt:null, clockedOutAt:null }; d.attendance.push(att); }
+    var active=att.clockedInAt && !att.clockedOutAt;
+    if(!active){ att.clockedInAt=now; att.clockedOutAt=null; n++; }
+  });
+  d.updatedAt=now;
+  save(); try{ renderScheduledDrills(); }catch(e){}
+  showToast(n ? ('\u2705 Clocked in '+n+' member'+(n===1?'':'s')+'.') : '\u2139\ufe0f No one to clock in.');
+}
+function clockAllOutDrill(drillId){
+  var d=(state.scheduledDrills||[]).find(function(x){ return x.id===drillId; });
+  if(!d||!_canManageDrillClock(d)){ showToast('\u26a0\ufe0f Not authorized.'); return; }
+  var now=new Date().toISOString(), n=0;
+  (d.attendance||[]).forEach(function(a){
+    if(a.clockedInAt && !a.clockedOutAt){
+      a.clockedOutAt=now; n++;
+      try{ _autoAwardLosap(a.memberId,'drill',d.date||localDateStr(),(d.drillName||'Drill')+' \u2014 attendance',drillId); }catch(e){}
+    }
+  });
+  d.updatedAt=now;
+  save(); try{ renderScheduledDrills(); }catch(e){}
+  showToast(n ? ('\u23f9 Clocked out '+n+' member'+(n===1?'':'s')+'. LOSAP awarded.') : '\u2139\ufe0f No one clocked in.');
+}
+
+
 function _askStayClockIn(type, entityId, entityTitle, scheduledEnd) {
   // Don't show if modal already visible
   if (document.getElementById('_stayClockInModal')) return;
@@ -13778,11 +14101,19 @@ function renderMeetingsList() {
           var submitBtn = (!awarded && !pending && _mOff)
             ? _losapSubmitBtn('meeting', mtg.id, sd, a.memberId, mtg.title+' — attendance')
             : '';
-          return nm + badge + submitBtn;
+          var clockBtn = '';
+          if (_canAlert) {
+            if (!a.clockedInAt) {
+              clockBtn = ' <button onclick="adminClockInMeeting(\''+mtg.id+'\',\''+sd+'\',\''+a.memberId+'\')" style="font-size:9px;padding:1px 6px;background:#0D2200;border:1px solid #27AE60;color:#27AE60;border-radius:3px;cursor:pointer;white-space:nowrap;">Clock In</button>';
+            } else if (!a.clockedOutAt) {
+              clockBtn = ' <button onclick="adminClockOutMeeting(\''+mtg.id+'\',\''+sd+'\',\''+a.memberId+'\')" style="font-size:9px;padding:1px 6px;background:#1A1200;border:1px solid #F5A623;color:#F5A623;border-radius:3px;cursor:pointer;white-space:nowrap;">Clock Out</button>';
+            }
+          }
+          return nm + badge + submitBtn + clockBtn;
         }).join(' &nbsp;&bull;&nbsp; ');
-        // For officers: show expected members who didn't clock in at all
+        // For managers: show expected members who didn't clock in at all
         var expectedNoShow = '';
-        if (_mOff && mtg.members && Array.isArray(mtg.members)) {
+        if (_canAlert && mtg.members && Array.isArray(mtg.members)) {
           var noShows = mtg.members.filter(function(mid){
             return !attendees.some(function(a){ return a.memberId===mid; });
           });
@@ -13792,10 +14123,11 @@ function renderMeetingsList() {
               var nm = mbr ? mbr.last+', '+mbr.first : mid;
               var awarded = _hasLosapAutoEntry(mid, 'meeting', sd, mtg.id);
               var pending = (state.losapPending||[]).some(function(p){ return p.sourceId===mtg.id&&p.occurrenceDate===sd&&p.memberId===mid&&p.status==='pending'; });
-              var submitBtn = (!awarded && !pending)
+              var submitBtn = (!awarded && !pending && _mOff)
                 ? _losapSubmitBtn('meeting', mtg.id, sd, mid, mtg.title+' — attendance')
-                : (pending ? ' <span style="color:#F5A623;font-size:9px;">&#9203;</span>' : ' <span style="color:#27AE60;font-size:9px;">&#10003;</span>');
-              return nm + submitBtn;
+                : (pending ? ' <span style="color:#F5A623;font-size:9px;">&#9203;</span>' : (awarded ? ' <span style="color:#27AE60;font-size:9px;">&#10003;</span>' : ''));
+              var clockBtn = ' <button onclick="adminClockInMeeting(\''+mtg.id+'\',\''+sd+'\',\''+mid+'\')" style="font-size:9px;padding:1px 6px;background:#0D2200;border:1px solid #27AE60;color:#27AE60;border-radius:3px;cursor:pointer;white-space:nowrap;">Clock In</button>';
+              return nm + clockBtn + submitBtn;
             }).join(' &nbsp;&bull;&nbsp; ');
             expectedNoShow = '<div style="font-size:11px;color:#666;margin-top:3px;">Expected (no clock-in): '+nsNames+'</div>';
           }
@@ -13823,24 +14155,28 @@ function renderMeetingsList() {
       +'<button onclick="deleteMeeting(\''+mtg.id+'\')" style="background:none;border:1px solid #333;color:#E74C3C;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">&#128465; Delete</button>'
       +'</div></div>'
       +(function(){
+        // Manager (officer / admin / in-charge) "Clock All" controls
+        var _mgrRow = _canAlert
+          ? '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #222;display:flex;gap:6px;flex-wrap:wrap;">'
+            +'<button onclick="clockAllInMeeting(\''+mtg.id+'\',\''+sd+'\')" style="flex:1;min-width:120px;background:#0D2200;border:1px solid #27AE60;color:#27AE60;border-radius:8px;padding:7px 10px;font-weight:700;font-size:12px;cursor:pointer;">&#9201; Clock All In</button>'
+            +'<button onclick="clockAllOutMeeting(\''+mtg.id+'\',\''+sd+'\')" style="flex:1;min-width:120px;background:#1A1200;border:1px solid #F5A623;color:#F5A623;border-radius:8px;padding:7px 10px;font-weight:700;font-size:12px;cursor:pointer;">&#9209; Clock All Out</button>'
+            +'</div>'
+          : '';
         // Member sign-up / attendance section
-        if (isPast) return '</div>';
-        var myAtt = (state.meetingAttendance||[]).find(function(a){ return a.mtgId===mtg.id && a.date===sd && a.memberId===_mUid; });
-        var isSigned = !!myAtt;
-        var isClockedIn = myAtt && myAtt.clockedInAt && !myAtt.clockedOutAt;
-        if (isClockedIn) {
-          return '<div style="margin-top:10px;display:flex;justify-content:flex-end;">'
-            +'<span style="font-size:12px;color:#27AE60;">✅ Clocked in</span>'
-            +'</div></div>';
-        } else if (isSigned) {
-          return '<div style="margin-top:10px;display:flex;justify-content:flex-end;">'
-            +'<span style="font-size:12px;color:#7EC8E3;">✓ You are signed up</span>'
-            +'</div></div>';
-        } else {
-          return '<div style="margin-top:10px;display:flex;justify-content:flex-end;">'
-            +'<button onclick="signUpForMeeting(\''+mtg.id+'\',\''+sd+'\')" class="btn btn-sm" style="background:#0D2200;border:1px solid #27AE60;color:#27AE60;border-radius:8px;padding:6px 14px;font-weight:700;font-size:13px;">✋ SIGN UP</button>'
-            +'</div></div>';
+        var statusHtml = '';
+        if (!isPast) {
+          var myAtt = (state.meetingAttendance||[]).find(function(a){ return a.mtgId===mtg.id && a.date===sd && a.memberId===_mUid; });
+          var isSigned = !!myAtt;
+          var isClockedIn = myAtt && myAtt.clockedInAt && !myAtt.clockedOutAt;
+          if (isClockedIn) {
+            statusHtml = '<div style="margin-top:10px;display:flex;justify-content:flex-end;"><span style="font-size:12px;color:#27AE60;">✅ Clocked in</span></div>';
+          } else if (isSigned) {
+            statusHtml = '<div style="margin-top:10px;display:flex;justify-content:flex-end;"><span style="font-size:12px;color:#7EC8E3;">✓ You are signed up</span></div>';
+          } else {
+            statusHtml = '<div style="margin-top:10px;display:flex;justify-content:flex-end;"><button onclick="signUpForMeeting(\''+mtg.id+'\',\''+sd+'\')" class="btn btn-sm" style="background:#0D2200;border:1px solid #27AE60;color:#27AE60;border-radius:8px;padding:6px 14px;font-weight:700;font-size:13px;">✋ SIGN UP</button></div>';
+          }
         }
+        return statusHtml + _mgrRow + '</div>';
       })();
   }
   var upcoming=mtgs.filter(function(m){ return !!nextMeetingOccurrence(m); });
@@ -13956,6 +14292,7 @@ function renderSpecialEventAdmin() {
   function _seAdminCard(ev) {
     var isPast = ev.date < today;
     var isToday = ev.date === today;
+    var mgr = _canManageEventClock(ev);
     var evDate = new Date(ev.date+'T12:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric',year:'numeric'});
     var signupRows = (ev.signups||[]).map(function(s){
       var m=(state.roster||[]).find(function(r){ return r.id===s.memberId; });
@@ -13968,11 +14305,25 @@ function renderSpecialEventAdmin() {
           : '<span style="color:#666;">— Not clocked in</span>';
       var timeStr = s.clockedInAt ? new Date(s.clockedInAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
       var outStr  = s.clockedOutAt ? new Date(s.clockedOutAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+      var clockBtn = '';
+      if (mgr) {
+        if (!s.clockedInAt) {
+          clockBtn = ' <button onclick="adminClockInEvent(\''+ev.id+'\',\''+s.memberId+'\')" style="font-size:9px;padding:1px 6px;background:#0D2200;border:1px solid #27AE60;color:#27AE60;border-radius:3px;cursor:pointer;white-space:nowrap;">Clock In</button>';
+        } else if (!s.clockedOutAt) {
+          clockBtn = ' <button onclick="adminClockOutEvent(\''+ev.id+'\',\''+s.memberId+'\')" style="font-size:9px;padding:1px 6px;background:#1A1200;border:1px solid #F5A623;color:#F5A623;border-radius:3px;cursor:pointer;white-space:nowrap;">Clock Out</button>';
+        }
+      }
       return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #222;font-size:11px;">'
         +'<span style="color:#CCC;">'+name+posLabel+'</span>'
-        +'<span>'+clockLabel+(timeStr?' <span style="color:#555;">'+timeStr+(outStr?'–'+outStr:'')+'</span>':'')+'</span>'
+        +'<span>'+clockLabel+(timeStr?' <span style="color:#555;">'+timeStr+(outStr?'–'+outStr:'')+'</span>':'')+clockBtn+'</span>'
         +'</div>';
     }).join('') || '<div style="font-size:11px;color:#444;padding:4px 0;">No signups yet.</div>';
+    var clockAllRow = (mgr && (ev.signups||[]).length)
+      ? '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">'
+        +'<button onclick="clockAllInEvent(\''+ev.id+'\')" style="flex:1;min-width:120px;background:#0D2200;border:1px solid #27AE60;color:#27AE60;border-radius:8px;padding:7px 10px;font-weight:700;font-size:12px;cursor:pointer;">&#9201; Clock All In</button>'
+        +'<button onclick="clockAllOutEvent(\''+ev.id+'\')" style="flex:1;min-width:120px;background:#1A1200;border:1px solid #F5A623;color:#F5A623;border-radius:8px;padding:7px 10px;font-weight:700;font-size:12px;cursor:pointer;">&#9209; Clock All Out</button>'
+        +'</div>'
+      : '';
     return '<div style="background:#181818;border:1px solid '+(isToday?'#C8102E':'#2A2A2A')+';'+(isPast?'opacity:0.75;':'')+' border-radius:10px;padding:12px;margin-bottom:10px;">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">'
       +'<div style="flex:1;">'
@@ -13986,7 +14337,7 @@ function renderSpecialEventAdmin() {
           var color = total ? (cnt>=total?'#27AE60':'#888') : '#555';
           return '<div style="font-size:11px;color:'+color+';margin-bottom:6px;margin-top:2px;">'+cnt+(total?' / '+total+' members'+(cnt>=total?' ✅ Fully staffed':' needed'):' signed up')+'</div>';
         })()
-        +'<div style="background:#111;border-radius:6px;padding:4px 8px;">'+signupRows+'</div>'
+        +'<div style="background:#111;border-radius:6px;padding:4px 8px;">'+signupRows+'</div>'+clockAllRow
         +(function(){
           // Decline Roster — members who explicitly declined this event
           var declined = (ev.declined||[]);
