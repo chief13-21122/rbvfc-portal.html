@@ -560,7 +560,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 7, 2026 \u00B7 build 3 \u2014 clocked-in locks out other staffing positions';   // ← update on every deploy
+var PORTAL_BUILD = 'June 8, 2026 \u00B7 build 4 \u2014 rebuilt Feedback & Issues page';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -970,6 +970,15 @@ function _fbMergeMeeting(remoteM, localM) {
   merged.declined = _fbUnionScalar(remoteM && remoteM.declined, localM && localM.declined);
   return merged;
 }
+// Duplicate-feedback merge: keep whichever side has the more-advanced status so a
+// member's new submission and an admin's status change on another device can't
+// clobber each other. Status order: pending < acknowledged < resolved.
+function _fbMergeFeedback(remoteF, localF) {
+  var rank = { pending:0, acknowledged:1, resolved:2 };
+  var rl = rank[localF && localF.status] || 0;
+  var rr = rank[remoteF && remoteF.status] || 0;
+  return rr > rl ? Object.assign({}, localF, remoteF) : Object.assign({}, remoteF, localF);
+}
 // Reconcile the protected collections, preserving additions on both sides.
 // `localSnapshot` is a copy of the protected arrays captured BEFORE the remote
 // Object.assign overwrote them.
@@ -981,6 +990,9 @@ function _fbReconcileProtected(localSnapshot) {
   state.meetings         = _fbUnionById(localSnapshot.meetings,         state.meetings,         'id', _fbMergeMeeting);
   state.specialEvents    = _fbUnionById(localSnapshot.specialEvents,    state.specialEvents,    'id', _fbMergeEvent);
   state.scheduledDrills  = _fbUnionById(localSnapshot.scheduledDrills,  state.scheduledDrills,  'id', _fbMergeDrill);
+  if (localSnapshot.feedback !== undefined) {
+    state.feedback       = _fbUnionById(localSnapshot.feedback,         state.feedback,         'id', _fbMergeFeedback);
+  }
 }
 
 function _mergeAndRender(remote) {
@@ -996,7 +1008,8 @@ function _mergeAndRender(remote) {
       staffingShifts:    (state.staffingShifts||[]).slice(),
       meetingAttendance: (state.meetingAttendance||[]).slice(),
       scheduledDrills:   (state.scheduledDrills||[]).slice(),
-      trainingClasses:   (state.trainingClasses||[]).slice()
+      trainingClasses:   (state.trainingClasses||[]).slice(),
+      feedback:          (state.feedback||[]).slice()
     };
   }
   // Note: state.logo (compressed) is allowed to pass through — it syncs the logo to all devices
@@ -1549,7 +1562,7 @@ function isCareerRole(member) {
   return !!(member && member.appRole === 'career');
 }
 
-var NOTIF_CATEGORIES = ['staffing', 'reminders', 'losap'];
+var NOTIF_CATEGORIES = ['staffing', 'reminders', 'losap', 'feedback'];
 function _wantsNotif(member, category) {
   if (!member) return true;          // unknown member — don't suppress
   if (isCareerRole(member)) return false;  // CAREER PERSON never gets notifications
@@ -1778,6 +1791,7 @@ var state = {
   staffingShifts: [],        // [{id,date,unitId,position,memberId,status,clockedIn,reminded,notes}]
   staffingEnabled: null,      // null = all units enabled by default
   staffingAlerts: [],        // [{id,msg,sentBy,sentAt,group,targetMembers,clears:[{memberId,clearedAt}]}]
+  feedback: [],              // [{id,type:'issue'|'idea',text,screenshot,memberId,createdAt,status,adminNote,statusBy,statusAt}]
   alertGroups: [],           // [{id,name,memberIds}] — custom groups
   specialEvents: [],         // [{id,title,date,time,location,desc,members:[uid],signups:[{memberId,signedUpAt,clockedIn,clockedInAt}]}]
   unitDisplayFilter: {},     // {unitId: bool} — which units member wants visible
@@ -2109,6 +2123,10 @@ function initNotifPrefsUI() {
   var isOfficer = me && (me.appRole==='officer' || me.appRole==='admin');
   var losapRow = document.getElementById('notifPrefRow_losap');
   if (losapRow) losapRow.style.display = isOfficer ? 'flex' : 'none';
+  // Feedback/issue pings only go to admins — hide that row for everyone else
+  var isAdmin = me && me.appRole==='admin';
+  var feedbackRow = document.getElementById('notifPrefRow_feedback');
+  if (feedbackRow) feedbackRow.style.display = isAdmin ? 'flex' : 'none';
 }
 
 function toggleNotifPref(category, checkbox) {
@@ -14681,28 +14699,39 @@ function formatDateLong(date) {
 function updateApprovalsBadge() {
   var uid = state.currentUserId;
   var m = (state.roster||[]).find(function(x){ return x.id===uid; });
-  if (!m || (m.appRole!=='officer' && m.appRole!=='admin')) {
-    // Not an officer/admin — always hide both badges
-    var _b = document.getElementById('approvalsBadge');
-    var _mb = document.getElementById('moreBadge');
-    if (_b)  _b.style.display  = 'none';
-    if (_mb) _mb.style.display = 'none';
-    return;
+  var isOfficer = m && (m.appRole==='officer' || m.appRole==='admin');
+  var isAdmin   = m && m.appRole==='admin';
+
+  // ── Approvals (officer/admin only) ──
+  var pending = 0;
+  if (isOfficer) {
+    var pendingTraining = (state.trainingSubmissions||[]).filter(function(s){ return s.status==='pending'; }).length;
+    var pendingLosap = (state.losapPending||[]).filter(function(s){ return s.status==='pending'; }).length;
+    var pendingER = (state.emergencyResponses||[]).filter(function(r){ return !r.approvedBy; }).length;
+    pending = pendingTraining + pendingLosap + pendingER;
   }
-  var pendingTraining = (state.trainingSubmissions||[]).filter(function(s){ return s.status==='pending'; }).length;
-  var pendingLosap = (state.losapPending||[]).filter(function(s){ return s.status==='pending'; }).length;
-  var pendingER = (state.emergencyResponses||[]).filter(function(r){ return !r.approvedBy; }).length;
-  var pending = pendingTraining + pendingLosap + pendingER;
-  // Update badge inside Approvals button in More sheet
   var badge = document.getElementById('approvalsBadge');
   if (badge) {
-    if (pending > 0) { badge.textContent = pending; badge.style.display='inline'; }
+    if (isOfficer && pending > 0) { badge.textContent = pending; badge.style.display='inline'; }
     else badge.style.display='none';
   }
-  // Update badge on the More button in the bottom nav
+
+  // ── Feedback (everyone): admins see company-wide pending; members see own unresolved ──
+  var fb = state.feedback || [];
+  var feedbackCount = isAdmin
+    ? fb.filter(function(f){ return f.status==='pending'; }).length
+    : fb.filter(function(f){ return f.memberId===uid && f.status!=='resolved'; }).length;
+  var fbBadge = document.getElementById('feedbackBadge');
+  if (fbBadge) {
+    if (feedbackCount > 0) { fbBadge.textContent = feedbackCount; fbBadge.style.display='inline'; }
+    else fbBadge.style.display='none';
+  }
+
+  // ── Bottom-nav More badge = approvals + feedback (shown for everyone) ──
+  var total = pending + feedbackCount;
   var moreBadge = document.getElementById('moreBadge');
   if (moreBadge) {
-    if (pending > 0) { moreBadge.textContent = pending; moreBadge.style.display='block'; }
+    if (total > 0) { moreBadge.textContent = total; moreBadge.style.display='block'; }
     else moreBadge.style.display='none';
   }
 }
@@ -20801,6 +20830,286 @@ function toggleLosapInfo() {
   if (chev) chev.style.transform = open ? 'rotate(0deg)' : 'rotate(-90deg)';
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  FEEDBACK / ISSUE SUBMISSION
+// ═══════════════════════════════════════════════════════════════
+var _feedbackType = 'issue';
+var _feedbackPendingShot = null;   // compressed data URL awaiting submit
+
+function _feedbackName(uid) {
+  var m = (state.roster||[]).find(function(x){ return x.id===uid; });
+  return m ? (m.first + ' ' + m.last) : 'Unknown';
+}
+function _feedbackEsc(s) {
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _feedbackFmt(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' · ' +
+         d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+}
+
+function showFeedbackSheet() {
+  var s = document.getElementById('feedbackSheet');
+  if (!s) return;
+  // Reset the form each open
+  _feedbackType = 'issue';
+  _feedbackPendingShot = null;
+  _feedbackSetType('issue');
+  var ta = document.getElementById('feedbackText'); if (ta) ta.value = '';
+  removeFeedbackScreenshot();
+  var sb = document.getElementById('feedbackSubmitBtn'); if (sb){ sb.disabled=false; sb.textContent='Submit'; }
+  // Admin-only filter + list title
+  var me = (state.roster||[]).find(function(x){ return x.id===state.currentUserId; });
+  var isAdmin = me && me.appRole==='admin';
+  var filt = document.getElementById('feedbackAdminFilter');
+  if (filt) filt.style.display = isAdmin ? 'flex' : 'none';
+  var title = document.getElementById('feedbackListTitle');
+  if (title) title.textContent = isAdmin ? 'All Submissions' : 'Your Submissions';
+  renderFeedbackList();
+  s.style.display = 'flex';
+  setTimeout(function(){
+    var p = document.getElementById('feedbackSheetPanel');
+    if (p) p.style.transform = 'translateY(0)';
+  }, 10);
+}
+function closeFeedbackSheet() {
+  var s = document.getElementById('feedbackSheet');
+  var p = document.getElementById('feedbackSheetPanel');
+  if (p) p.style.transform = 'translateY(100%)';
+  setTimeout(function(){ if (s) s.style.display = 'none'; }, 300);
+}
+
+function _feedbackSetType(t) {
+  _feedbackType = (t==='idea') ? 'idea' : 'issue';
+  var bi = document.getElementById('fbTypeIssue');
+  var bd = document.getElementById('fbTypeIdea');
+  function on(b){ if(b){ b.style.background='#C8102E'; b.style.borderColor='#C8102E'; b.style.color='#FFF'; } }
+  function off(b){ if(b){ b.style.background='none'; b.style.borderColor='#333'; b.style.color='#888'; } }
+  if (_feedbackType==='issue') { on(bi); off(bd); } else { on(bd); off(bi); }
+}
+
+function handleFeedbackScreenshot(file) {
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    _compressFeedbackImage(e.target.result, function(compressed) {
+      _feedbackPendingShot = compressed;
+      var wrap = document.getElementById('feedbackShotPreviewWrap');
+      var img  = document.getElementById('feedbackShotPreview');
+      if (img)  img.src = compressed;
+      if (wrap) wrap.style.display = 'block';
+      var btn = document.getElementById('feedbackAttachBtn');
+      if (btn) btn.textContent = '📎 Replace Screenshot';
+    });
+  };
+  reader.readAsDataURL(file);
+}
+// Downscale to ≤1200px and JPEG-compress (stepping quality down) so each shot
+// stays well within Firestore's per-document size limit — modeled on saveLogoData.
+function _compressFeedbackImage(dataUrl, cb) {
+  var img = new Image();
+  img.onload = function() {
+    var MAX_PX = 1200;
+    var w = img.naturalWidth, h = img.naturalHeight;
+    var scale = Math.min(1, MAX_PX / Math.max(w, h, 1));
+    var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+    var canvas = document.createElement('canvas');
+    canvas.width = cw; canvas.height = ch;
+    canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+    var qualities = [0.6, 0.45, 0.3];
+    var out = canvas.toDataURL('image/jpeg', qualities[0]);
+    for (var i=1; i<qualities.length && out.length > 260000; i++) {
+      out = canvas.toDataURL('image/jpeg', qualities[i]);
+    }
+    cb(out);
+  };
+  img.onerror = function(){ cb(dataUrl); };
+  img.src = dataUrl;
+}
+function removeFeedbackScreenshot() {
+  _feedbackPendingShot = null;
+  var wrap = document.getElementById('feedbackShotPreviewWrap');
+  var img  = document.getElementById('feedbackShotPreview');
+  var inp  = document.getElementById('feedbackShotInput');
+  if (img)  img.src = '';
+  if (wrap) wrap.style.display = 'none';
+  if (inp)  inp.value = '';
+  var btn = document.getElementById('feedbackAttachBtn');
+  if (btn) btn.textContent = '📎 Attach Screenshot';
+}
+
+function submitFeedback() {
+  var ta = document.getElementById('feedbackText');
+  var text = (ta && ta.value || '').trim();
+  if (!text) { showToast('⚠️ Please describe the issue or idea first.'); return; }
+  var uid = state.currentUserId;
+  if (!uid) { showToast('⚠️ Not signed in.'); return; }
+  var btn = document.getElementById('feedbackSubmitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
+
+  var id = 'fb_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+  var entry = {
+    id: id,
+    type: _feedbackType,
+    text: text,
+    screenshot: _feedbackPendingShot || null,
+    memberId: uid,
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    adminNote: '',
+    statusBy: '',
+    statusAt: ''
+  };
+  if (!Array.isArray(state.feedback)) state.feedback = [];
+  state.feedback.unshift(entry);
+  save();
+
+  // Ping admins (except the submitter). Honors the 'feedback' notif preference.
+  try {
+    var admins = (state.roster||[]).filter(function(r){
+      return r.appRole==='admin' && r.id!==uid;
+    }).map(function(r){ return r.id; });
+    if (admins.length) {
+      var label = (_feedbackType==='issue') ? 'an issue' : 'feedback';
+      sendPushToMembers(admins, '💬 New ' + (_feedbackType==='issue'?'issue report':'feedback'),
+        _feedbackName(uid) + ' submitted ' + label + '.', id, 'feedback');
+    }
+  } catch(e) { console.warn('[RBVFC] feedback push failed:', e && e.message); }
+
+  // Reset form, refresh list + badges
+  if (ta) ta.value = '';
+  removeFeedbackScreenshot();
+  _feedbackSetType('issue');
+  if (btn) { btn.disabled = false; btn.textContent = 'Submit'; }
+  renderFeedbackList();
+  try { updateApprovalsBadge(); } catch(e){}
+  showToast('✅ Submitted — thank you!');
+}
+
+function renderFeedbackList() {
+  var box = document.getElementById('feedbackList');
+  if (!box) return;
+  var uid = state.currentUserId;
+  var me = (state.roster||[]).find(function(x){ return x.id===uid; });
+  var isAdmin = me && me.appRole==='admin';
+  var all = (state.feedback||[]).slice();
+
+  var list;
+  if (isAdmin) {
+    var filt = (document.getElementById('feedbackFilterSelect')||{}).value || 'open';
+    list = all.filter(function(f){
+      if (filt==='all') return true;
+      if (filt==='open') return f.status==='pending' || f.status==='acknowledged';
+      return f.status===filt;
+    });
+  } else {
+    list = all.filter(function(f){ return f.memberId===uid; });
+  }
+  // Newest first
+  list.sort(function(a,b){ return (b.createdAt||'').localeCompare(a.createdAt||''); });
+
+  if (!list.length) {
+    box.innerHTML = '<div style="font-size:13px;color:#555;text-align:center;padding:20px 0;">' +
+      (isAdmin ? 'No submissions in this view.' : 'You haven\u2019t submitted anything yet.') + '</div>';
+    return;
+  }
+
+  box.innerHTML = list.map(function(f) {
+    var pill = _feedbackStatusPill(f.status);
+    var typeLabel = (f.type==='idea') ? '💡 Feedback / Idea' : '🐞 Issue';
+    var who = isAdmin ? ('<span style="color:#7EC8E3;">' + _feedbackEsc(_feedbackName(f.memberId)) + '</span> · ') : '';
+    var shot = f.screenshot
+      ? '<img src="' + f.screenshot + '" onclick="viewFeedbackShot(this.src)" style="margin-top:10px;max-width:100%;max-height:140px;border-radius:8px;border:1px solid #333;cursor:pointer;display:block;">'
+      : '';
+    var note = f.adminNote
+      ? '<div style="margin-top:10px;background:#0D1A2A;border:1px solid #1A3A5A;border-radius:8px;padding:8px 10px;font-size:12px;color:#9CC;"><strong style="color:#7EC8E3;">Admin note:</strong> ' + _feedbackEsc(f.adminNote) + '</div>'
+      : '';
+
+    var actions = '';
+    if (isAdmin) {
+      var btns = [];
+      if (f.status==='pending') {
+        btns.push('<button onclick="acknowledgeFeedback(\'' + f.id + '\')" style="flex:1;background:none;border:1px solid #F5A623;color:#F5A623;border-radius:8px;padding:8px;font-size:12px;font-weight:700;cursor:pointer;">👀 Acknowledge</button>');
+      }
+      if (f.status!=='resolved') {
+        btns.push('<button onclick="resolveFeedback(\'' + f.id + '\')" style="flex:1;background:none;border:1px solid #2ECC71;color:#2ECC71;border-radius:8px;padding:8px;font-size:12px;font-weight:700;cursor:pointer;">✅ Resolve</button>');
+      } else {
+        btns.push('<button onclick="deleteFeedback(\'' + f.id + '\')" style="flex:1;background:none;border:1px solid #555;color:#888;border-radius:8px;padding:8px;font-size:12px;font-weight:700;cursor:pointer;">🗑 Delete</button>');
+      }
+      if (btns.length) actions = '<div style="display:flex;gap:8px;margin-top:12px;">' + btns.join('') + '</div>';
+    }
+
+    return '<div style="background:#141414;border:1px solid #2A2A2A;border-radius:12px;padding:14px 16px;margin-bottom:12px;">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">' +
+        '<span style="font-size:12px;font-weight:700;color:#CCC;">' + typeLabel + '</span>' + pill +
+      '</div>' +
+      '<div style="font-size:11px;color:#666;margin-bottom:8px;">' + who + _feedbackFmt(f.createdAt) + '</div>' +
+      '<div style="font-size:14px;color:#F0F0F0;line-height:1.5;white-space:pre-wrap;">' + _feedbackEsc(f.text) + '</div>' +
+      shot + note + actions +
+    '</div>';
+  }).join('');
+}
+
+function _feedbackStatusPill(status) {
+  var map = {
+    pending:      { t:'⏳ Pending',      c:'#F5A623', bg:'#2A1F0A' },
+    acknowledged: { t:'👀 Acknowledged', c:'#7EC8E3', bg:'#0D1A2A' },
+    resolved:     { t:'✅ Resolved',     c:'#2ECC71', bg:'#0A2014' }
+  };
+  var s = map[status] || map.pending;
+  return '<span style="font-size:11px;font-weight:700;color:' + s.c + ';background:' + s.bg +
+    ';border-radius:10px;padding:3px 9px;white-space:nowrap;">' + s.t + '</span>';
+}
+
+function _findFeedback(id) {
+  return (state.feedback||[]).find(function(f){ return f.id===id; });
+}
+function acknowledgeFeedback(id) {
+  var f = _findFeedback(id); if (!f) return;
+  f.status = 'acknowledged';
+  f.statusBy = state.currentUserId;
+  f.statusAt = new Date().toISOString();
+  save();
+  renderFeedbackList();
+  try { updateApprovalsBadge(); } catch(e){}
+}
+function resolveFeedback(id) {
+  var f = _findFeedback(id); if (!f) return;
+  var note = prompt('Optional note back to the submitter (leave blank for none):', f.adminNote || '');
+  if (note === null) return;   // cancelled
+  f.status = 'resolved';
+  f.adminNote = note.trim();
+  f.statusBy = state.currentUserId;
+  f.statusAt = new Date().toISOString();
+  save();
+  renderFeedbackList();
+  try { updateApprovalsBadge(); } catch(e){}
+  showToast('✅ Marked resolved.');
+}
+function deleteFeedback(id) {
+  var f = _findFeedback(id); if (!f) return;
+  if (!confirm('Delete this resolved submission permanently?')) return;
+  state.feedback = (state.feedback||[]).filter(function(x){ return x.id!==id; });
+  save();
+  renderFeedbackList();
+  try { updateApprovalsBadge(); } catch(e){}
+}
+
+function viewFeedbackShot(src) {
+  var v = document.getElementById('feedbackShotViewer');
+  var img = document.getElementById('feedbackShotViewerImg');
+  if (img) img.src = src;
+  if (v) v.style.display = 'flex';
+}
+function closeFeedbackShotViewer() {
+  var v = document.getElementById('feedbackShotViewer');
+  if (v) v.style.display = 'none';
+}
+
+
 function closeLosapModal() { var m=document.getElementById('losapChairModal'); if(m) m.remove(); }
 
 function messageLosapChair() {
@@ -21593,6 +21902,10 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         <label id="notifPrefRow_losap" style="display:flex;align-items:center;gap:12px;padding:8px 0;cursor:pointer;border-top:1px solid #222;">
           <input type="checkbox" id="notifPref_losap" onchange="toggleNotifPref('losap', this)" style="width:18px;height:18px;accent-color:#C8102E;flex-shrink:0;cursor:pointer;">
           <span style="flex:1;"><span style="font-size:14px;color:#F0F0F0;">🏅 LOSAP approval requests</span><br><span style="font-size:11px;color:#666;">When a member needs your approval (officers only)</span></span>
+        </label>
+        <label id="notifPrefRow_feedback" style="display:flex;align-items:center;gap:12px;padding:8px 0;cursor:pointer;border-top:1px solid #222;">
+          <input type="checkbox" id="notifPref_feedback" onchange="toggleNotifPref('feedback', this)" style="width:18px;height:18px;accent-color:#C8102E;flex-shrink:0;cursor:pointer;">
+          <span style="flex:1;"><span style="font-size:14px;color:#F0F0F0;">💬 Feedback &amp; issues</span><br><span style="font-size:11px;color:#666;">When a member submits feedback or a bug report (admins only)</span></span>
         </label>
       </div>
 
@@ -23471,7 +23784,67 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       </button>
       <button class="btn btn-secondary btn-full" style="margin-top:8px;display:none;" id="moreAdminBtn" onclick="showTab('admin');closeMoreMenu()">⚙️ Admin</button>
 
+      <!-- ── Section: Support ──────────────────────────── -->
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#666;margin:18px 0 10px 4px;">Support</div>
+      <button class="btn btn-secondary btn-full" style="position:relative;" id="moreFeedbackBtn" onclick="showFeedbackSheet();closeMoreMenu()">
+        💬 Feedback &amp; Issues
+        <span id="feedbackBadge" style="display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);background:#C8102E;color:#FFF;font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;"></span>
+      </button>
+
     </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       FEEDBACK / ISSUE SUBMISSION SHEET
+  ════════════════════════════════════════════════════════════════ -->
+  <div id="feedbackSheet" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:1100;align-items:flex-end;" onclick="if(event.target===this)closeFeedbackSheet()">
+    <div id="feedbackSheetPanel" style="background:#1A1A1A;border-radius:20px 20px 0 0;padding:20px;width:100%;box-sizing:border-box;max-height:90vh;overflow-y:auto;-webkit-overflow-scrolling:touch;transform:translateY(100%);transition:transform .3s ease;">
+      <div style="width:40px;height:4px;background:#333;border-radius:2px;margin:0 auto 16px;"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:20px;">💬</span>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#F0F0F0;">Feedback &amp; Issues</div>
+        </div>
+        <button onclick="closeFeedbackSheet()" style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;line-height:1;">✕</button>
+      </div>
+      <p style="font-size:12px;color:#666;margin:0 0 16px;">Found a bug or have a suggestion? Let us know — you can attach a screenshot.</p>
+
+      <!-- Submit form -->
+      <div style="background:#141414;border:1px solid #2A2A2A;border-radius:12px;padding:14px 16px;margin-bottom:18px;">
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <button type="button" id="fbTypeIssue" onclick="_feedbackSetType('issue')" style="flex:1;background:#C8102E;border:1px solid #C8102E;color:#FFF;border-radius:8px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;">🐞 Report an Issue</button>
+          <button type="button" id="fbTypeIdea" onclick="_feedbackSetType('idea')" style="flex:1;background:none;border:1px solid #333;color:#888;border-radius:8px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;">💡 Feedback / Idea</button>
+        </div>
+        <textarea id="feedbackText" rows="4" placeholder="Describe the issue or your idea…" style="width:100%;background:#111;border:1px solid #333;border-radius:8px;padding:10px;color:#F0F0F0;font-size:14px;resize:vertical;box-sizing:border-box;"></textarea>
+        <input type="file" id="feedbackShotInput" accept="image/*" style="display:none;" onchange="if(this.files&&this.files[0])handleFeedbackScreenshot(this.files[0]);">
+        <div id="feedbackShotPreviewWrap" style="display:none;position:relative;margin-top:10px;">
+          <img id="feedbackShotPreview" src="" style="max-width:100%;max-height:180px;border-radius:8px;border:1px solid #333;display:block;">
+          <button type="button" onclick="removeFeedbackScreenshot()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.7);border:none;color:#FFF;width:26px;height:26px;border-radius:13px;font-size:14px;cursor:pointer;line-height:1;">✕</button>
+        </div>
+        <button type="button" id="feedbackAttachBtn" onclick="document.getElementById('feedbackShotInput').click()" class="btn btn-secondary btn-full" style="margin-top:10px;font-size:13px;">📎 Attach Screenshot</button>
+        <button type="button" id="feedbackSubmitBtn" onclick="submitFeedback()" class="btn btn-primary btn-full" style="margin-top:10px;">Submit</button>
+      </div>
+
+      <!-- Admin filter (admins only) -->
+      <div id="feedbackAdminFilter" style="display:none;align-items:center;gap:10px;margin-bottom:12px;">
+        <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1.5px;">Show</span>
+        <select id="feedbackFilterSelect" onchange="renderFeedbackList()" style="flex:1;background:#111;border:1px solid #333;border-radius:8px;padding:8px;color:#F0F0F0;font-size:13px;">
+          <option value="open">Open (pending + acknowledged)</option>
+          <option value="pending">Pending</option>
+          <option value="acknowledged">Acknowledged</option>
+          <option value="resolved">Resolved</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+
+      <div id="feedbackListTitle" style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">Your Submissions</div>
+      <div id="feedbackList"></div>
+    </div>
+  </div>
+
+  <!-- Full-screen screenshot viewer -->
+  <div id="feedbackShotViewer" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:1300;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;" onclick="closeFeedbackShotViewer()">
+    <img id="feedbackShotViewerImg" src="" style="max-width:100%;max-height:100%;border-radius:8px;">
   </div>
 
   <!-- LOSAP Info Modal -->
