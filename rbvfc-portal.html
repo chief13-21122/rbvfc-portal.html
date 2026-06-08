@@ -347,12 +347,6 @@ main{padding:16px;max-width:900px;margin:0 auto;}
 .qual-text p{font-size:12px;color:var(--text-muted);}
 
 /* ── COMPANY LOSAP TABLE ── */
-.posrank-d summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:5px;color:#AAA;}
-.posrank-d summary::-webkit-details-marker{display:none;}
-.posrank-d .posrank-badge{font-size:9px;background:#222;border-radius:8px;padding:1px 5px;color:#888;line-height:1.4;}
-.posrank-d .posrank-chev{color:#666;font-size:10px;transition:transform .2s;}
-.posrank-d[open] .posrank-chev{transform:rotate(180deg);}
-.posrank-d[open] summary{margin-bottom:2px;color:#F0F0F0;}
 .mini-bar-wrap{display:flex;align-items:center;gap:6px;}
 .mini-bar{flex:1;height:5px;background:var(--dark3);border-radius:99px;overflow:hidden;min-width:40px;}
 .mini-bar-fill{height:100%;border-radius:99px;}
@@ -566,7 +560,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 8, 2026 \u00B7 build 5 \u2014 8-hour monthly requirement (Admin/Operational), board column, reminders, officer email';   // ← update on every deploy
+var PORTAL_BUILD = 'June 8, 2026 \u00B7 build 6 \u2014 Recent Time Captures point labels routed through canonical LOSAP rules';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -16983,7 +16977,8 @@ function renderCompanyLOSAP() {
     '<th style="text-align:center;">Points</th>' +
     '<th style="text-align:center;">Training Hrs</th>' +
     '<th style="text-align:center;">Drill Hrs</th>' +
-    '<th style="text-align:center;">Hours<div style="font-size:10px;color:#555;font-weight:400;letter-spacing:0;text-transform:none;">'+(_isCurYr?'Mo / Req \u00b7 YTD':String(yr).slice(2)+' Dec \u00b7 YTD')+'</div></th>' +
+    '<th style="text-align:center;">Hours Clocked<div style="font-size:10px;color:#555;font-weight:400;letter-spacing:0;text-transform:none;">'+(_isCurYr?'Month':String(yr).slice(2)+' Dec')+' / YTD</div></th>' +
+    '<th style="text-align:center;">8-Hour<div style="font-size:10px;color:#555;font-weight:400;letter-spacing:0;text-transform:none;">'+(_isCurYr?'This Month':'\u2014')+'</div></th>' +
     '<th style="text-align:center;">Calls</th>' +
     '<th style="text-align:center;">Qualified</th>' +
     '<th>On Duty</th>' +
@@ -17001,38 +16996,20 @@ function renderCompanyLOSAP() {
       var _rankParts = [];
       if (_losapPos.length) _rankParts = _rankParts.concat(_losapPos);
       ranks.forEach(function(r){ if (r && _losapPos.indexOf(r)<0) _rankParts.push(r); });
-      var _rankItems = _rankParts.length ? _rankParts : [(m.memberType || '\u2014')];
-      var _posRankCell;
-      if (_rankItems.length <= 1) {
-        _posRankCell = '<td style="color:#AAA;font-size:12px;">'+_rankItems[0]+'</td>';
-      } else {
-        var _rankList = _rankItems.map(function(it){
-          return '<div style="padding:3px 0;color:#CCC;font-size:12px;white-space:nowrap;">'+it+'</div>';
-        }).join('');
-        _posRankCell = '<td style="color:#AAA;font-size:12px;">' +
-          '<details class="posrank-d"><summary>' +
-            '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;display:inline-block;vertical-align:middle;">'+_rankItems[0]+'</span>' +
-            '<span class="posrank-badge">+'+(_rankItems.length-1)+'</span>' +
-            '<span class="posrank-chev">\u25be</span>' +
-          '</summary>' +
-          '<div style="margin-top:4px;border-top:1px solid #222;padding-top:4px;">'+_rankList+'</div>' +
-          '</details></td>';
-      }
+      var _posRankText = _rankParts.length
+        ? _rankParts.join(' · ')
+        : (m.memberType ? m.memberType : '—');
       var qualified = row.pts >= 50;
       var _e = row.eightHr;
-      var hoursCell;
-      if (_isCurYr && _e && !_e.exempt) {
+      var eightCell;
+      if (!_isCurYr || !_e || _e.exempt) {
+        eightCell = '<td style="text-align:center;color:#444;font-size:11px;">\u2014</td>';
+      } else {
         var _eColor = _e.met ? '#27AE60' : '#E74C3C';
-        hoursCell = '<td style="text-align:center;white-space:nowrap;font-size:12px;line-height:1.35;">' +
+        eightCell = '<td style="text-align:center;white-space:nowrap;font-size:12px;">' +
           '<span style="color:'+_eColor+';font-weight:700;">'+_e.hours.toFixed(1)+'</span>' +
           '<span style="color:#555;">/'+_e.target+'</span>' +
           (_e.met ? ' <span style="color:#27AE60;">\u2713</span>' : '') +
-          '<div style="font-size:10px;color:#666;line-height:1.2;">YTD '+(row.clockedYTD||0).toFixed(1)+'</div>' +
-          '</td>';
-      } else {
-        hoursCell = '<td style="text-align:center;white-space:nowrap;font-size:12px;line-height:1.35;">' +
-          '<span style="color:#F0F0F0;font-weight:600;">'+(row.clockedMonth||0).toFixed(1)+'</span>' +
-          '<div style="font-size:10px;color:#666;line-height:1.2;">YTD '+(row.clockedYTD||0).toFixed(1)+'</div>' +
           '</td>';
       }
       var p = pos <= 3 ? podium[pos] : null;
@@ -17067,11 +17044,16 @@ function renderCompanyLOSAP() {
 
       return '<tr style="'+rowStyle+'">'+numCell+
         '<td style="font-weight:'+(p?'700':'600')+';color:'+(p?p.nameColor:'#F0F0F0')+';">'+m.last+', '+m.first+'</td>'+
-        _posRankCell+
+        '<td style="color:#AAA;font-size:12px;">'+_posRankText+'</td>'+
         ptsCell+
         '<td style="text-align:center;color:#AAA;">'+(row.trainingHrs||0).toFixed(1)+'</td>'+
         '<td style="text-align:center;color:#AAA;">'+(row.drillHrs||0).toFixed(1)+'</td>'+
-        hoursCell+
+        '<td style="text-align:center;color:#AAA;font-size:12px;line-height:1.3;white-space:nowrap;">'+
+          '<span style="color:#F0F0F0;font-weight:600;">'+(row.clockedMonth||0).toFixed(1)+'</span>'+
+          '<span style="color:#555;"> / </span>'+
+          '<span>'+(row.clockedYTD||0).toFixed(1)+'</span>'+
+        '</td>'+
+        eightCell+
         '<td style="text-align:center;color:#AAA;">'+row.responses+'</td>'+
         '<td style="text-align:center;">'+(qualified?'<span style="color:#27AE60;font-weight:700;">✓ Yes</span>':'<span style="color:#555;">No</span>')+'</td>'+
         dutyCell+'</tr>';
@@ -18405,28 +18387,43 @@ function renderRecentSessions() {
     // Duty sessions: 1 pt per 4-hr block (§3c), collateral/standby same rule
     // Drill sessions: 1 pt flat if >= 2 hrs
     // Other (meeting, training): 1 pt flat
+    // LOSAP credit: derive from canonical rules (CAT_CONFIG / calcActivityPts)
+    // rather than a separate inline formula, so this preview can't drift from
+    // the awarding logic used elsewhere in the portal.
     var activity = (s.activity || 'duty').toLowerCase();
+    var _catMap = { duty:'duties', collateral:'duties', standby:'duties',
+                    drill:'drill', meeting:'meeting', boardmeeting:'meeting',
+                    training:'training', emergency:'emergency' };
+    var cat = _catMap[activity] || 'duties';
     var pts = 0;
     var ptsLabel = '';
-    if (activity === 'duty' || activity === 'collateral' || activity === 'standby') {
-      pts = Math.floor(durHrs / 4);
+    if (cat === 'emergency') {
+      // 0.5 pt per response (§3f). Actual credit is tracked via emergencyResponses;
+      // this is an estimate shown for the clocked session.
+      pts = 0.5;
+      ptsLabel = '+0.5 pt (emergency call)';
+    } else if (cat === 'drill') {
+      // 1 pt per drill, minimum 2 hrs (§3b)
+      pts = durHrs >= 2 ? 1 : 0;
+      ptsLabel = pts > 0 ? '+1 pt (drill ≥2h)' : 'No pts — need ' + (2 - durHrs).toFixed(1) + 'h more';
+    } else if (cat === 'meeting') {
+      // 1 pt per meeting (§3e)
+      pts = 1;
+      ptsLabel = '+1 pt (meeting)';
+    } else if (cat === 'training') {
+      // Tiered by hours: 6–19h=5, 20–44h=10, 45h+=15 (§3a)
+      pts = calcActivityPts('training', durHrs);
+      ptsLabel = pts > 0
+        ? '+' + pts + ' pts (' + Math.floor(durHrs) + 'h training)'
+        : 'No pts — need 6h+ for credit';
+    } else {
+      // duties: 1 pt per 4-hr block (§3c)
+      pts = calcActivityPts('duties', durHrs);
       ptsLabel = pts > 0
         ? '+' + pts + ' pt' + (pts !== 1 ? 's' : '') + ' (' + Math.floor(durHrs) + 'h @ 1 pt/4h)'
         : durHrs >= 1
           ? 'No pts — need ' + (4 - Math.floor(durHrs % 4)) + 'h more for next pt'
           : 'No pts — less than 1h';
-    } else if (activity === 'drill') {
-      pts = durHrs >= 2 ? 1 : 0;
-      ptsLabel = pts > 0 ? '+1 pt (drill ≥2h)' : 'No pts — need ' + (2 - durHrs).toFixed(1) + 'h more';
-    } else if (activity === 'meeting') {
-      pts = 1;
-      ptsLabel = '+1 pt (meeting)';
-    } else if (activity === 'training') {
-      pts = durHrs >= 2 ? Math.floor(durHrs / 2) : 0;
-      ptsLabel = pts > 0 ? '+' + pts + ' pt' + (pts !== 1 ? 's' : '') : 'No pts';
-    } else {
-      pts = Math.floor(durHrs / 4);
-      ptsLabel = pts > 0 ? '+' + pts + ' pt' + (pts !== 1 ? 's' : '') : 'No pts';
     }
 
     var ptColor  = pts > 0 ? '#27AE60' : '#888';
