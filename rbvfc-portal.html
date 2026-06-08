@@ -347,6 +347,12 @@ main{padding:16px;max-width:900px;margin:0 auto;}
 .qual-text p{font-size:12px;color:var(--text-muted);}
 
 /* ── COMPANY LOSAP TABLE ── */
+.posrank-d summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:5px;color:#AAA;}
+.posrank-d summary::-webkit-details-marker{display:none;}
+.posrank-d .posrank-badge{font-size:9px;background:#222;border-radius:8px;padding:1px 5px;color:#888;line-height:1.4;}
+.posrank-d .posrank-chev{color:#666;font-size:10px;transition:transform .2s;}
+.posrank-d[open] .posrank-chev{transform:rotate(180deg);}
+.posrank-d[open] summary{margin-bottom:2px;color:#F0F0F0;}
 .mini-bar-wrap{display:flex;align-items:center;gap:6px;}
 .mini-bar{flex:1;height:5px;background:var(--dark3);border-radius:99px;overflow:hidden;min-width:40px;}
 .mini-bar-fill{height:100%;border-radius:99px;}
@@ -560,7 +566,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 8, 2026 \u00B7 build 4 \u2014 rebuilt Feedback & Issues page';   // ← update on every deploy
+var PORTAL_BUILD = 'June 8, 2026 \u00B7 build 5 \u2014 8-hour monthly requirement (Admin/Operational), board column, reminders, officer email';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -3403,6 +3409,7 @@ function renderLOSAP() {
   try { renderLosapNotifBanner(); } catch(e){}
   try { updateLosapNotifBadge(); } catch(e){}
   try { renderPositionPoints(); } catch(e){}
+  try { renderEightHrProgress(); } catch(e){}
   var uid = state.currentUserId;
   var yr = new Date().getFullYear();
   var responses = (state.emergencyResponses||[]).filter(function(r){ return r.members&&r.members.includes(uid)&&r.date&&r.date.startsWith(String(yr)); });
@@ -5978,6 +5985,9 @@ function applyUserSession(m) {
     }
     checkYearRollover();
     checkMonthlyEmail();
+    if (!state.eightHrEpoch) { state.eightHrEpoch = localDateStr().slice(0,7); save(); }
+    checkEightHrReminders();
+    checkEightHrOfficerEmail();
     // CAD auto-sync on boot
     if (state.cadScriptUrl) startCadAutoSync();
   }, 1500);
@@ -16570,6 +16580,243 @@ function renderCompanyStats() {
     statBox('&#128336;', 'Duty Hours Logged', dutyHrs.toFixed(0) + ' hrs', ACT_COLORS.drill, drills + ' drill' + (drills!==1?'s':'') + ' conducted');
 }
 
+// ===========================================================
+//  8-HOUR MONTHLY REQUIREMENT
+//  Administrative members : 8 hrs total clocked-in time / month
+//  Operational members on Eligible Ride Report : 8 hrs staffing duty / month
+//  Auxiliary, ineligible-ride-report operational, inactive -> exempt
+//  Make-up: single-month carry only. target = 8 + last month's unmet base
+//  deficit (never the inflated target). No multi-month accumulation.
+//  Classification is by MEMBERSHIP TYPE (member.memberType), not app role.
+// ===========================================================
+var EIGHT_HR_TARGET = 8;
+
+// 'administrative' | 'operational' | null (exempt)
+function eightHrReqType(member) {
+  if (!member || member.active === false) return null;
+  var mt = member.memberType || 'operational';
+  if (mt === 'auxiliary') return null;
+  if (mt === 'administrative') return 'administrative';
+  // operational: only counts when on the Eligible Ride Report
+  if (member.rideReport === 'ineligible') return null;
+  return 'operational';
+}
+
+// Only completed (clocked-out) sessions count.
+function _eightHrSessionHours(s) {
+  if (!s || !s.end) return 0;
+  var secs = parseFloat(s.duration);
+  if ((!secs || isNaN(secs)) && s.hours) return parseFloat(s.hours) || 0; // legacy fallback
+  return (isNaN(secs) ? 0 : secs) / 3600;
+}
+function _eightHrSessionMonth(s) {
+  var d = s && (s.start ? String(s.start).slice(0,10) : s.date);
+  return d ? d.slice(0,7) : '';   // YYYY-MM
+}
+// Operational counts staffing duty only; administrative counts all clocked-in time.
+function _eightHrSessionCounts(s, reqType) {
+  if (reqType === 'operational') return !!(s && s.activity === 'duty');
+  return true;
+}
+
+// Hours accrued by a member in YYYY-MM for their requirement type.
+function eightHrMonthHours(memberId, ym, reqType) {
+  var total = 0;
+  (state.sessions||[]).forEach(function(s){
+    if (!s) return;
+    if (s.userId !== memberId && s.memberId !== memberId) return;
+    if (_eightHrSessionMonth(s) !== ym) return;
+    if (!_eightHrSessionCounts(s, reqType)) return;
+    total += _eightHrSessionHours(s);
+  });
+  return total;
+}
+
+function _eightHrPrevMonth(ym) {
+  var y = parseInt(ym.slice(0,4),10), m = parseInt(ym.slice(5,7),10);
+  m -= 1; if (m < 1) { m = 12; y -= 1; }
+  return y + '-' + String(m).padStart(2,'0');
+}
+function _eightHrNextMonth(ym) {
+  var y = parseInt(ym.slice(0,4),10), m = parseInt(ym.slice(5,7),10);
+  m += 1; if (m > 12) { m = 1; y += 1; }
+  return y + '-' + String(m).padStart(2,'0');
+}
+function _eightHrMonthLabel(ym) {
+  var names=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return names[parseInt(ym.slice(5,7),10)-1] + ' ' + ym.slice(0,4);
+}
+
+// Full status for a member in a month:
+// { exempt, type, hours, base, carry, target, met }
+function eightHrStatus(member, ym) {
+  var reqType = eightHrReqType(member);
+  if (!reqType) return { exempt:true, type:null };
+  ym = ym || localDateStr().slice(0,7);
+  var hours = eightHrMonthHours(member.id, ym, reqType);
+  // Single-month make-up carry. Guarded by an epoch so deficits are never
+  // assessed for months before the feature went live (avoids retroactive
+  // penalties at launch and for brand-new members' pre-existence months).
+  var carry = 0;
+  var epoch = state.eightHrEpoch || ym;
+  var prevYm = _eightHrPrevMonth(ym);
+  if (prevYm >= epoch) {
+    var prevHours = eightHrMonthHours(member.id, prevYm, reqType);
+    carry = Math.max(0, EIGHT_HR_TARGET - prevHours);
+  }
+  var target = EIGHT_HR_TARGET + carry;
+  return {
+    exempt:false, type:reqType, hours:hours, base:EIGHT_HR_TARGET,
+    carry:carry, target:target, met: hours >= target
+  };
+}
+
+// Per-member LOSAP-tab indicator (logged-in user's own requirement).
+function renderEightHrProgress() {
+  var card = document.getElementById('eightHrCard');
+  if (!card) return;
+  var uid = state.currentUserId;
+  var me  = uid ? (state.roster||[]).find(function(x){ return x.id===uid; }) : null;
+  var st  = me ? eightHrStatus(me) : { exempt:true };
+  if (!me || st.exempt) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+
+  var pct = st.target > 0 ? Math.min(100, (st.hours/st.target)*100) : 0;
+  var remaining = Math.max(0, st.target - st.hours);
+  var label = st.type === 'operational' ? 'Monthly Staffing Hours' : 'Monthly Clocked-In Hours';
+
+  var bar = document.getElementById('eightHrBar');
+  if (bar) {
+    bar.style.width = pct + '%';
+    bar.style.background = st.met
+      ? 'linear-gradient(90deg,#1E8449,#27AE60)'
+      : 'linear-gradient(90deg,#C8102E,#F5A623)';
+  }
+  var lbl = document.getElementById('eightHrLabel'); if (lbl) lbl.textContent = label;
+  var amt = document.getElementById('eightHrAmount');
+  if (amt) amt.innerHTML = '<span>'+st.hours.toFixed(1)+'</span> / '+st.target+' hrs';
+  var ind = document.getElementById('eightHrIndicator');
+  if (ind) {
+    ind.textContent = st.met ? '\u2705 8-Hour Requirement Met' : (remaining.toFixed(1)+' hrs to go');
+    ind.style.color = st.met ? '#27AE60' : '#E74C3C';
+  }
+  var note = document.getElementById('eightHrCarryNote');
+  if (note) {
+    if (st.carry > 0) {
+      note.style.display = 'block';
+      note.textContent = 'Includes ' + st.carry.toFixed(1) + ' hr make-up carried from last month (target raised to ' + st.target + ').';
+    } else { note.style.display = 'none'; }
+  }
+}
+
+// Members with a requirement who have NOT yet met THIS month's target.
+function _eightHrShortMembers(ym) {
+  ym = ym || localDateStr().slice(0,7);
+  var out = [];
+  (state.roster||[]).forEach(function(m){
+    if (!m || m.active===false) return;
+    var st = eightHrStatus(m, ym);
+    if (st.exempt || st.met) return;
+    out.push(m.id);
+  });
+  return out;
+}
+
+// Push reminders within the month: mid-month (>=15th), ~5 days out, last day.
+// Only to members still short. One send per window (synced flag guards dups).
+function checkEightHrReminders() {
+  if (!state.cadScriptUrl) return;
+  var now = new Date();
+  var ym  = localDateStr().slice(0,7);
+  var day = now.getDate();
+  var lastDay = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+  var daysLeft = lastDay - day; // 0 on the last day
+  if (!state.eightHrReminderLog) state.eightHrReminderLog = {};
+  if (!state.eightHrReminderLog[ym]) state.eightHrReminderLog[ym] = {};
+  var log = state.eightHrReminderLog[ym];
+
+  var key=null, msg=null;
+  if (daysLeft <= 0 && !log.last) { key='last'; msg='Today is the last day to meet your 8-hour monthly requirement.'; }
+  else if (daysLeft <= 5 && !log.pre) { key='pre'; msg='5 days left to meet your 8-hour monthly requirement.'; }
+  else if (day >= 15 && !log.mid) { key='mid'; msg='Reminder: meet your 8-hour monthly requirement before month end.'; }
+  if (!key) return;
+
+  var shortIds = _eightHrShortMembers(ym);
+  log[key] = new Date().toISOString();   // flag + persist BEFORE send (house pattern)
+  save();
+  if (!shortIds.length) return;
+  sendPushToMembers(shortIds, '8-Hour Requirement', msg, '8hr_'+ym+'_'+key, 'reminders');
+}
+
+// End-of-month officer summary for the PRIOR month. Fires on the 1st,
+// guarded by a synced flag (mirrors checkMonthlyEmail). Reports every
+// covered member, grouped by type, with missed members flagged at top.
+function checkEightHrOfficerEmail() {
+  var url = state.cadScriptUrl || state.sheetWebhookUrl;
+  if (!url) return;
+  var now = new Date();
+  if (now.getDate() !== 1) return;
+  var ym = localDateStr().slice(0,7);           // the new month
+  if (state.lastEightHrEmailMonth === ym) return;
+  var prevYm = _eightHrPrevMonth(ym);
+  var officers = (state.roster||[]).filter(function(m){
+    return m.email && m.active!==false && (m.appRole==='officer' || m.appRole==='admin');
+  });
+  state.lastEightHrEmailMonth = ym; save();      // guard before send
+  if (!officers.length) return;
+  var body = buildEightHrOfficerReport(prevYm);
+  var emails = officers.map(function(m){
+    return { to:m.email, subject:'Co.13 8-Hour Requirement Report \u2014 '+_eightHrMonthLabel(prevYm), body:body };
+  });
+  fetch(url, { method:'POST', body: JSON.stringify({ action:'sendEmails', emails:emails }) })
+    .catch(function(err){ console.warn('8-hr officer email failed:', err); });
+}
+
+function buildEightHrOfficerReport(ym) {
+  var nl='\n';
+  var sep='------------------------------------------------------------';
+  var rows=[];
+  (state.roster||[]).forEach(function(m){
+    if (!m || m.active===false) return;
+    var st = eightHrStatus(m, ym);
+    if (st.exempt) return;
+    rows.push({ name:((m.last||'')+', '+(m.first||'')), type:st.type,
+                hours:st.hours, target:st.target, carry:st.carry, met:st.met });
+  });
+  rows.sort(function(a,b){
+    if (a.met !== b.met) return a.met ? 1 : -1;  // missed first
+    return a.name.localeCompare(b.name);
+  });
+  function fmtRow(r){
+    var nm=r.name.slice(0,24); while(nm.length<25) nm+=' ';
+    var h=r.hours.toFixed(1); while(h.length<5) h=' '+h;
+    var tg=String(r.target); while(tg.length<2) tg=' '+tg;
+    var carry = r.carry>0 ? ('  (incl '+r.carry.toFixed(1)+' make-up)') : '';
+    return '  '+nm+' '+h+' / '+tg+' hrs   '+(r.met?'MET':'*** MISSED ***')+carry;
+  }
+  var admins=rows.filter(function(r){return r.type==='administrative';});
+  var ops=rows.filter(function(r){return r.type==='operational';});
+  var missed=rows.filter(function(r){return !r.met;});
+
+  var out='Co.13 8-Hour Monthly Requirement Report'+nl
+    +_eightHrMonthLabel(ym)+nl
+    +'Generated: '+new Date().toLocaleString()+nl+nl
+    +'SUMMARY'+nl
+    +'  Members with a requirement: '+rows.length+nl
+    +'  Met:    '+(rows.length-missed.length)+nl
+    +'  Missed: '+missed.length+nl+nl;
+  if (missed.length) {
+    out += 'DID NOT MEET REQUIREMENT'+nl+sep+nl
+      + missed.map(fmtRow).join(nl) + nl+nl
+      + 'Per policy, missed hours may be made up during '+_eightHrMonthLabel(_eightHrNextMonth(ym))+'.'+nl+nl;
+  }
+  out += 'ADMINISTRATIVE MEMBERS  (8 hrs total clocked-in)'+nl+sep+nl
+    + (admins.length ? admins.map(fmtRow).join(nl) : '  (none)') + nl+nl
+    + 'OPERATIONAL MEMBERS \u2014 ELIGIBLE RIDE REPORT  (8 hrs staffing)'+nl+sep+nl
+    + (ops.length ? ops.map(fmtRow).join(nl) : '  (none)') + nl;
+  return out;
+}
+
 function renderCompanyLOSAP() {
   var yr = parseInt((document.getElementById('companyYear')||{}).value) || new Date().getFullYear();
   var _loUid=state.currentUserId,_loMe=_loUid?(state.roster||[]).find(function(x){return x.id===_loUid;}):null,_loOff=!!(_loMe&&(_loMe.appRole==='officer'||_loMe.appRole==='admin'));
@@ -16588,7 +16835,7 @@ function renderCompanyLOSAP() {
   var _monthPrefix = yr + '-' + String(_monthIdx+1).padStart(2,'0');
 
   var totals = {};
-  (state.roster||[]).filter(function(m){ return m.active!==false && !isAdminMember(m); }).forEach(function(m){
+  (state.roster||[]).filter(function(m){ return m.active!==false; }).forEach(function(m){
     var mPts = calcMemberLOSAP(m.id, yr);
     // Training Hrs — losapActivities (approved only) where category is 'training' or 'class'
     var mTrainingHrs = (state.losapActivities||[]).reduce(function(sum, a){
@@ -16626,7 +16873,8 @@ function renderCompanyLOSAP() {
       member:m, pts:mPts,
       trainingHrs:mTrainingHrs, drillHrs:mDrillHrs,
       clockedMonth:mClockedMonth, clockedYTD:mClockedYTD,
-      responses:mResponses
+      responses:mResponses,
+      eightHr: eightHrStatus(m)
     };
   });
 
@@ -16735,7 +16983,7 @@ function renderCompanyLOSAP() {
     '<th style="text-align:center;">Points</th>' +
     '<th style="text-align:center;">Training Hrs</th>' +
     '<th style="text-align:center;">Drill Hrs</th>' +
-    '<th style="text-align:center;">Hours Clocked<div style="font-size:10px;color:#555;font-weight:400;letter-spacing:0;text-transform:none;">'+(_isCurYr?'Month':String(yr).slice(2)+' Dec')+' / YTD</div></th>' +
+    '<th style="text-align:center;">Hours<div style="font-size:10px;color:#555;font-weight:400;letter-spacing:0;text-transform:none;">'+(_isCurYr?'Mo / Req \u00b7 YTD':String(yr).slice(2)+' Dec \u00b7 YTD')+'</div></th>' +
     '<th style="text-align:center;">Calls</th>' +
     '<th style="text-align:center;">Qualified</th>' +
     '<th>On Duty</th>' +
@@ -16753,10 +17001,40 @@ function renderCompanyLOSAP() {
       var _rankParts = [];
       if (_losapPos.length) _rankParts = _rankParts.concat(_losapPos);
       ranks.forEach(function(r){ if (r && _losapPos.indexOf(r)<0) _rankParts.push(r); });
-      var _posRankText = _rankParts.length
-        ? _rankParts.join(' · ')
-        : (m.memberType ? m.memberType : '—');
+      var _rankItems = _rankParts.length ? _rankParts : [(m.memberType || '\u2014')];
+      var _posRankCell;
+      if (_rankItems.length <= 1) {
+        _posRankCell = '<td style="color:#AAA;font-size:12px;">'+_rankItems[0]+'</td>';
+      } else {
+        var _rankList = _rankItems.map(function(it){
+          return '<div style="padding:3px 0;color:#CCC;font-size:12px;white-space:nowrap;">'+it+'</div>';
+        }).join('');
+        _posRankCell = '<td style="color:#AAA;font-size:12px;">' +
+          '<details class="posrank-d"><summary>' +
+            '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;display:inline-block;vertical-align:middle;">'+_rankItems[0]+'</span>' +
+            '<span class="posrank-badge">+'+(_rankItems.length-1)+'</span>' +
+            '<span class="posrank-chev">\u25be</span>' +
+          '</summary>' +
+          '<div style="margin-top:4px;border-top:1px solid #222;padding-top:4px;">'+_rankList+'</div>' +
+          '</details></td>';
+      }
       var qualified = row.pts >= 50;
+      var _e = row.eightHr;
+      var hoursCell;
+      if (_isCurYr && _e && !_e.exempt) {
+        var _eColor = _e.met ? '#27AE60' : '#E74C3C';
+        hoursCell = '<td style="text-align:center;white-space:nowrap;font-size:12px;line-height:1.35;">' +
+          '<span style="color:'+_eColor+';font-weight:700;">'+_e.hours.toFixed(1)+'</span>' +
+          '<span style="color:#555;">/'+_e.target+'</span>' +
+          (_e.met ? ' <span style="color:#27AE60;">\u2713</span>' : '') +
+          '<div style="font-size:10px;color:#666;line-height:1.2;">YTD '+(row.clockedYTD||0).toFixed(1)+'</div>' +
+          '</td>';
+      } else {
+        hoursCell = '<td style="text-align:center;white-space:nowrap;font-size:12px;line-height:1.35;">' +
+          '<span style="color:#F0F0F0;font-weight:600;">'+(row.clockedMonth||0).toFixed(1)+'</span>' +
+          '<div style="font-size:10px;color:#666;line-height:1.2;">YTD '+(row.clockedYTD||0).toFixed(1)+'</div>' +
+          '</td>';
+      }
       var p = pos <= 3 ? podium[pos] : null;
 
       var rowStyle = p ? 'background:'+p.rowBg+';' : (i%2===0?'':'background:rgba(255,255,255,0.02);');
@@ -16789,15 +17067,11 @@ function renderCompanyLOSAP() {
 
       return '<tr style="'+rowStyle+'">'+numCell+
         '<td style="font-weight:'+(p?'700':'600')+';color:'+(p?p.nameColor:'#F0F0F0')+';">'+m.last+', '+m.first+'</td>'+
-        '<td style="color:#AAA;font-size:12px;">'+_posRankText+'</td>'+
+        _posRankCell+
         ptsCell+
         '<td style="text-align:center;color:#AAA;">'+(row.trainingHrs||0).toFixed(1)+'</td>'+
         '<td style="text-align:center;color:#AAA;">'+(row.drillHrs||0).toFixed(1)+'</td>'+
-        '<td style="text-align:center;color:#AAA;font-size:12px;line-height:1.3;white-space:nowrap;">'+
-          '<span style="color:#F0F0F0;font-weight:600;">'+(row.clockedMonth||0).toFixed(1)+'</span>'+
-          '<span style="color:#555;"> / </span>'+
-          '<span>'+(row.clockedYTD||0).toFixed(1)+'</span>'+
-        '</td>'+
+        hoursCell+
         '<td style="text-align:center;color:#AAA;">'+row.responses+'</td>'+
         '<td style="text-align:center;">'+(qualified?'<span style="color:#27AE60;font-weight:700;">✓ Yes</span>':'<span style="color:#555;">No</span>')+'</td>'+
         dutyCell+'</tr>';
@@ -22174,6 +22448,19 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
         <div style="background:#1E1E1E;border-radius:4px;height:8px;overflow:hidden;">
           <div id="losapProgressBar" style="height:8px;background:linear-gradient(90deg,#C8102E,#F5A623);border-radius:4px;transition:width .5s;width:0%;"></div>
         </div>
+      </div>
+
+      <!-- 8-Hour Monthly Requirement -->
+      <div class="card" id="eightHrCard" style="padding:16px;display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span id="eightHrLabel" style="font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;color:#888;text-transform:uppercase;">Monthly Hours</span>
+          <span id="eightHrAmount" style="font-size:13px;font-weight:700;color:#F0F0F0;"><span>0</span> / 8 hrs</span>
+        </div>
+        <div style="background:#1E1E1E;border-radius:4px;height:8px;overflow:hidden;">
+          <div id="eightHrBar" style="height:8px;background:linear-gradient(90deg,#C8102E,#F5A623);border-radius:4px;transition:width .5s;width:0%;"></div>
+        </div>
+        <div id="eightHrIndicator" style="margin-top:8px;font-size:13px;font-weight:700;color:#E74C3C;">0.0 hrs to go</div>
+        <div id="eightHrCarryNote" style="display:none;margin-top:4px;font-size:11px;color:#F5A623;"></div>
       </div>
 
       <!-- Elected Positions & Points -->
