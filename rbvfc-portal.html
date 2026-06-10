@@ -566,7 +566,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 10, 2026 \u00B7 build 8 \u2014 Member staffing availability: post free date/time windows on STAFFING tab; Add Crew surfaces & prioritizes available members; placement marks availability fulfilled, sends acknowledgment push + in-app alert + calendar update';   // ← update on every deploy
+var PORTAL_BUILD = 'June 10, 2026 \u00B7 build 9 \u2014 Response Breakdown label colors by unit category: Engines red, Truck green, Ambulance/Medic Unit blue, Boats/Marine orange (Utility/Brush/Chief neutral gray)';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -3471,6 +3471,14 @@ function renderLOSAP() {
   // show member pending training
   try { renderMyPendingTraining(); } catch(e) {}
 }
+// Response Breakdown label colors by unit category
+function unitBreakdownColor(u) {
+  if (['e131','e132','e133'].includes(u)) return '#E74C3C'; // Engines = Red
+  if (u === 'Tk13') return '#27AE60';                       // Truck = Green
+  if (['a139','Mu13'].includes(u)) return '#3498DB';        // Ambulance & Medic Unit = Blue
+  if (['B13','RB13','FB13'].includes(u)) return '#E67E22';  // Boats & Marine = Orange
+  return '#95A5A6';                                         // Utility/Brush/Chief = neutral gray
+}
 function renderUnitBreakdown(uid, yr, responses) {
   var container = document.getElementById('losapUnitBreakdown');
   var card = document.getElementById('losapUnitBreakdownCard');
@@ -3481,9 +3489,8 @@ function renderUnitBreakdown(uid, yr, responses) {
   var html = '';
   UNITS.forEach(function(u) {
     if (unitCounts[u]===0) return;
-    var isEMS = EMS_UNITS.includes(u);
     html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 10px;border-bottom:1px solid #1E1E1E;">'+
-      '<span style="font-size:13px;color:'+(isEMS?'#27AE60':'#3498DB')+';">'+(UNIT_LABELS[u]||u)+'</span>'+
+      '<span style="font-size:13px;color:'+unitBreakdownColor(u)+';">'+(UNIT_LABELS[u]||u)+'</span>'+
       '<span style="font-family:Bebas Neue,sans-serif;font-size:16px;color:#F0F0F0;">'+unitCounts[u]+'</span>'+
       '</div>';
   });
