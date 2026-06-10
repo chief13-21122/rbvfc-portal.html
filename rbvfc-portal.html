@@ -566,7 +566,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 10, 2026 \u00B7 build 7 \u2014 Restored per-member Position/Rank tap-to-expand dropdown on Company LOSAP Board (multi-title members show +N disclosure)';   // ← update on every deploy
+var PORTAL_BUILD = 'June 10, 2026 \u00B7 build 8 \u2014 Member staffing availability: post free date/time windows on STAFFING tab; Add Crew surfaces & prioritizes available members; placement marks availability fulfilled, sends acknowledgment push + in-app alert + calendar update';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -991,6 +991,9 @@ function _fbMergeFeedback(remoteF, localF) {
 function _fbReconcileProtected(localSnapshot) {
   state.roster           = _fbUnionById(localSnapshot.roster,           state.roster,           'id');
   state.staffingShifts   = _fbUnionById(localSnapshot.staffingShifts,   state.staffingShifts,   'id');
+  if (localSnapshot.staffingAvailability !== undefined) {
+    state.staffingAvailability = _fbUnionById(localSnapshot.staffingAvailability, state.staffingAvailability, 'id');
+  }
   state.meetingAttendance= _fbUnionById(localSnapshot.meetingAttendance,state.meetingAttendance,'id');
   state.trainingClasses  = _fbUnionById(localSnapshot.trainingClasses,  state.trainingClasses,  'id');
   state.meetings         = _fbUnionById(localSnapshot.meetings,         state.meetings,         'id', _fbMergeMeeting);
@@ -1012,6 +1015,7 @@ function _mergeAndRender(remote) {
       meetings:          (state.meetings||[]).slice(),
       specialEvents:     (state.specialEvents||[]).slice(),
       staffingShifts:    (state.staffingShifts||[]).slice(),
+      staffingAvailability: (state.staffingAvailability||[]).slice(),
       meetingAttendance: (state.meetingAttendance||[]).slice(),
       scheduledDrills:   (state.scheduledDrills||[]).slice(),
       trainingClasses:   (state.trainingClasses||[]).slice(),
@@ -1797,6 +1801,7 @@ var state = {
   staffingShifts: [],        // [{id,date,unitId,position,memberId,status,clockedIn,reminded,notes}]
   staffingEnabled: null,      // null = all units enabled by default
   staffingAlerts: [],        // [{id,msg,sentBy,sentAt,group,targetMembers,clears:[{memberId,clearedAt}]}]
+  staffingAvailability: [],  // [{id,memberId,date,startTime'HH:MM',endTime'HH:MM',anyUnit,note,createdAt,status'open'|'placed',placedShiftId}]
   feedback: [],              // [{id,type:'issue'|'idea',text,screenshot,memberId,createdAt,status,adminNote,statusBy,statusAt}]
   alertGroups: [],           // [{id,name,memberIds}] — custom groups
   specialEvents: [],         // [{id,title,date,time,location,desc,members:[uid],signups:[{memberId,signedUpAt,clockedIn,clockedInAt}]}]
@@ -7621,6 +7626,7 @@ function initStaffingTab() {
     renderMonthlyCalendar();
   }
   renderMyShifts();
+  try { initMyAvailabilityCard(); } catch(e){}
   renderUnitDisplayFilter();
   renderStaffingBoard();
   renderStaffingAlerts();
@@ -9155,12 +9161,31 @@ function _renderAddCrewMembers(date, unitId) {
     .sort(function(a,b){ return (a.last||'').localeCompare(b.last||''); })
     .filter(function(m){ return !_memberHasOverlappingShift(m.id, date, propStart, propHours); });
 
+  // Match each eligible member to any OPEN availability they posted covering this
+  // date/window. Members who flagged themselves available float to the top so the
+  // officer can place them per their request.
+  var availByMember = {};
+  eligible.forEach(function(m){ availByMember[m.id] = _availForMemberOnDate(m.id, date, propStart, propHours); });
+  eligible.sort(function(a,b){
+    var av = availByMember[a.id] ? 0 : 1;
+    var bv = availByMember[b.id] ? 0 : 1;
+    if (av !== bv) return av - bv;                       // available first
+    return (a.last||'').localeCompare(b.last||'');       // then alphabetical
+  });
+  var availCount = eligible.filter(function(m){ return !!availByMember[m.id]; }).length;
+
   if (!eligible.length) {
     listEl.innerHTML = '<div style="font-size:13px;color:#888;text-align:center;padding:16px;">No eligible members for this window (all booked, overlapping, or inactive).</div>';
     return;
   }
 
   var html = '';
+  if (availCount) {
+    html += '<div style="display:flex;align-items:center;gap:8px;background:#0F2418;border:1px solid #27AE60;border-radius:8px;padding:8px 10px;margin-bottom:10px;">' +
+      '<span style="font-size:12px;color:#27AE60;flex:1;">\ud83d\udfe2 ' + availCount + ' member' + (availCount>1?'s':'') + ' posted availability for this window.</span>' +
+      '<button class="btn btn-sm" onclick="_addCrewToggleAvailable()" style="font-size:11px;padding:4px 10px;background:#1A3A2A;border-color:#27AE60;color:#27AE60;">\u2713 Check available</button>' +
+    '</div>';
+  }
   eligible.forEach(function(m){
     var rankStr = (m.ranks && m.ranks.length) ? m.ranks.join('/') : (m.rank || '\u2014');
     var ineligibleRR = (m.rideReport === 'ineligible');
@@ -9189,13 +9214,30 @@ function _renderAddCrewMembers(date, unitId) {
     });
     opts += '<option value="999"'+(String(chosenPos)==='999'?' selected':'')+'>\uD83D\uDCDA Student</option>';
 
-    html += '<div data-crew-member="'+m.id+'" style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-bottom:1px solid #222;">' +
+    var av = availByMember[m.id];
+    var availBadge = av
+      ? '<div style="font-size:11px;color:#27AE60;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">\ud83d\udfe2 Available ' + av.startTime + '\u2013' + av.endTime + (av.note ? ' \u00b7 \u201c' + av.note.replace(/</g,'&lt;') + '\u201d' : '') + '</div>'
+      : '';
+
+    html += '<div data-crew-member="'+m.id+'"'+(av?' data-crew-available="1"':'')+' style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-bottom:1px solid #222;'+(av?'background:rgba(39,174,96,0.06);':'')+'">' +
       '<input type="checkbox"'+(checked?' checked':'')+' style="width:18px;height:18px;flex-shrink:0;accent-color:#27AE60;">' +
-      '<div style="flex:1;min-width:0;font-size:13px;color:#F0F0F0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+m.last+', '+m.first+(isProbationary(m)?' <span style="color:#F5A623;">[PROB]</span>':'')+(ineligibleRR?' <span style="color:#E74C3C;">[INELIG]</span>':'')+' <span style="color:#666;">('+rankStr+')</span></div>' +
+      '<div style="flex:1;min-width:0;overflow:hidden;">' +
+        '<div style="font-size:13px;color:#F0F0F0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+m.last+', '+m.first+(isProbationary(m)?' <span style="color:#F5A623;">[PROB]</span>':'')+(ineligibleRR?' <span style="color:#E74C3C;">[INELIG]</span>':'')+' <span style="color:#666;">('+rankStr+')</span></div>' +
+        availBadge +
+      '</div>' +
       '<select style="background:#1E1E1E;border:1px solid #333;border-radius:6px;color:#F0F0F0;padding:5px 8px;font-size:12px;max-width:160px;">'+opts+'</select>' +
     '</div>';
   });
   listEl.innerHTML = html;
+}
+
+function _addCrewToggleAvailable() {
+  var listEl = document.getElementById('addCrewMemberList');
+  if (!listEl) return;
+  Array.prototype.forEach.call(listEl.querySelectorAll('[data-crew-member]'), function(row){
+    var cb = row.querySelector('input[type=checkbox]');
+    if (cb) cb.checked = row.getAttribute('data-crew-available') === '1';
+  });
 }
 
 function _addCrewToggleAll(on) {
@@ -9261,6 +9303,9 @@ function addCrewAssign(date, unitId) {
     });
     if (overlap) { skipped.push({name:name, reason:'overlaps '+(UNIT_LABELS[overlap.unitId]||overlap.unitId)}); return; }
 
+    // If this member posted availability covering the window, fulfill it
+    var matchedAvail = _availForMemberOnDate(mid, date, start, hours);
+
     var shift = {
       id:            'sh_'+nowBase+'_'+(seq++),
       date:          date,
@@ -9271,9 +9316,14 @@ function addCrewAssign(date, unitId) {
       shiftStart:    start,
       shiftHours:    hours,
       clockedIn:     false,
-      status:        'assigned'
+      status:        'assigned',
+      fromAvailabilityId: matchedAvail ? matchedAvail.id : null
     };
     batch.push(shift);
+    if (matchedAvail) { matchedAvail.status = 'placed'; matchedAvail.placedShiftId = shift.id; }
+    var ackMsg = matchedAvail
+      ? '\ud83d\udcc5 You\u2019ve been placed per your posted availability: '+posName+' on '+uLabel+' for '+date+' ('+start+', '+hours+'h). Assigned by '+assignerName+'.'
+      : '\ud83d\udcc5 You have been assigned: '+posName+' on '+uLabel+' for '+date+' ('+start+', '+hours+'h). Assigned by '+assignerName+'.';
     state.staffingAlerts.unshift({
       id: 'asgn_'+nowBase+'_'+mid,
       type: 'assignment',
@@ -9283,7 +9333,7 @@ function addCrewAssign(date, unitId) {
       sentAt: new Date().toISOString(),
       needsAck: true,
       clears: [],
-      msg: '\ud83d\udcc5 You have been assigned: '+posName+' on '+uLabel+' for '+date+' ('+start+', '+hours+'h). Assigned by '+assignerName+'.'
+      msg: ackMsg
     });
   });
 
@@ -9295,14 +9345,171 @@ function addCrewAssign(date, unitId) {
   batch.forEach(function(s){ state.staffingShifts.push(s); });
   save();
   batch.forEach(function(s){ sendCalendarInvite(s.memberId, shiftToCalDetails(s)); });
+  // Acknowledgment push — one per assigned member, honoring their notif prefs
+  batch.forEach(function(s){
+    sendPushToMembers([s.memberId], '\ud83d\udcc5 Staffing Assignment',
+      'You\u2019ve been placed: '+s.position+' on '+uLabel+' for '+date+' ('+s.shiftStart+', '+s.shiftHours+'h). Assigned by '+assignerName+'.',
+      'asgn_'+nowBase+'_'+s.memberId, 'staffing');
+  });
 
   var mo = document.getElementById('addCrewModal'); if (mo) mo.remove();
   renderStaffingBoard(); renderMyShifts(); renderStaffingAlerts();
+  try { renderMyAvailability(); } catch(e){}
 
   var summary = '\u2705 Assigned '+batch.length+' member'+(batch.length>1?'s':'')+' to '+uLabel+'.';
   if (skipped.length) summary += ' Skipped '+skipped.length+': '+skipped.map(function(s){return s.name+' ('+s.reason+')';}).join('; ')+'.';
   showToast(summary);
   showSubmitConfirmation(batch.length+' member'+(batch.length>1?'s':'')+' assigned to '+uLabel+' on '+date+'. Notifications sent.'+(skipped.length?' '+skipped.length+' skipped.':''), '\ud83d\udcc5');
+}
+
+// ── MEMBER AVAILABILITY ───────────────────────────────────────
+// Members post free windows ("place me where needed") instead of grabbing a
+// specific seat. Officers see matching members surfaced in the Add Crew panel
+// and, on assignment, the member's availability is marked placed + they get an
+// acknowledgment alert/push and a calendar update.
+function _availToHHMM(t) { return (t || '00:00').replace(':', ''); }
+
+function _availWindowHours(startT, endT) {
+  function mins(t){ var p=(t||'00:00').split(':'); return (parseInt(p[0])||0)*60 + (parseInt(p[1])||0); }
+  var diff = mins(endT) - mins(startT);
+  if (diff <= 0) diff += 1440; // window crosses midnight
+  return diff / 60;
+}
+
+// Returns the member's first OPEN availability entry on `date` whose window
+// overlaps the proposed shift window [propStartHHMM, propHours], or null.
+function _availForMemberOnDate(memberId, date, propStartHHMM, propHours) {
+  return (state.staffingAvailability||[]).find(function(av){
+    if (av.memberId !== memberId || av.date !== date) return false;
+    if (av.status === 'placed') return false;
+    return _shiftsOverlap(_availToHHMM(av.startTime), _availWindowHours(av.startTime, av.endTime), propStartHHMM, propHours);
+  }) || null;
+}
+
+function initMyAvailabilityCard() {
+  var card = document.getElementById('staffingAvailabilityCard');
+  if (!card) return;
+  var member = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
+  // Career personnel are view-only and don't participate in staffing — hide entirely
+  if (isCareerRole(member)) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  var sEl = document.getElementById('availStartDate');
+  var eEl = document.getElementById('availEndDate');
+  if (sEl && !sEl.value) { sEl.value = localDateStr(); sEl.min = localDateStr(); }
+  if (eEl) eEl.min = localDateStr();
+  renderMyAvailability();
+}
+
+function postMyAvailability() {
+  var uid = state.currentUserId;
+  if (!uid) { showToast('\u26a0\ufe0f Log in to post availability.'); return; }
+  var sd = (document.getElementById('availStartDate')||{}).value || '';
+  var ed = (document.getElementById('availEndDate')||{}).value || sd;
+  var st = (document.getElementById('availStartTime')||{}).value || '10:00';
+  var et = (document.getElementById('availEndTime')||{}).value || '18:00';
+  var note = ((document.getElementById('availNote')||{}).value || '').trim().slice(0,120);
+  if (!sd) { showToast('\u26a0\ufe0f Pick a start date.'); return; }
+  if (!ed) ed = sd;
+  if (ed < sd) { showToast('\u26a0\ufe0f End date can\u2019t be before the start date.'); return; }
+  var today = localDateStr();
+  if (ed < today) { showToast('\u26a0\ufe0f That window is in the past.'); return; }
+  if (_availWindowHours(st, et) > 24) { showToast('\u26a0\ufe0f Time window can\u2019t exceed 24 hours.'); return; }
+
+  if (!Array.isArray(state.staffingAvailability)) state.staffingAvailability = [];
+  var nowBase = Date.now(), seq = 0, added = 0, skipped = 0;
+  var cursor = new Date(sd + 'T12:00:00');
+  var endD   = new Date(ed + 'T12:00:00');
+  var guard  = 0;
+  while (cursor <= endD && guard < 62) {
+    guard++;
+    var dStr = localDateStr(cursor);
+    cursor.setDate(cursor.getDate() + 1);
+    if (dStr < today) continue;
+    // Skip if an identical (date + window) open entry already exists
+    var dupe = (state.staffingAvailability||[]).some(function(av){
+      return av.memberId===uid && av.date===dStr && av.startTime===st && av.endTime===et && av.status!=='placed';
+    });
+    if (dupe) { skipped++; continue; }
+    state.staffingAvailability.push({
+      id: 'avail_' + nowBase + '_' + (seq++),
+      memberId: uid,
+      date: dStr,
+      startTime: st,
+      endTime: et,
+      anyUnit: true,
+      note: note,
+      createdAt: new Date().toISOString(),
+      status: 'open',
+      placedShiftId: null
+    });
+    added++;
+  }
+
+  if (!added) {
+    showToast(skipped ? '\u2139\ufe0f You already posted that window.' : '\u26a0\ufe0f Nothing to post.');
+    return;
+  }
+  save();
+  renderMyAvailability();
+  var noteEl = document.getElementById('availNote'); if (noteEl) noteEl.value = '';
+  showToast('\ud83d\udfe2 Availability posted for ' + added + ' day' + (added>1?'s':'') + '. Officers can now place you.');
+  showSubmitConfirmation('You\u2019re marked available ' + st + '\u2013' + et + ' on ' + added + ' day' + (added>1?'s':'') + '. An officer can place you where needed.', '\ud83d\udfe2');
+}
+
+function renderMyAvailability() {
+  var listEl = document.getElementById('myAvailabilityList');
+  if (!listEl) return;
+  var uid = state.currentUserId;
+  var today = localDateStr();
+  var mine = (state.staffingAvailability||[])
+    .filter(function(av){ return av.memberId===uid && av.date >= today; })
+    .sort(function(a,b){ return (a.date||'').localeCompare(b.date||'') || (a.startTime||'').localeCompare(b.startTime||''); });
+  if (!mine.length) {
+    listEl.innerHTML = '<div style="font-size:12px;color:#666;text-align:center;padding:10px;border-top:1px solid #222;">No upcoming availability posted.</div>';
+    return;
+  }
+  var html = '<div style="font-size:10px;color:#555;letter-spacing:1.5px;text-transform:uppercase;margin:4px 0 8px;border-top:1px solid #222;padding-top:10px;">Your posted availability</div>';
+  mine.forEach(function(av){
+    var placed = av.status === 'placed';
+    var dObj = new Date(av.date + 'T12:00:00');
+    var dLabel = dObj.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'});
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid #1E1E1E;">';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-size:13px;color:#F0F0F0;">' + dLabel + ' &middot; <span style="color:#aaa;">' + av.startTime + '\u2013' + av.endTime + '</span></div>';
+    if (av.note) html += '<div style="font-size:11px;color:#777;margin-top:2px;">\u201c' + av.note.replace(/</g,'&lt;') + '\u201d</div>';
+    html += '</div>';
+    if (placed) {
+      html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:#1A2A1A;border:1px solid #27AE60;color:#27AE60;border-radius:6px;padding:3px 8px;">\u2713 Placed</span>';
+    } else {
+      html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:#1A2200;border:1px solid #F5A623;color:#F5A623;border-radius:6px;padding:3px 8px;">Open</span>';
+      html += '<button onclick="removeMyAvailability(\'' + av.id + '\')" style="flex-shrink:0;background:none;border:1px solid #333;color:#888;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:13px;line-height:1;">\u2715</button>';
+    }
+    html += '</div>';
+  });
+  listEl.innerHTML = html;
+}
+
+function removeMyAvailability(id) {
+  var av = (state.staffingAvailability||[]).find(function(x){ return x.id===id; });
+  if (!av) return;
+  if (av.status === 'placed') { showToast('\u2139\ufe0f You\u2019ve already been placed for that window.'); return; }
+  state.staffingAvailability = (state.staffingAvailability||[]).filter(function(x){ return x.id!==id; });
+  save();
+  renderMyAvailability();
+  showToast('Availability removed.');
+}
+
+// When a shift sourced from a posted availability is cancelled/removed, free the
+// availability back to "open" so the member can be placed again.
+function _revertAvailabilityForShift(shiftId) {
+  if (!shiftId) return;
+  var changed = false;
+  (state.staffingAvailability||[]).forEach(function(av){
+    if (av.placedShiftId === shiftId && av.status === 'placed') {
+      av.status = 'open'; av.placedShiftId = null; changed = true;
+    }
+  });
+  if (changed) { try { renderMyAvailability(); } catch(e){} }
 }
 
 // ── MONTHLY CALENDAR VIEW ─────────────────────────────────────
@@ -11149,6 +11356,7 @@ function cancelShift(elOrId) {
   if (shift && shift.calEventId) deleteCalendarInvite(shift.calEventId);
   if (shift && shift._gcalEventId) _gcalDeleteEvent(shift._gcalEventId).catch(function(){});
   state.staffingShifts = (state.staffingShifts||[]).filter(function(s){ return s.id!==shiftId; });
+  if (shift && shift.fromAvailabilityId) _revertAvailabilityForShift(shiftId);
   save();
   renderStaffingBoard();
   renderMyShifts();
@@ -11162,6 +11370,7 @@ function removeFromShift(elOrId) {
   if (shift && shift.calEventId) deleteCalendarInvite(shift.calEventId);
   if (shift && shift._gcalEventId) _gcalDeleteEvent(shift._gcalEventId).catch(function(){});
   state.staffingShifts = (state.staffingShifts||[]).filter(function(s){ return s.id!==shiftId; });
+  if (shift && shift.fromAvailabilityId) _revertAvailabilityForShift(shiftId);
   save();
   renderStaffingBoard();
   renderMyShifts();
@@ -22857,6 +23066,45 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
       <div class="card" id="staffingMyShiftsCard">
         <div class="card-header"><div class="icon">📋</div><h2>My Shifts &amp; Events</h2></div>
         <div id="myShiftsContainer"><p style="color:#666;font-size:13px;text-align:center;padding:20px;">No upcoming shifts or events.</p></div>
+      </div>
+
+      <!-- My Availability — members post free windows; officers place them via Add Crew -->
+      <div class="card" id="staffingAvailabilityCard">
+        <div class="card-header" onclick="toggleStaffCard('staffingAvailabilityBody','staffingAvailabilityChevron')" style="cursor:pointer;user-select:none;">
+          <div class="icon">🟢</div><h2>My Availability</h2>
+          <span id="staffingAvailabilityChevron" style="margin-left:auto;color:#27AE60;font-size:13px;transition:transform .2s;display:inline-block;">▼</span>
+        </div>
+        <div id="staffingAvailabilityBody">
+          <div style="font-size:12px;color:#888;line-height:1.5;margin-bottom:12px;">
+            Don't want to pick a specific seat? Post the days and hours you're free and an officer can place you where you're needed. You'll get an acknowledgment notification and a calendar update when they do.
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+            <div style="flex:1;min-width:130px;">
+              <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">From date</label>
+              <input type="date" id="availStartDate" style="width:100%;box-sizing:border-box;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:8px;font-size:13px;">
+            </div>
+            <div style="flex:1;min-width:130px;">
+              <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">To date <span style="color:#555;">(optional)</span></label>
+              <input type="date" id="availEndDate" style="width:100%;box-sizing:border-box;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:8px;font-size:13px;">
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+            <div style="flex:1;min-width:110px;">
+              <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">Available from</label>
+              <input type="time" id="availStartTime" value="10:00" style="width:100%;box-sizing:border-box;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:8px;font-size:13px;">
+            </div>
+            <div style="flex:1;min-width:110px;">
+              <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">Available until</label>
+              <input type="time" id="availEndTime" value="18:00" style="width:100%;box-sizing:border-box;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:8px;font-size:13px;">
+            </div>
+          </div>
+          <div style="margin-bottom:10px;">
+            <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">Note for officers <span style="color:#555;">(optional)</span></label>
+            <input type="text" id="availNote" maxlength="120" placeholder="e.g. prefer EMS, can do driver" style="width:100%;box-sizing:border-box;background:#111;border:1px solid #333;color:#F0F0F0;border-radius:8px;padding:8px;font-size:13px;">
+          </div>
+          <button class="btn btn-primary btn-full" onclick="postMyAvailability()" style="background:#1A3A2A;border:1px solid #27AE60;color:#27AE60;">🟢 Post Availability</button>
+          <div id="myAvailabilityList" style="margin-top:14px;"></div>
+        </div>
       </div>
 
       <!-- ═══ APPARATUS STAFFING SECTION ═══ -->
