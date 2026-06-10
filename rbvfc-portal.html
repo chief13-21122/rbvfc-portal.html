@@ -347,6 +347,12 @@ main{padding:16px;max-width:900px;margin:0 auto;}
 .qual-text p{font-size:12px;color:var(--text-muted);}
 
 /* ── COMPANY LOSAP TABLE ── */
+.posrank-d summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:5px;color:#AAA;}
+.posrank-d summary::-webkit-details-marker{display:none;}
+.posrank-d .posrank-badge{font-size:9px;background:#222;border-radius:8px;padding:1px 5px;color:#888;line-height:1.4;}
+.posrank-d .posrank-chev{color:#666;font-size:10px;transition:transform .2s;}
+.posrank-d[open] .posrank-chev{transform:rotate(180deg);}
+.posrank-d[open] summary{margin-bottom:2px;color:#F0F0F0;}
 .mini-bar-wrap{display:flex;align-items:center;gap:6px;}
 .mini-bar{flex:1;height:5px;background:var(--dark3);border-radius:99px;overflow:hidden;min-width:40px;}
 .mini-bar-fill{height:100%;border-radius:99px;}
@@ -560,7 +566,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 10, 2026 \u00B7 build 6 \u2014 Recent Time Captures labels via canonical LOSAP rules; merged Hours Clocked + 8-Hour into single Hours column on Company LOSAP Board';   // ← update on every deploy
+var PORTAL_BUILD = 'June 10, 2026 \u00B7 build 7 \u2014 Restored per-member Position/Rank tap-to-expand dropdown on Company LOSAP Board (multi-title members show +N disclosure)';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -16998,6 +17004,28 @@ function renderCompanyLOSAP() {
       var _posRankText = _rankParts.length
         ? _rankParts.join(' · ')
         : (m.memberType ? m.memberType : '—');
+      // Per-member Position/Rank disclosure: members with 2+ titles get a
+      // tap-to-expand dropdown (summary = primary title, +N badge, chevron).
+      // Single-title / fallback members render as plain text — no dropdown.
+      var _posRankCell;
+      if (_rankParts.length >= 2) {
+        var _prExtra = _rankParts.length - 1;
+        var _prList = _rankParts.map(function(t){
+          return '<div style="color:#CCC;font-size:11px;padding:1px 0 1px 2px;">'+t+'</div>';
+        }).join('');
+        _posRankCell = '<td style="font-size:12px;padding:6px 8px;">' +
+          '<details class="posrank-d">' +
+            '<summary>' +
+              '<span style="font-weight:600;">'+_rankParts[0]+'</span>' +
+              '<span class="posrank-badge">+'+_prExtra+'</span>' +
+              '<span class="posrank-chev">\u25BE</span>' +
+            '</summary>' +
+            '<div style="margin-top:1px;">'+_prList+'</div>' +
+          '</details>' +
+        '</td>';
+      } else {
+        _posRankCell = '<td style="color:#AAA;font-size:12px;">'+_posRankText+'</td>';
+      }
       var qualified = row.pts >= 50;
       var _e = row.eightHr;
       var _ytdStr = (row.clockedYTD||0).toFixed(1);
@@ -17052,7 +17080,7 @@ function renderCompanyLOSAP() {
 
       return '<tr style="'+rowStyle+'">'+numCell+
         '<td style="font-weight:'+(p?'700':'600')+';color:'+(p?p.nameColor:'#F0F0F0')+';">'+m.last+', '+m.first+'</td>'+
-        '<td style="color:#AAA;font-size:12px;">'+_posRankText+'</td>'+
+        _posRankCell+
         ptsCell+
         '<td style="text-align:center;color:#AAA;">'+(row.trainingHrs||0).toFixed(1)+'</td>'+
         '<td style="text-align:center;color:#AAA;">'+(row.drillHrs||0).toFixed(1)+'</td>'+
