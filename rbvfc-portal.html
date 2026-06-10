@@ -560,7 +560,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 8, 2026 \u00B7 build 6 \u2014 Recent Time Captures point labels routed through canonical LOSAP rules';   // ← update on every deploy
+var PORTAL_BUILD = 'June 10, 2026 \u00B7 build 6 \u2014 Recent Time Captures labels via canonical LOSAP rules; merged Hours Clocked + 8-Hour into single Hours column on Company LOSAP Board';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -16977,8 +16977,7 @@ function renderCompanyLOSAP() {
     '<th style="text-align:center;">Points</th>' +
     '<th style="text-align:center;">Training Hrs</th>' +
     '<th style="text-align:center;">Drill Hrs</th>' +
-    '<th style="text-align:center;">Hours Clocked<div style="font-size:10px;color:#555;font-weight:400;letter-spacing:0;text-transform:none;">'+(_isCurYr?'Month':String(yr).slice(2)+' Dec')+' / YTD</div></th>' +
-    '<th style="text-align:center;">8-Hour<div style="font-size:10px;color:#555;font-weight:400;letter-spacing:0;text-transform:none;">'+(_isCurYr?'This Month':'\u2014')+'</div></th>' +
+    '<th style="text-align:center;">Hours<div style="font-size:10px;color:#555;font-weight:400;letter-spacing:0;text-transform:none;">'+(_isCurYr?'This Month / YTD':String(yr).slice(2)+' Dec / YTD')+'</div></th>' +
     '<th style="text-align:center;">Calls</th>' +
     '<th style="text-align:center;">Qualified</th>' +
     '<th>On Duty</th>' +
@@ -17001,15 +17000,24 @@ function renderCompanyLOSAP() {
         : (m.memberType ? m.memberType : '—');
       var qualified = row.pts >= 50;
       var _e = row.eightHr;
-      var eightCell;
-      if (!_isCurYr || !_e || _e.exempt) {
-        eightCell = '<td style="text-align:center;color:#444;font-size:11px;">\u2014</td>';
-      } else {
+      var _ytdStr = (row.clockedYTD||0).toFixed(1);
+      var hoursCell;
+      if (_isCurYr && _e && !_e.exempt) {
+        // Member carries an 8-hour requirement this year:
+        //   top line  = this month's qualifying hours vs target (red/green)
+        //   bottom    = year-to-date clocked total (gray)
         var _eColor = _e.met ? '#27AE60' : '#E74C3C';
-        eightCell = '<td style="text-align:center;white-space:nowrap;font-size:12px;">' +
-          '<span style="color:'+_eColor+';font-weight:700;">'+_e.hours.toFixed(1)+'</span>' +
-          '<span style="color:#555;">/'+_e.target+'</span>' +
-          (_e.met ? ' <span style="color:#27AE60;">\u2713</span>' : '') +
+        hoursCell = '<td style="text-align:center;white-space:nowrap;font-size:12px;line-height:1.3;">' +
+          '<div><span style="color:'+_eColor+';font-weight:700;">'+_e.hours.toFixed(1)+'</span>' +
+            '<span style="color:#555;">/'+_e.target+'</span>' +
+            (_e.met ? ' <span style="color:#27AE60;">\u2713</span>' : '') + '</div>' +
+          '<div style="color:#666;font-size:10px;">'+_ytdStr+' YTD</div>' +
+          '</td>';
+      } else {
+        // Exempt member (e.g. Auxiliary) or a past year: show month total over YTD.
+        hoursCell = '<td style="text-align:center;white-space:nowrap;font-size:12px;line-height:1.3;">' +
+          '<div><span style="color:#F0F0F0;font-weight:600;">'+(row.clockedMonth||0).toFixed(1)+'</span></div>' +
+          '<div style="color:#666;font-size:10px;">'+_ytdStr+' YTD</div>' +
           '</td>';
       }
       var p = pos <= 3 ? podium[pos] : null;
@@ -17048,12 +17056,7 @@ function renderCompanyLOSAP() {
         ptsCell+
         '<td style="text-align:center;color:#AAA;">'+(row.trainingHrs||0).toFixed(1)+'</td>'+
         '<td style="text-align:center;color:#AAA;">'+(row.drillHrs||0).toFixed(1)+'</td>'+
-        '<td style="text-align:center;color:#AAA;font-size:12px;line-height:1.3;white-space:nowrap;">'+
-          '<span style="color:#F0F0F0;font-weight:600;">'+(row.clockedMonth||0).toFixed(1)+'</span>'+
-          '<span style="color:#555;"> / </span>'+
-          '<span>'+(row.clockedYTD||0).toFixed(1)+'</span>'+
-        '</td>'+
-        eightCell+
+        hoursCell+
         '<td style="text-align:center;color:#AAA;">'+row.responses+'</td>'+
         '<td style="text-align:center;">'+(qualified?'<span style="color:#27AE60;font-weight:700;">✓ Yes</span>':'<span style="color:#555;">No</span>')+'</td>'+
         dutyCell+'</tr>';
@@ -22984,7 +22987,7 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
                   <th style="padding:8px 10px;text-align:center;color:#27AE60;font-size:14px;font-family:'Bebas Neue',sans-serif;letter-spacing:1px;">Pts</th>
                   <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Training Hrs</th>
                   <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Drill Hrs</th>
-                  <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Hours Clocked</th>
+                  <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Hours</th>
                   <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Calls</th>
                   <th style="padding:8px 10px;text-align:center;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Status</th>
                 </tr>
