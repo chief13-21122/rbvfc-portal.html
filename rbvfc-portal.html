@@ -806,6 +806,13 @@ function _fbDocPath() {
 // Doc 2: portal_acts  — losapActivities (can be 500KB+)
 // Doc 3: portal_train — trainingSubmissions (can be 400KB+)
 // This keeps each doc well under Firestore's 1MB limit.
+//
+// !! CONSOLE PATH WARNING !!  All portal state (including state.feedback) is stored
+// in a NESTED document, NOT at a top-level `portal_main`. When inspecting data in the
+// Firebase console, navigate the full path or you will see an empty/different doc and
+// wrongly conclude data isn't saving:
+//     companies  ->  rbvfc-losap  ->  data  ->  portal_main   (likewise portal_acts / portal_train)
+// (A top-level `portal_main` document, if any exists, is NOT what the app reads or writes.)
 
 function _fbDocMain()  { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_main'; }
 function _fbDocActs()  { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_acts'; }
