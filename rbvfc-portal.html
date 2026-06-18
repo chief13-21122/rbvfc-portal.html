@@ -566,7 +566,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 18, 2026 \u00B7 build 12 \u2014 Write-storm safeguards: (1) emergency kill switch (cadKill in portal_main) pauses CAD sync + all background writes on every client at once \u2014 flip from Firebase console or Admin \u2192 CAD Dispatch Sync; (2) cadScriptUrl/sheetWebhookUrl are now server-authoritative (stripped from routine saves) so clearing them in the console sticks and stale tabs can no longer resurrect them';   // ← update on every deploy
+var PORTAL_BUILD = 'June 18, 2026 \u00B7 build 13 \u2014 Write-storm cure: all save() calls funnel through one coalesced writer \u2014 never two writes in flight at once, and any document whose content is unchanged since its last write is skipped (per-doc hash compare), so a re-firing loop performs zero writes and the queue cannot saturate; also losapActivities now unions by id on snapshot during a pending save so a just-logged clock-in can no longer be wiped by an incoming snapshot. Build 12 kill switch + server-authoritative URLs retained.';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -894,8 +894,83 @@ function _fbDocSafeToWrite(docKey, docData) {
   return true;
 }
 
-// ── Save to Firestore (debounced) ────────────────────────────────────────────
-var _fbSaveTimer = null;
+// ── Save to Firestore (debounced, coalesced, change-gated) ───────────────────
+// Build 13 storm cure: every save() funnels through ONE debounced writer that
+//   (a) never has two writes in flight at once (in-flight guard + dirty flag), and
+//   (b) skips any document whose serialized content is unchanged since its last
+//       successful write (per-doc hash compare).
+// Result: a loop that calls save() repeatedly with identical state performs ZERO
+// network writes, so the write queue can no longer saturate the way it did in the
+// CAD storms. Genuine changes still write normally.
+var _fbSaveTimer     = null;
+var _fbWriteInFlight = false;   // true while a Promise.all of .set() calls is pending
+var _fbDirty         = false;   // a save was requested while a write was in flight
+var _fbLastHashes    = { main:'', acts:'', train:'' };  // last successfully-written content per doc
+
+function _fbHash(str) {
+  var h1 = 0xdeadbeef, h2 = 0x41c6ce57, ch;
+  for (var i=0; i<str.length; i++) {
+    ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1>>>16), 2246822507) ^ Math.imul(h2 ^ (h2>>>13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2>>>16), 2246822507) ^ Math.imul(h1 ^ (h1>>>13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1>>>0)).toString(36);
+}
+
+function _fbFlush() {
+  if (!_fbConfigured() || !_fbInitialized || !fbDb) { _fbSavePending = false; return; }
+  if (state.cadKill)        { _fbSavePending = false; return; }
+  if (!_fbInitialLoadDone)  { _fbSavePending = false; return; }
+  // Never overlap writes. If one is already in flight, mark dirty; the in-flight
+  // completion handler re-flushes once, collapsing any number of intervening
+  // change requests into a single follow-up write.
+  if (_fbWriteInFlight) { _fbDirty = true; return; }
+
+  var parts = _fbSplitState();
+  _fbRecordGoodCounts(state);   // track upward growth before guarding
+
+  var hashes = {
+    main:  _fbHash(JSON.stringify(parts.main)),
+    acts:  _fbHash(JSON.stringify(parts.acts)),
+    train: _fbHash(JSON.stringify(parts.train))
+  };
+  var saves = [], written = [];
+  function consider(key, ref, data) {
+    if (hashes[key] === _fbLastHashes[key]) return;   // unchanged since last write — skip
+    if (!_fbDocSafeToWrite(key, data)) return;        // anti-wipe guard
+    saves.push(fbDb.doc(ref).set(data, {merge:true}));
+    written.push(key);
+  }
+  consider('main',  _fbDocMain(),  parts.main);
+  consider('acts',  _fbDocActs(),  parts.acts);
+  consider('train', _fbDocTrain(), parts.train);
+
+  if (!saves.length) {
+    // Nothing changed (or all blocked by the anti-wipe guard). No network write —
+    // this is the storm stopper: an identical-state loop costs zero writes.
+    _fbSavePending = false;
+    return;
+  }
+
+  _fbWriteInFlight = true;
+  Promise.all(saves)
+    .then(function(){
+      written.forEach(function(k){ _fbLastHashes[k] = hashes[k]; });  // remember only what landed
+      _fbWriteInFlight = false;
+      _fbSavePending   = false;
+      console.log('[RBVFC] Firestore saved (' + saves.length + ' doc(s)): ' + written.join(', ') + '.');
+      if (_fbDirty) { _fbDirty = false; _fbSavePending = true; _fbFlush(); }   // one coalesced follow-up
+    })
+    .catch(function(e){
+      _fbWriteInFlight = false;
+      _fbSavePending   = false;
+      // Leave _fbLastHashes unchanged so the change retries on the next save().
+      console.error('[RBVFC] Firestore save error:', e.message);
+    });
+}
+
 function _fbSave() {
   if (!_fbConfigured() || !_fbInitialized || !fbDb) return;
   // Emergency kill switch — pause ALL background writes on every client. Set via
@@ -909,22 +984,12 @@ function _fbSave() {
     console.log('[RBVFC] Save suppressed — initial Firestore load not yet complete.');
     return;
   }
-  // A local edit is now queued for Firestore. Mark pending so any snapshot that
-  // arrives before this write lands won't revert the change (see _mergeAndRender).
+  // A local edit is now queued. Mark pending so any snapshot that arrives before
+  // this write lands won't revert the change (see _mergeAndRender and the acts
+  // listener's union-on-pending reconciliation).
   _fbSavePending = true;
   clearTimeout(_fbSaveTimer);
-  _fbSaveTimer = setTimeout(function() {
-    var parts = _fbSplitState();
-    _fbRecordGoodCounts(state);   // track upward growth before guarding
-    var saves = [];
-    if (_fbDocSafeToWrite('main',  parts.main))  saves.push(fbDb.doc(_fbDocMain()).set(parts.main,  {merge:true}));
-    if (_fbDocSafeToWrite('acts',  parts.acts))  saves.push(fbDb.doc(_fbDocActs()).set(parts.acts,  {merge:true}));
-    if (_fbDocSafeToWrite('train', parts.train)) saves.push(fbDb.doc(_fbDocTrain()).set(parts.train, {merge:true}));
-    if (!saves.length) { _fbSavePending = false; console.warn('[RBVFC] Firestore save: all docs blocked by anti-wipe guard.'); return; }
-    Promise.all(saves)
-      .then(function(){ _fbSavePending = false; console.log('[RBVFC] Firestore saved (' + saves.length + ' doc(s)).'); })
-      .catch(function(e){ _fbSavePending = false; console.error('[RBVFC] Firestore save error:', e.message); });
-  }, 800);
+  _fbSaveTimer = setTimeout(_fbFlush, 800);
 }
 
 // ── Real-time listeners — one per doc ────────────────────────────────────────
@@ -1185,7 +1250,15 @@ function _startFbSync() {
 
   _fbSyncUnsubActs = fbDb.doc(_fbDocActs()).onSnapshot(function(doc) {
     if (doc.exists && doc.data().losapActivities) {
-      state.losapActivities = doc.data().losapActivities;
+      var remoteActs = doc.data().losapActivities;
+      // If a local edit is still queued for Firestore, a brand-new record (e.g. a
+      // just-logged clock-in) may not be in this snapshot yet. Union by id so the
+      // incoming snapshot can't wipe a pending local addition — the same protection
+      // the protected main-doc arrays already get. When no save is pending, take
+      // remote as-is so admin deletions still propagate normally.
+      state.losapActivities = _fbSavePending
+        ? _fbUnionById(state.losapActivities, remoteActs, 'id')
+        : remoteActs;
       try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
       try { renderLOSAP(); } catch(e){}
       try { renderCompanyLOSAP(); } catch(e){}
