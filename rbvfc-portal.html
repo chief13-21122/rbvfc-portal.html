@@ -566,7 +566,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 15, 2026 \u00B7 build 11 \u2014 Feedback & Issues now company-wide: all officers & members see every submission read-only (status pill + admin note) so they can tell an issue is already known / being worked on; submitter names and screenshots stay admin-only; admin view & actions unchanged';   // ← update on every deploy
+var PORTAL_BUILD = 'June 18, 2026 \u00B7 build 12 \u2014 Write-storm safeguards: (1) emergency kill switch (cadKill in portal_main) pauses CAD sync + all background writes on every client at once \u2014 flip from Firebase console or Admin \u2192 CAD Dispatch Sync; (2) cadScriptUrl/sheetWebhookUrl are now server-authoritative (stripped from routine saves) so clearing them in the console sticks and stale tabs can no longer resurrect them';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -838,6 +838,15 @@ function _fbSplitState() {
   delete full.adminPin;
   // Logo is localStorage-only — too large for Firestore (would exceed 1MB limit)
   delete full.companyLogo;
+  // Server-authoritative fields — clients READ these from the snapshot but must
+  // NEVER write them via the routine bulk save. This stops a stale tab from
+  // resurrecting cadScriptUrl/sheetWebhookUrl after an admin clears them in the
+  // Firestore console (the root cause of the write storms), and stops a stale
+  // client from un-setting the kill switch. These are set ONLY in the Firebase
+  // console, by saveCadScriptUrl(), or by setCadKill() — each a dedicated write.
+  delete full.cadScriptUrl;
+  delete full.sheetWebhookUrl;
+  delete full.cadKill;
 
   var acts  = { losapActivities: full.losapActivities || [] };
   var train = { trainingSubmissions: full.trainingSubmissions || [] };
@@ -889,6 +898,10 @@ function _fbDocSafeToWrite(docKey, docData) {
 var _fbSaveTimer = null;
 function _fbSave() {
   if (!_fbConfigured() || !_fbInitialized || !fbDb) return;
+  // Emergency kill switch — pause ALL background writes on every client. Set via
+  // the Firebase console (works even mid-storm) or the kill-switch button. Turning
+  // it OFF is a dedicated write (setCadKill), so it is never blocked by this gate.
+  if (state.cadKill) { console.log('[RBVFC] Writes paused — CAD kill switch active.'); return; }
   // Load-gate: never push to Firestore until we have completed at least one read.
   // This is what prevents a fresh-deploy / empty-localStorage boot from clobbering
   // the remote docs with empty state before loadFromFirestore() has run.
@@ -1139,8 +1152,10 @@ function _mergeAndRender(remote) {
     if (_compSec && _compSec.classList.contains('active')) renderCompanyLOSAP();
   } catch(e){}
   try { renderUnitToggles(); } catch(e){}
-  // Auto-start CAD sync on every state load — no login required
-  if (state.cadScriptUrl && !_cadSyncInterval) {
+  // Honor the kill switch on every snapshot (banner + stop sync if active)
+  try { applyCadKill(); } catch(e){}
+  // Auto-start CAD sync on every state load — no login required (unless kill switch on)
+  if (state.cadScriptUrl && !state.cadKill && !_cadSyncInterval) {
     try { startCadAutoSync(); } catch(e){}
   }
   try { clearStaleClockedInFlags(); } catch(e){}
@@ -1819,6 +1834,7 @@ var state = {
   gcalClientId: '',              // Google OAuth 2.0 Client ID for Calendar integration
   gcalClientSecret: '',          // Google OAuth 2.0 Client Secret for Calendar integration
   cadScriptUrl: '',            // separate Apps Script URL just for CAD dispatch sync
+  cadKill: false,              // emergency kill switch — when true every client pauses CAD sync + background writes (server-authoritative: set via Firebase console or the kill-switch button)
   lastCadSync: '',             // ISO timestamp of last successful CAD sync
   // Extended properties (used at runtime, safe to be undefined but declared for clarity)
   _impersonating: null,        // member ID being impersonated (officer view-as)
@@ -17577,7 +17593,14 @@ function testSheetConnection() {
 }
 function saveCadScriptUrl() {
   var url=((document.getElementById('cadScriptUrl')||{}).value||'').trim();
-  state.cadScriptUrl=url; save();
+  state.cadScriptUrl=url;
+  // cadScriptUrl is server-authoritative (stripped from routine saves), so persist
+  // it with a dedicated targeted write rather than relying on save().
+  if (_fbConfigured() && _fbInitialized && fbDb) {
+    fbDb.doc(_fbDocMain()).set({ cadScriptUrl: url }, {merge:true})
+      .catch(function(e){ console.error('[RBVFC] saveCadScriptUrl write error:', e.message); });
+  }
+  try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
   showToast(url?'✅ CAD URL saved.':'CAD URL cleared.');
   if (url) testCadConnection();
   else updateCadStatusPanel('none', null);
@@ -22137,16 +22160,84 @@ function sheetSyncNow() {
 // 9. syncCadCalls — fetch new CAD calls from the configured Apps Script URL
 var _cadSyncInterval = null;
 function syncCadCalls() {
+  if (state.cadKill) return;               // kill switch active — no CAD writes
   var url = state.cadScriptUrl;
   if (!url) return;
   _fetchCadCalls(url, false).catch(function(e){ console.warn('[RBVFC] CAD sync error:', e.message); });
 }
 
+function stopCadAutoSync() {
+  if (_cadSyncInterval) { clearInterval(_cadSyncInterval); _cadSyncInterval = null; }
+}
+
 function startCadAutoSync() {
-  if (_cadSyncInterval) clearInterval(_cadSyncInterval);
+  if (_cadSyncInterval) { clearInterval(_cadSyncInterval); _cadSyncInterval = null; }
+  if (state.cadKill) return;               // kill switch active — do not start
   if (!state.cadScriptUrl) return;
   syncCadCalls();
   _cadSyncInterval = setInterval(syncCadCalls, 120000); // every 2 min
+}
+
+// ── Emergency kill switch ────────────────────────────────────────────────────
+// cadKill is a server-authoritative boolean in portal_main. When true, EVERY
+// open client stops CAD auto-sync, pauses all background Firestore writes, and
+// shows a red banner. It is the remote equivalent of "close every portal" — flip
+// it from the Firebase console (works even when writes are jammed) or from the
+// kill-switch button in Admin → CAD Dispatch Sync.
+function applyCadKill() {
+  var killed = !!state.cadKill;
+  if (killed) { try { stopCadAutoSync(); } catch(e){} }
+  var b = document.getElementById('cadKillBanner');
+  if (killed && !b) {
+    b = document.createElement('div');
+    b.id = 'cadKillBanner';
+    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#7A1F1F;color:#fff;font-size:13px;font-weight:700;text-align:center;padding:8px 12px;box-shadow:0 2px 8px rgba(0,0,0,0.5);';
+    b.textContent = '\u26A0 CAD sync & background writes PAUSED by admin (kill switch active)';
+    document.body.appendChild(b);
+  } else if (!killed && b) {
+    b.remove();
+  }
+  try { updateCadKillButton(); } catch(e){}
+}
+function setCadKill(on) {
+  on = !!on;
+  if (!_fbConfigured() || !_fbInitialized || !fbDb) {
+    try { showToast('Firebase not ready — cannot set kill switch.'); } catch(e){}
+    return;
+  }
+  // Dedicated targeted write — bypasses the _fbSplitState strip and the
+  // kill-suppressed _fbSave, so turning the switch OFF is never self-blocking.
+  fbDb.doc(_fbDocMain()).set({ cadKill: on }, {merge:true})
+    .then(function(){
+      state.cadKill = on;
+      try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
+      if (on) { try { stopCadAutoSync(); } catch(e){} }
+      try { applyCadKill(); } catch(e){}
+      try { showToast(on ? '\uD83D\uDED1 Kill switch ON — all clients pausing CAD & writes.' : '\u2705 Kill switch OFF — normal operation resumes.'); } catch(e){}
+    })
+    .catch(function(e){
+      try { showToast('Kill switch write failed: ' + e.message); } catch(_){}
+      console.error('[RBVFC] setCadKill error:', e.message);
+    });
+}
+function toggleCadKill() {
+  var turningOn = !state.cadKill;
+  if (turningOn && !confirm('Activate the kill switch?\n\nThis pauses CAD sync and ALL background writes on EVERY open device until you turn it back off. Use it to stop a write storm.')) return;
+  setCadKill(turningOn);
+}
+function updateCadKillButton() {
+  var btn = document.getElementById('cadKillBtn');
+  var st  = document.getElementById('cadKillState');
+  if (btn) {
+    if (state.cadKill) {
+      btn.textContent = '\u2705 Deactivate Kill Switch';
+      btn.style.background = '#0A2A1A'; btn.style.borderColor = '#27AE60'; btn.style.color = '#7EE3A0';
+    } else {
+      btn.textContent = '\uD83D\uDED1 Activate Kill Switch';
+      btn.style.background = '#3A1010'; btn.style.borderColor = '#C0392B'; btn.style.color = '#FF6B5B';
+    }
+  }
+  if (st) st.textContent = state.cadKill ? 'ACTIVE — all clients paused' : 'Off — normal operation';
 }
 
 // 10. staffingDatePrev — move staffing board to previous day
@@ -24127,6 +24218,18 @@ try { window.addEventListener('load', function(){ initFavicon(); }); } catch(e) 
               <button class="btn btn-secondary btn-sm" onclick="openCadGmailSetup()">⚙️ Setup Guide</button>
             </div>
             <div id="adminCadSyncStatus" style="margin-top:10px;"></div>
+
+            <!-- Emergency kill switch -->
+            <div style="border-top:1px solid #5A2A2A;margin-top:14px;padding-top:12px;">
+              <div style="font-size:11px;color:#E67E22;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;font-weight:700;">🛑 Emergency Kill Switch</div>
+              <div style="font-size:11px;color:#888;line-height:1.5;margin-bottom:10px;">
+                Instantly pauses CAD auto-sync and background writes on <strong>every</strong> open device — the remote equivalent of closing every portal. Use it to stop a write storm without hunting down each device. Flip it back off to resume. Clock-ins made while it's active stay on that device and sync once you turn it off.
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button id="cadKillBtn" class="btn btn-sm" onclick="toggleCadKill()" style="background:#3A1010;border:1px solid #C0392B;color:#FF6B5B;">🛑 Activate Kill Switch</button>
+                <span id="cadKillState" style="font-size:11px;color:#888;"></span>
+              </div>
+            </div>
 
             <!-- Backfill historic dispatches (gap filler) -->
             <div style="border-top:1px solid #2A4A5A;margin-top:14px;padding-top:12px;">
