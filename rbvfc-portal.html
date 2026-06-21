@@ -566,7 +566,8 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // BUMP THIS on every deploy of a new copy of this file to GitHub. Everyone who
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
-var PORTAL_BUILD = 'June 18, 2026 \u00B7 build 13 \u2014 Write-storm cure: all save() calls funnel through one coalesced writer \u2014 never two writes in flight at once, and any document whose content is unchanged since its last write is skipped (per-doc hash compare), so a re-firing loop performs zero writes and the queue cannot saturate; also losapActivities now unions by id on snapshot during a pending save so a just-logged clock-in can no longer be wiped by an incoming snapshot. Build 12 kill switch + server-authoritative URLs retained.';   // ← update on every deploy
+var PORTAL_BUILD_NUM = 14;   // numeric build for the version gate — bump on every deploy
+var PORTAL_BUILD = 'June 18, 2026 \u00B7 build 14 \u2014 Stale-client defenses: (1) version gate \u2014 a minClientBuild value in portal_main makes any build-14+ client below it stop writing and show a Reload screen, so you can retire a bad build by bumping one number; (2) CAD no longer churns the queue \u2014 lastCadSync is device-local (stripped from sync) and a poll with nothing new performs zero writes, making CAD safe to re-enable; (3) every write is stamped with _cb (build number) for optional server-side rule enforcement. Build 12 kill switch, 13 coalesced writer + server-authoritative URLs retained.';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -847,6 +848,13 @@ function _fbSplitState() {
   delete full.cadScriptUrl;
   delete full.sheetWebhookUrl;
   delete full.cadKill;
+  // lastCadSync is a per-device status timestamp — keeping it out of the synced
+  // docs means a CAD poll that finds nothing new produces identical serialized
+  // content, so the build-13 change-gate skips the write (no CAD churn).
+  delete full.lastCadSync;
+  // minClientBuild is server-authoritative — set ONLY in the Firebase console so a
+  // stale client can never lower or clear the version floor.
+  delete full.minClientBuild;
 
   var acts  = { losapActivities: full.losapActivities || [] };
   var train = { trainingSubmissions: full.trainingSubmissions || [] };
@@ -903,6 +911,7 @@ function _fbDocSafeToWrite(docKey, docData) {
 // network writes, so the write queue can no longer saturate the way it did in the
 // CAD storms. Genuine changes still write normally.
 var _fbSaveTimer     = null;
+var _fbVersionBlocked = false;  // true when this client is below minClientBuild (see _checkClientVersion)
 var _fbWriteInFlight = false;   // true while a Promise.all of .set() calls is pending
 var _fbDirty         = false;   // a save was requested while a write was in flight
 var _fbLastHashes    = { main:'', acts:'', train:'' };  // last successfully-written content per doc
@@ -922,6 +931,7 @@ function _fbHash(str) {
 function _fbFlush() {
   if (!_fbConfigured() || !_fbInitialized || !fbDb) { _fbSavePending = false; return; }
   if (state.cadKill)        { _fbSavePending = false; return; }
+  if (_fbVersionBlocked)    { _fbSavePending = false; return; }  // client below required build — no writes
   if (!_fbInitialLoadDone)  { _fbSavePending = false; return; }
   // Never overlap writes. If one is already in flight, mark dirty; the in-flight
   // completion handler re-flushes once, collapsing any number of intervening
@@ -929,6 +939,9 @@ function _fbFlush() {
   if (_fbWriteInFlight) { _fbDirty = true; return; }
 
   var parts = _fbSplitState();
+  // Stamp the writing client's build number on each doc. Constant per build, so it
+  // does not churn the change-gate; enables optional Firestore-rule enforcement.
+  parts.main._cb = parts.acts._cb = parts.train._cb = PORTAL_BUILD_NUM;
   _fbRecordGoodCounts(state);   // track upward growth before guarding
 
   var hashes = {
@@ -977,6 +990,7 @@ function _fbSave() {
   // the Firebase console (works even mid-storm) or the kill-switch button. Turning
   // it OFF is a dedicated write (setCadKill), so it is never blocked by this gate.
   if (state.cadKill) { console.log('[RBVFC] Writes paused — CAD kill switch active.'); return; }
+  if (_fbVersionBlocked) { console.log('[RBVFC] Writes paused — client below required build.'); return; }
   // Load-gate: never push to Firestore until we have completed at least one read.
   // This is what prevents a fresh-deploy / empty-localStorage boot from clobbering
   // the remote docs with empty state before loadFromFirestore() has run.
@@ -1219,8 +1233,10 @@ function _mergeAndRender(remote) {
   try { renderUnitToggles(); } catch(e){}
   // Honor the kill switch on every snapshot (banner + stop sync if active)
   try { applyCadKill(); } catch(e){}
-  // Auto-start CAD sync on every state load — no login required (unless kill switch on)
-  if (state.cadScriptUrl && !state.cadKill && !_cadSyncInterval) {
+  // Honor the version floor — stale clients stop writing and show a Reload screen
+  try { _checkClientVersion(); } catch(e){}
+  // Auto-start CAD sync on every state load — no login required (unless paused)
+  if (state.cadScriptUrl && !state.cadKill && !_fbVersionBlocked && !_cadSyncInterval) {
     try { startCadAutoSync(); } catch(e){}
   }
   try { clearStaleClockedInFlags(); } catch(e){}
@@ -17828,18 +17844,21 @@ function _fetchCadCalls(url, fromAdmin) {
       var calls = Array.isArray(data) ? data : (data.calls || data.results || []);
       // Merge, avoiding duplicate incidents
       var existing = (state.cadPendingCalls || []);
+      var added = 0;
       calls.forEach(function(c) {
         var key = c.incidentNum || c.id || (c.address + '_' + c.date);
         var dup = existing.some(function(e) {
           return (e.incidentNum || e.id || (e.address+'_'+e.date)) === key;
         });
-        if (!dup) existing.unshift(c);
+        if (!dup) { existing.unshift(c); added++; }
       });
       state.cadPendingCalls = existing.slice(0, 50);
-      state.lastCadSync = new Date().toISOString();
-      // Auto-log new calls for staffed members
+      state.lastCadSync = new Date().toISOString();   // device-local only (stripped from sync)
+      // Auto-log new calls for staffed members (_autoLogCadCall saves only on a real new record)
       calls.forEach(function(c) { try { _autoLogCadCall(c); } catch(e){} });
-      save();
+      // Only persist the pending-list change when something was actually added. A
+      // no-op poll performs zero writes, so CAD polling can never churn the queue.
+      if (added > 0) save();
       updateCadStatusPanel('ok', state.lastCadSync);
       // Show the pending card (officers only — non-officers should never see this section)
       var _meCAD = (state.roster||[]).find(function(m){ return m.id===state.currentUserId; });
@@ -22234,6 +22253,7 @@ function sheetSyncNow() {
 var _cadSyncInterval = null;
 function syncCadCalls() {
   if (state.cadKill) return;               // kill switch active — no CAD writes
+  if (_fbVersionBlocked) return;           // client below required build — no CAD
   var url = state.cadScriptUrl;
   if (!url) return;
   _fetchCadCalls(url, false).catch(function(e){ console.warn('[RBVFC] CAD sync error:', e.message); });
@@ -22246,9 +22266,41 @@ function stopCadAutoSync() {
 function startCadAutoSync() {
   if (_cadSyncInterval) { clearInterval(_cadSyncInterval); _cadSyncInterval = null; }
   if (state.cadKill) return;               // kill switch active — do not start
+  if (_fbVersionBlocked) return;           // client below required build — do not start
   if (!state.cadScriptUrl) return;
   syncCadCalls();
   _cadSyncInterval = setInterval(syncCadCalls, 120000); // every 2 min
+}
+
+// ── Version gate ─────────────────────────────────────────────────────────────
+// minClientBuild is a server-authoritative number in portal_main. Any client whose
+// PORTAL_BUILD_NUM is below it stops all writes + CAD and shows a Reload screen.
+// This makes stale tabs harmless the moment they next sync — set/raise it in the
+// Firebase console to retire an old build. (Only build-14+ clients honor it; tabs
+// older than build 14 predate this code and can't be governed this way.)
+function _checkClientVersion() {
+  var min = parseInt(state.minClientBuild, 10);
+  if (!min || isNaN(min)) { _removeStaleOverlay(); return true; }   // no floor set
+  if (PORTAL_BUILD_NUM >= min) { _removeStaleOverlay(); return true; }
+  _fbVersionBlocked = true;
+  try { stopCadAutoSync(); } catch(e){}
+  _showStaleOverlay(min);
+  return false;
+}
+function _showStaleOverlay(min) {
+  if (document.getElementById('staleBuildOverlay')) return;
+  var o = document.createElement('div');
+  o.id = 'staleBuildOverlay';
+  o.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#0B0F17;color:#F0F0F0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;';
+  o.innerHTML = '<div style="font-size:42px;margin-bottom:12px;">\uD83D\uDD04</div>'
+    + '<div style="font-size:20px;font-weight:800;margin-bottom:10px;">Update required</div>'
+    + '<div style="font-size:14px;color:#AAB;max-width:340px;line-height:1.6;margin-bottom:22px;">This device is running an older version of the LOSAP Portal (build ' + PORTAL_BUILD_NUM + '). The minimum supported version is build ' + min + '. Please reload to update \u2014 saving is paused on this device until you do.</div>'
+    + '<button onclick="try{location.reload(true)}catch(e){location.reload()}" style="background:#C0392B;border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;padding:12px 28px;cursor:pointer;">Reload now</button>';
+  document.body.appendChild(o);
+}
+function _removeStaleOverlay() {
+  var o = document.getElementById('staleBuildOverlay'); if (o) o.remove();
+  _fbVersionBlocked = false;
 }
 
 // ── Emergency kill switch ────────────────────────────────────────────────────
