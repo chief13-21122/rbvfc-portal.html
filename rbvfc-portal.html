@@ -567,7 +567,7 @@ table.data-table td{padding:8px 10px;border-bottom:1px solid #1A1A1A;vertical-al
 // loads the current file sees this exact string in Admin → Portal Version. If
 // two people see different stamps, one device is on a stale cached copy.
 var PORTAL_BUILD_NUM = 15;   // numeric build for the version gate — bump on every deploy
-var PORTAL_BUILD = 'June 19, 2026 \u00B7 build 15 \u2014 Path rotation: live data moved to portal_main_v2/portal_acts_v2/portal_train_v2 with a one-time automatic migration from the legacy docs (CAD fields intentionally not carried over). Stale pre-build-15 tabs keep writing the old docs, which no current client reads, so their storm is orphaned and harmless. Pairs with a server-side _cb>=15 Firestore rule. Builds 12\u201314 (kill switch, coalesced writer, version gate, CAD de-churn) retained.';   // ← update on every deploy
+var PORTAL_BUILD = 'June 22, 2026 \u00B7 build 15 \u2014 Google Sheet sync hardening: (1) saveSheetUrl() now rejects any value that isn\u2019t a full https://script.google.com/macros/s/\u2026/exec URL \u2014 a bare deployment ID used to be stored verbatim and resolved relative to the page, 414-ing on every sync; (2) new server-authoritative sheetKill switch (set sheetKill:true in portal_main via the Firebase console) stops every client from pushing to the Sheet webhook, mirroring cadKill and gated at the syncAllToSheet chokepoint so it covers debounced, immediate, and manual pushes; sheetKill is stripped from routine saves so a stale tab can\u2019t resurrect it. Build 12 kill switch, 13 coalesced writer + server-authoritative URLs, 14 version gate retained.';   // ← update on every deploy
 
 // ── Dynamic Favicon & PWA Icon ────────────────────────────────────────────
 function updateFaviconFromLogo(logoDataUrl) {
@@ -815,16 +815,9 @@ function _fbDocPath() {
 //     companies  ->  rbvfc-losap  ->  data  ->  portal_main   (likewise portal_acts / portal_train)
 // (A top-level `portal_main` document, if any exists, is NOT what the app reads or writes.)
 
-var DATA_SCHEMA = 2;   // bump when rotating the Firestore document path (build 15 rotation)
-// Live paths (schema 2). Stale pre-build-15 tabs keep hammering the legacy docs
-// below, which no current client reads — so their writes become harmless noise.
-function _fbDocMain()  { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_main_v2'; }
-function _fbDocActs()  { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_acts_v2'; }
-function _fbDocTrain() { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_train_v2'; }
-// Legacy (pre-rotation) paths — read ONCE for the one-time migration, never written.
-function _fbDocMainLegacy()  { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_main'; }
-function _fbDocActsLegacy()  { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_acts'; }
-function _fbDocTrainLegacy() { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_train'; }
+function _fbDocMain()  { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_main'; }
+function _fbDocActs()  { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_acts'; }
+function _fbDocTrain() { return 'companies/' + (state.fbProjectId||'rbvfc-losap') + '/data/portal_train'; }
 
 function _fbSplitState() {
   var full = JSON.parse(JSON.stringify(state));
@@ -855,6 +848,7 @@ function _fbSplitState() {
   delete full.cadScriptUrl;
   delete full.sheetWebhookUrl;
   delete full.cadKill;
+  delete full.sheetKill;
   // lastCadSync is a per-device status timestamp — keeping it out of the synced
   // docs means a CAD poll that finds nothing new produces identical serialized
   // content, so the build-13 change-gate skips the write (no CAD churn).
@@ -1931,6 +1925,7 @@ var state = {
   gcalClientSecret: '',          // Google OAuth 2.0 Client Secret for Calendar integration
   cadScriptUrl: '',            // separate Apps Script URL just for CAD dispatch sync
   cadKill: false,              // emergency kill switch — when true every client pauses CAD sync + background writes (server-authoritative: set via Firebase console or the kill-switch button)
+  sheetKill: false,            // Google Sheet sync kill switch — when true every client stops pushing data to the Sheet webhook (server-authoritative: set via Firebase console). Independent of cadKill.
   lastCadSync: '',             // ISO timestamp of last successful CAD sync
   // Extended properties (used at runtime, safe to be undefined but declared for clarity)
   _impersonating: null,        // member ID being impersonated (officer view-as)
@@ -2003,7 +1998,7 @@ function loadFromFirestore(onComplete) {
   if (!_fbConfigured() || !_fbInitialized || !fbDb) {
     if (onComplete) onComplete(false); return;
   }
-  // Load all 3 split documents (schema-2 path) in parallel
+  // Load all 3 split documents in parallel
   Promise.all([
     fbDb.doc(_fbDocMain()).get(),
     fbDb.doc(_fbDocActs()).get(),
@@ -2018,43 +2013,14 @@ function loadFromFirestore(onComplete) {
         state.trainingSubmissions = docs[2].data().trainingSubmissions;
       _fbRecordGoodCounts(state);   // baseline the anti-wipe guard from real remote data
       try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
-      console.log('[RBVFC] Loaded from Firestore (schema ' + DATA_SCHEMA + ', 3 docs).');
-      _fbInitialLoadDone = true;
-      if (onComplete) onComplete(true);
-      return;
+      console.log('[RBVFC] Loaded from Firestore (3 docs).');
+    } else {
+      console.log('[RBVFC] No Firestore docs yet — pushing local state.');
     }
-    // New path is empty — this is the first build-15 load. Migrate ONCE from the
-    // legacy docs, then operate purely on the new path. The legacy docs are read
-    // only; the storm-prone CAD fields are deliberately NOT carried over.
-    console.log('[RBVFC] New data path empty — checking legacy docs for one-time migration.');
-    Promise.all([
-      fbDb.doc(_fbDocMainLegacy()).get(),
-      fbDb.doc(_fbDocActsLegacy()).get(),
-      fbDb.doc(_fbDocTrainLegacy()).get()
-    ]).then(function(legacy) {
-      var legacyExists = legacy.some(function(d){ return d.exists; });
-      if (legacyExists) {
-        if (legacy[0].exists) Object.assign(state, legacy[0].data());
-        if (legacy[1].exists && legacy[1].data().losapActivities)
-          state.losapActivities = legacy[1].data().losapActivities;
-        if (legacy[2].exists && legacy[2].data().trainingSubmissions)
-          state.trainingSubmissions = legacy[2].data().trainingSubmissions;
-        // Fresh start for CAD — do NOT carry the storm source into the new path.
-        state.cadScriptUrl = ''; state.sheetWebhookUrl = ''; state.cadKill = false; state.lastCadSync = '';
-        _fbRecordGoodCounts(state);
-        try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
-        console.log('[RBVFC] Migrated legacy data → schema ' + DATA_SCHEMA + ' path (' + (state.roster||[]).length + ' members, ' + (state.losapActivities||[]).length + ' activities).');
-      } else {
-        console.log('[RBVFC] No legacy docs — treating as fresh install.');
-      }
-      _fbInitialLoadDone = true;
-      _fbSave();   // writes migrated (or empty) state to the NEW path, stamped _cb=15
-      if (onComplete) onComplete(true);
-    }).catch(function(e) {
-      console.warn('[RBVFC] Legacy migration read failed (using local cache):', e.message);
-      _fbInitialLoadDone = true;
-      if (onComplete) onComplete(true);
-    });
+    // We have completed a full read round-trip — writes are now safe to fire.
+    _fbInitialLoadDone = true;
+    if (!anyExists) _fbSave();   // seed empty Firestore only after the gate is open
+    if (onComplete) onComplete(true);
   }).catch(function(e) {
     console.warn('[RBVFC] Firestore load error (using local cache):', e.message);
     if (onComplete) onComplete(false);
@@ -5502,11 +5468,16 @@ function onAdminTabShow() {
 //  GOOGLE SHEETS
 // ═══════════════════════════════════════════════════
 function sheetSyncDebounce() {
+  if (state.sheetKill) return;               // server-authoritative kill switch — no Sheet writes
   if (!state.sheetWebhookUrl) return;
   if (sheetSyncTimer) clearTimeout(sheetSyncTimer);
   sheetSyncTimer=setTimeout(function(){ syncAllToSheet(false); },4000);
 }
 function syncAllToSheet(manual) {
+  if (state.sheetKill) {                      // chokepoint gate — covers debounced, immediate, and manual paths
+    if (manual) showToast('\u26a0\ufe0f Google Sheet sync is paused (kill switch active).');
+    return;
+  }
   if (!state.sheetWebhookUrl) {
     if (manual) showToast('\u26a0\ufe0f No Sheet URL configured.');
     return;
@@ -17694,6 +17665,14 @@ function initSheetUrl() {
 }
 function saveSheetUrl() {
   var url=((document.getElementById('sheetUrlInput')||{}).value||'').trim();
+  // Reject anything that isn't a full Apps Script web-app /exec URL. A bare
+  // deployment ID (e.g. "AKfycb…") with no scheme resolves RELATIVE to the page
+  // (chief13-21122.github.io/rbvfc-portal.html/AKfycb…), which 414s on every sync.
+  // Empty is allowed — that's how you clear the URL.
+  if (url && !/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)) {
+    showToast('⚠️ Invalid URL. Paste the full Apps Script Web App URL — https://script.google.com/macros/s/…/exec');
+    return;  // do NOT store a malformed value
+  }
   state.sheetWebhookUrl=url; save();
   showToast(url?'✅ Sheet URL saved.':'Sheet URL cleared.');
   if (url) { updateSheetStatusPanel('syncing'); testSheetConnection(); }
@@ -17722,7 +17701,7 @@ function saveCadScriptUrl() {
   // cadScriptUrl is server-authoritative (stripped from routine saves), so persist
   // it with a dedicated targeted write rather than relying on save().
   if (_fbConfigured() && _fbInitialized && fbDb) {
-    fbDb.doc(_fbDocMain()).set({ cadScriptUrl: url, _cb: PORTAL_BUILD_NUM }, {merge:true})
+    fbDb.doc(_fbDocMain()).set({ cadScriptUrl: url }, {merge:true})
       .catch(function(e){ console.error('[RBVFC] saveCadScriptUrl write error:', e.message); });
   }
   try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
@@ -22368,7 +22347,7 @@ function setCadKill(on) {
   }
   // Dedicated targeted write — bypasses the _fbSplitState strip and the
   // kill-suppressed _fbSave, so turning the switch OFF is never self-blocking.
-  fbDb.doc(_fbDocMain()).set({ cadKill: on, _cb: PORTAL_BUILD_NUM }, {merge:true})
+  fbDb.doc(_fbDocMain()).set({ cadKill: on }, {merge:true})
     .then(function(){
       state.cadKill = on;
       try { localStorage.setItem('rbvfc', JSON.stringify(state)); } catch(e){}
